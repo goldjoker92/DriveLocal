@@ -746,6 +746,38 @@ grep -R "â" src || true
 
 ---
 
+## Android Build Strategy — Stratégie de build Android
+
+**EN:** DriveLocal uses **exactly two Android build tracks** — no separate "preview APK" track.
+
+| Build type | Purpose | Target users |
+| ----------------------------------- | -------------------------------------------------- | ------------------------------- |
+| Development Build / Expo Dev Client | Developer testing on a real Android phone | Project owner / developer |
+| Production Build | Real-world installable app for field usage/testing | selected drivers and passengers |
+
+- **Development Build / Expo Dev Client:** used during active development to test DriveLocal on a real Android phone, validate navigation and screens, test mobile behavior, and reproduce real device issues. Similar to the previous VigiApp workflow using Expo Dev Build / Expo Dev Client.
+- **Production Build:** used to install the real app on Android devices and test with real local users/drivers, validating the MVP in Horizonte-CE. Production Build does **not** mean an immediate public Play Store release — public release waits until MVP validation. Do **not** configure Play Store release, public distribution, production signing, or store deployment until explicitly approved.
+- **No preview track:** do **not** introduce a separate "preview APK" concept. Only Development Build (development testing) and Production Build (real-world usage/testing) exist.
+- **Branding assets (pending):** official DriveLocal logo, app icon, splash screen, optional dark/light logo versions, and the Admin-web favicon will be provided by the project owner. Do **not** generate or replace official branding assets unless explicitly approved.
+
+> Documentation only here — do **not** configure EAS Build, create Android build files, or set up signing/distribution until explicitly approved.
+
+**FR:** DriveLocal utilise **exactement deux pistes de build Android** — pas de piste « preview APK » séparée.
+
+| Type de build | Objectif | Utilisateurs cibles |
+| ----------------------------------- | -------------------------------------------------- | ------------------------------- |
+| Development Build / Expo Dev Client | Tests développeur sur un vrai téléphone Android | Propriétaire du projet / dev |
+| Production Build | App installable réelle pour usage/test sur le terrain | chauffeurs et passagers sélectionnés |
+
+- **Development Build / Expo Dev Client :** utilisé pendant le développement actif pour tester DriveLocal sur un vrai téléphone Android, valider la navigation et les écrans, tester le comportement mobile et reproduire les problèmes réels d'appareil. Similaire à l'ancien workflow VigiApp avec Expo Dev Build / Expo Dev Client.
+- **Production Build :** utilisé pour installer l'app réelle sur des appareils Android et tester avec de vrais utilisateurs/chauffeurs locaux, afin de valider le MVP à Horizonte-CE. Le Production Build ne signifie **pas** une publication immédiate sur le Play Store — la publication publique attend la validation du MVP. Ne **pas** configurer la publication Play Store, la distribution publique, la signature de production ni le déploiement en store avant accord explicite.
+- **Pas de piste preview :** ne **pas** introduire de concept « preview APK » séparé. Seuls existent le Development Build (tests de dev) et le Production Build (usage/test réel).
+- **Éléments de marque (en attente) :** le logo officiel DriveLocal, l'icône d'app, l'écran de démarrage, les versions de logo clair/sombre optionnelles et le favicon du web Admin seront fournis par le propriétaire du projet. Ne **pas** générer ni remplacer les éléments de marque officiels sans accord explicite.
+
+> Documentation uniquement ici — ne **pas** configurer EAS Build, créer de fichiers de build Android, ni mettre en place la signature/distribution avant accord explicite.
+
+---
+
 ## 19. Approval Discipline — Discipline d'approbation
 
 **EN:** Use "Yes" only for expected, focused commands. Do not use broad "always allow" permissions casually. Be cautious with: `git checkout`, `rm`, package installation, PowerShell process-killing commands, and commands that modify `package.json` / `package-lock.json`. Read-only checks are generally fine to approve. For source edits, the preview must be clean and free of mojibake.

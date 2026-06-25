@@ -307,6 +307,67 @@ DriveLocal does not replace Google Maps/Waze in V1; the driver navigates with ex
 
 ---
 
+## Android build strategy
+
+DriveLocal uses **two Android build tracks** — nothing else.
+
+| Build type | Purpose | Target users |
+| ----------------------------------- | -------------------------------------------------- | ------------------------------- |
+| Development Build / Expo Dev Client | Developer testing on a real Android phone | Project owner / developer |
+| Production Build | Real-world installable app for field usage/testing | selected drivers and passengers |
+
+### Development Build
+
+The Development Build is used during active development.
+
+Purpose:
+
+- test DriveLocal on a real Android phone
+- validate navigation
+- validate screens
+- test mobile behavior
+- reproduce real device issues
+
+This is similar to the previous VigiApp testing workflow using Expo Dev Build / Expo Dev Client.
+
+### Production Build
+
+The Production Build is used when DriveLocal needs to be tested or used in real-world conditions with selected drivers/passengers.
+
+Purpose:
+
+- install the real app on Android devices
+- test with real local users
+- test with real drivers
+- validate the MVP in Horizonte-CE
+
+**Important:**
+
+- Production Build does **not** mean public Play Store release immediately.
+- Public Play Store release must wait until MVP validation.
+- Do **not** configure Play Store release, public distribution, production signing, or store deployment until explicitly approved.
+
+### No preview track
+
+Do **not** use a separate "preview APK" concept in DriveLocal documentation. The project only distinguishes:
+
+1. **Development Build** for development testing.
+2. **Production Build** for real-world usage/testing.
+
+### Branding assets
+
+Official DriveLocal branding assets are **pending** and will be provided by the project owner:
+
+- DriveLocal logo
+- app icon
+- splash screen
+- optional dark/light logo versions
+- favicon for Admin web
+
+Do **not** generate or replace official branding assets unless explicitly approved.
+
+---
+
 ## 16. Current status
 
 | Item | Status |
