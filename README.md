@@ -368,6 +368,31 @@ Do **not** generate or replace official branding assets unless explicitly approv
 
 ---
 
+## V1 production-field plan (validated)
+
+DriveLocal V1 is moving from a frontend-only mock toward a **real production-field MVP with controlled scope**. The goal is **not** a public Play Store launch — it is a controlled real-world build for **selected drivers** (and later selected passengers) in Horizonte-CE. Core positioning (`"Uber-level trust, local MVP simplicity."`) and all non-negotiable constraints are unchanged.
+
+**Firebase is now approved for the real V1 foundation — in scoped phases only:**
+
+| Phase | Scope | Notes |
+| ------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| Iteration 1A | Firebase project setup, Auth (email/password first), Firestore `drivers`, persistent verification statuses, admin pending-list + driver detail, real approve/reject, simple founder calc, basic duplicate warnings (CPF, phone, plate, Pix key) | No notifications required |
+| Iteration 1B | Firebase Storage, real uploads (document, selfie/profile, CNH, CRLV, vehicle photo), admin view + manual approve/reject | No biometrics, no facial/auto doc verification |
+
+**Excluded from Firebase V1 (until explicitly approved):** Cloud Functions (unless approved for a specific use), Pix API, PSP integration, wallet automation, commission-debit automation, automatic bank reconciliation, public Play Store release, multi-city launch, complex ride matching before passenger/ride iterations.
+
+**Backend folder** (`backend/`) holds Firebase configuration and is **preparation/foundation only** — no secrets; security rules **start closed by default** and are opened progressively with explicit approval.
+
+**Milestones:** MVP 1 (driver supply: Auth, driver records, statuses, approve/reject, founder rule, duplicate warnings — no notifications) → MVP 1B (verification: Storage uploads, documents, selfie, manual admin validation) → MVP 2 (passenger demand: ride request, transparent price, service-area polygon validation) → MVP 3 (real ride dispatch: minimal notifications, dispatch waves, accept/reject, trust card, external Maps/Waze navigation).
+
+**Service area:** V1 operates only in Horizonte-CE (`HORIZONTE_CE_BR`). The boundary must be a GPS **polygon/multipolygon** (pickup and destination inside it for strict V1), with a ~50–100 m border buffer used **only** as GPS/address tolerance — not a commercial expansion. Borderline points (e.g. Horizonte/Pacajus) require manual pin confirmation; neighboring cities become separate service areas later.
+
+**Notifications:** not required for the driver/admin onboarding MVP (Iteration 1A) — the driver opens the app and sees status copy. Minimal push notifications are required only for the later real ride MVP (e.g. "Nova corrida disponível", "Motorista aceitou sua corrida", "Motorista chegou ao local", "Corrida cancelada").
+
+> See [`CLAUDE.md`](./CLAUDE.md) §3bis for the full validated V1 decisions, including the future ride-dispatch wave model and the per-status driver verification model.
+
+---
+
 ## 16. Current status
 
 | Item | Status |
@@ -376,7 +401,7 @@ Do **not** generate or replace official branding assets unless explicitly approv
 | Frontend structure | Exists |
 | Admin web scope | Planned/structured |
 | Passenger/Driver mobile scope | Android-first |
-| Backend | Planned later |
+| Backend (Firebase) | Approved for V1 foundation — scoped phases (1A/1B); config files are foundation only, not implemented |
 | Real Pix integration | Not implemented yet |
 | Wallet automation | Not implemented yet |
 | PSP/webhooks | Not implemented yet |

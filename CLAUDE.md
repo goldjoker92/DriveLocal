@@ -72,6 +72,168 @@ src/components/TrustChip.jsx
 
 ---
 
+## 3bis. DriveLocal V1 — Validated Production-Field MVP Decisions / Décisions validées du MVP de terrain V1
+
+> **EN:** This section captures the validated V1 plan and **takes precedence** over older notes where they conflict. DriveLocal V1 is moving from a frontend-only mock toward a **real production-field MVP with controlled scope**. The goal is **not** a public Play Store launch — it is a real-world, controlled field build for **selected drivers** (and later selected passengers) in Horizonte-CE. Core positioning is unchanged: **"Uber-level trust, local MVP simplicity."** All non-negotiable constraints in §2 still apply (Expo RN, Expo Router, Android-first for Passenger/Driver, Admin browser/web, JavaScript/JSX only, no TypeScript, keep code simple, don't overbuild, no Pix/wallet automation or Uber-like matching before the driver/admin foundation is ready).
+>
+> **FR:** Cette section décrit le plan V1 validé et **prévaut** sur les notes antérieures en cas de conflit. La V1 de DriveLocal passe d'un mock front-only vers un **vrai MVP de terrain à périmètre contrôlé**. L'objectif n'est **pas** une publication publique sur le Play Store — c'est un build de terrain réel et contrôlé pour des **chauffeurs sélectionnés** (puis des passagers sélectionnés) à Horizonte-CE. Le positionnement central est inchangé : **« Confiance niveau Uber, simplicité d'un MVP local. »** Toutes les contraintes non négociables du §2 s'appliquent encore.
+
+### A. Firebase decision — now approved in scoped phases / décision Firebase — approuvée par phases
+
+**EN:** Firebase is now **explicitly approved** for the real V1 foundation, but **only in scoped phases**. Do not jump ahead of the current phase.
+
+**Iteration 1A (driver/admin foundation):**
+- Firebase project setup
+- Firebase **Auth with email/password first**
+- Firestore `drivers` collection
+- persistent driver verification statuses
+- admin **pending drivers list** from Firestore
+- admin **driver detail** from Firestore
+- real **approve/reject** flow
+- simple founder calculation
+- basic **duplicate warnings** for CPF, phone, vehicle plate, Pix key
+
+**Iteration 1B (verification / file uploads):**
+- Firebase **Storage**
+- real driver document upload, selfie/profile photo upload, CNH upload, CRLV / vehicle document upload, vehicle photo upload if needed
+- admin can **view** submitted files and **approve/reject manually**
+- **no** biometric verification, **no** facial recognition, **no** automatic document-verification provider
+
+**Firebase V1 exclusions (do NOT do until explicitly approved):** no Cloud Functions until explicitly approved for a specific use; no Pix API; no PSP integration; no wallet automation; no commission-debit automation; no automatic bank reconciliation; no Play Store public release; no multi-city production launch; no complex ride matching before the passenger/ride iterations.
+
+**FR:** Firebase est désormais **explicitement approuvé** pour la vraie fondation V1, mais **uniquement par phases**. Ne pas anticiper la phase en cours.
+- **Itération 1A (fondation chauffeur/admin) :** setup du projet Firebase ; **Auth e-mail/mot de passe d'abord** ; collection Firestore `drivers` ; statuts de vérification persistants ; **liste admin des chauffeurs en attente** depuis Firestore ; **détail chauffeur** depuis Firestore ; vrai flux **approuver/refuser** ; calcul fondateur simple ; **avertissements de doublon** de base pour CPF, téléphone, plaque, clé Pix.
+- **Itération 1B (vérification / uploads) :** Firebase **Storage** ; upload réel des documents, du selfie/photo de profil, de la CNH, du CRLV / document du véhicule, de la photo du véhicule si besoin ; l'admin peut **voir** les fichiers et **approuver/refuser manuellement** ; **pas** de biométrie, **pas** de reconnaissance faciale, **pas** de fournisseur de vérification automatique de documents.
+- **Exclusions V1 (interdit sans accord explicite) :** pas de Cloud Functions tant qu'un usage précis n'est pas approuvé ; pas d'API Pix ; pas d'intégration PSP ; pas d'automatisation de portefeuille ; pas d'automatisation du débit de commission ; pas de réconciliation bancaire automatique ; pas de publication publique Play Store ; pas de lancement multi-villes ; pas de matching complexe avant les itérations passager/course.
+
+### B. Backend folder decision / décision dossier backend
+
+**EN:** The repository now contains a `backend/` folder reserved for Firebase configuration and future backend assets. These files are **preparation / foundation only** — they must **not** contain secrets. Security rules **start closed by default** (`allow read, write: if false`) and are opened **progressively, with explicit approval**, as each phase is implemented.
+```
+backend/README.md
+backend/firebase/rules/firestore.rules
+backend/firebase/rules/storage.rules
+backend/firebase/indexes/firestore.indexes.json
+```
+
+**FR:** Le dépôt contient désormais un dossier `backend/` réservé à la configuration Firebase et aux futurs éléments backend. Ces fichiers sont **préparation / fondation uniquement** — ils ne doivent **pas** contenir de secrets. Les règles de sécurité **démarrent fermées par défaut** (`allow read, write: if false`) et s'ouvrent **progressivement, avec accord explicite**, au fur et à mesure de chaque phase.
+
+### C. Driver / Admin V1 foundation / fondation chauffeur-admin V1
+
+**EN:** The first production-field foundation must validate **trusted local driver supply**. Build driver/admin onboarding first.
+
+Driver onboarding required data / Données requises à l'onboarding chauffeur:
+```
+fullName, displayName, whatsApp, email, cpf,
+vehicleType: moto | car,
+serviceAreaId: HORIZONTE_CE_BR,
+pixKeyType, pixKey,
+selfie/profile photo, CNH, CRLV / vehicle document, vehicle photo (if needed),
+vehiclePlate, vehicleBrand, vehicleModel, vehicleColor
+```
+
+Driver verification statuses / Statuts de vérification (persistent):
+```
+verificationStatus: draft | pending_review | approved | rejected | suspended
+```
+Verification sub-statuses / Sous-statuts:
+```
+profileStatus:        incomplete | complete
+vehicleStatus:        incomplete | complete
+documentsStatus:      missing | submitted | approved | rejected
+selfieStatus:         missing | submitted | approved | rejected
+duplicateCheckStatus: clear | warning | blocked
+```
+Admin approval fields / Champs d'approbation admin:
+```
+reviewedAt, reviewedBy, rejectionReason,
+approvalNumber, founderEligible, founderGrantedAt, founderExpiresAt,
+statusHistory
+```
+
+**FR:** La première fondation de terrain doit valider une **offre locale de chauffeurs de confiance**. Construire d'abord l'onboarding chauffeur/admin (données, statuts et champs ci-dessus, conservés une seule fois).
+
+### D. Founder rule (validated, unchanged) / règle fondateur (validée, inchangée)
+
+**EN:** The founder counter is based on **admin-approved** drivers (not registrations); moto and car count together; founder is **service-area based**. The first **100 admin-approved** drivers in `HORIZONTE_CE_BR` are **Motoristas Fundadores** → 0% commission for 60 days + R$0 subscription for 60 days. Drivers **#101 onward** → standard **15% commission from the first completed ride** + R$0 subscription for the first 60 days. **No commission is taken at driver approval.** Founder benefits can be removed after confirmed fraud via admin review.
+
+**FR:** Le compteur fondateur se base sur les chauffeurs **approuvés par l'admin** (pas les inscriptions) ; moto et voiture comptés ensemble ; fondateur **par zone de service**. Les **100 premiers approuvés** dans `HORIZONTE_CE_BR` sont **Motoristas Fundadores** → 0 % pendant 60 jours + abonnement R$0 pendant 60 jours. Les chauffeurs **#101+** → **15 % dès la première course terminée** + abonnement R$0 les 60 premiers jours. **Aucune commission n'est prélevée à l'approbation.** Les avantages fondateur peuvent être retirés après fraude confirmée en revue admin.
+
+### E. Notifications decision / décision notifications
+
+**EN:** Distinguish clearly by phase.
+- **Driver/Admin onboarding MVP (Iteration 1A): push notifications are NOT required.** The driver simply opens the app and sees status: "Cadastro em andamento", "Aguardando aprovação", "Motorista aprovado", "Cadastro recusado", "Documento pendente".
+- **Real ride MVP (passenger + driver): minimal notifications ARE required** — without them a driver will not reliably know a ride request arrived if the app is closed or the phone is locked. Minimum future ride notification scope: driver "Nova corrida disponível"; passenger "Motorista aceitou sua corrida"; passenger "Motorista chegou ao local"; passenger/driver "Corrida cancelada". Driver/admin status notifications may come later (not first priority).
+- **Do NOT implement notifications in Iteration 1A.** Document them as required for the future ride MVP, not for onboarding.
+
+**FR:** Distinguer clairement par phase.
+- **MVP onboarding chauffeur/admin (Itération 1A) : les notifications push ne sont PAS requises.** Le chauffeur ouvre l'app et voit son statut (libellés PT-BR ci-dessus).
+- **MVP course réelle (passager + chauffeur) : des notifications minimales SONT requises** — sans elles, un chauffeur ne saura pas de façon fiable qu'une demande est arrivée si l'app est fermée ou le téléphone verrouillé. Périmètre minimal futur : chauffeur « Nova corrida disponível » ; passager « Motorista aceitou sua corrida » ; passager « Motorista chegou ao local » ; passager/chauffeur « Corrida cancelada ». Les notifications de statut chauffeur/admin viendront plus tard (pas la priorité).
+- **Ne PAS implémenter de notifications en Itération 1A.** Les documenter comme requises pour le futur MVP course, pas pour l'onboarding.
+
+### F. Ride dispatch model — future ride MVP (document, do NOT implement now) / modèle de dispatch — futur MVP course (documenter, NE PAS implémenter)
+
+**EN:** This is the approved MVP dispatch model for the later passenger/ride MVP. **Do NOT implement during Iteration 1A.**
+
+Driver eligibility for dispatch: admin approved; available; in the correct service area; correct vehicle type; not already in a ride; not suspended; recent location; wallet/saldo rules later when the wallet is implemented.
+
+Dispatch model:
+- Prioritize the **nearest eligible available driver** first; do not wait forever for the nearest.
+- Try up to **2 nearby drivers sequentially** within ~1 km, then expand by progressive waves: ~2.5 km → ~5 km → emergency wider range ~8 km or the whole service area.
+- Automatic search lasts **~70–90 seconds**, then show the passenger "Continuar procurando"; extended search stays **~3 minutes maximum**.
+- Do **not** re-offer the same ride to a driver who rejected or expired it.
+- Penalize stale locations.
+- After repeated missed ride offers, temporarily mark the driver **unavailable** until they tap available again.
+- Use **transactional locking** so only one driver can accept a ride.
+
+**FR:** Modèle de dispatch MVP approuvé pour le futur MVP passager/course. **Ne PAS implémenter en Itération 1A.** Éligibilité chauffeur : approuvé admin ; disponible ; bonne zone de service ; bon type de véhicule ; pas déjà en course ; non suspendu ; localisation récente ; règles de portefeuille plus tard. Modèle : privilégier le **chauffeur éligible disponible le plus proche** ; essayer jusqu'à **2 chauffeurs proches en séquence** dans ~1 km, puis vagues progressives ~2,5 km → ~5 km → ~8 km/zone entière ; recherche auto **~70–90 s** puis « Continuar procurando » ; recherche étendue **~3 min max** ; ne pas re-proposer une course à un chauffeur qui l'a refusée/expirée ; pénaliser les localisations périmées ; après plusieurs offres manquées, marquer le chauffeur **indisponible** jusqu'à réactivation ; **verrouillage transactionnel** pour qu'un seul chauffeur accepte.
+
+### G. Service area / polygon decision / zone de service & polygone
+
+**EN:** DriveLocal V1 operates **only** in Horizonte-CE (`serviceAreaId: HORIZONTE_CE_BR`). Do not hardcode Horizonte everywhere — use service-area configuration. The V1 boundary must be a **polygon/multipolygon** from an official or curated source, and the service-area check must be based on **GPS coordinates**, not only address text.
+
+Rules:
+- Pickup must be **inside** the `HORIZONTE_CE_BR` polygon.
+- Destination must be **inside** the polygon for the strict first V1.
+- A border buffer of ~50–100 m may be used **only** as technical tolerance for GPS/address imprecision — it is **not** a commercial expansion area.
+- A point clearly outside Horizonte is outside V1 service area.
+- A point very close to the boundary requires **manual pin confirmation**.
+- For a street on the Horizonte/Pacajus border, accept the ride only if the confirmed pin is inside the Horizonte polygon; if the pin is on the Pacajus side, show out-of-area for V1.
+- Future expansion: Pacajus / other neighbors become **separate service areas** later, never ad-hoc exceptions inside Horizonte logic.
+
+PT-BR copy — out of area: _"Ainda não atendemos esta área. No momento o DriveLocal funciona apenas em Horizonte."_ Borderline confirmation: _"Este ponto está muito perto do limite de Horizonte. Confirme o local exato no mapa."_
+
+Suggested future service-area structure / Structure future suggérée — `serviceAreas/{serviceAreaId}`:
+```
+id, name, city, state, country, active, center, boundary, borderBufferMeters,
+allowedVehicleTypes,
+rules.pickupMustBeInside, rules.destinationMustBeInside, rules.allowBorderlineManualConfirm
+```
+
+**FR:** La V1 fonctionne **uniquement** à Horizonte-CE (`serviceAreaId: HORIZONTE_CE_BR`). Ne pas coder Horizonte en dur partout — utiliser la configuration de zone. La frontière V1 doit être un **polygone/multipolygone** d'une source officielle ou curée, et la vérification doit se baser sur les **coordonnées GPS**, pas seulement le texte d'adresse. Règles : prise en charge **dans** le polygone ; destination **dans** le polygone pour la première V1 stricte ; tampon de bordure ~50–100 m **uniquement** comme tolérance technique (pas une zone d'expansion commerciale) ; point clairement hors Horizonte = hors zone ; point très proche de la limite = **confirmation manuelle du pin** ; rue à la frontière Horizonte/Pacajus acceptée seulement si le pin confirmé est dans le polygone Horizonte, sinon hors-zone V1 ; expansion future : Pacajus/voisins deviennent des **zones de service séparées**, jamais des exceptions ad hoc. (Copies PT-BR et structure ci-dessus.)
+
+### H. Production-field build strategy & milestones / stratégie de build de terrain & jalons
+
+**EN:** "Production Build" means a **controlled real-world installable build for selected users**, **not** a public Play Store release (see also the Android Build Strategy section). Validated milestones:
+- **MVP 1 / Driver supply:** Firebase Auth; Firestore driver records; persistent statuses; admin approve/reject; founder rule; duplicate warnings; **no notifications required**.
+- **MVP 1B / Verification:** Storage uploads; documents; selfie; admin manual validation.
+- **MVP 2 / Passenger demand:** passenger ride request; transparent price; service-area polygon validation; no complex dispatch yet if not ready.
+- **MVP 3 / Real ride dispatch:** minimal notifications required; dispatch waves; driver accept/reject; passenger trust card; Google Maps/Waze external navigation.
+
+**FR:** « Production Build » = build installable réel **contrôlé pour utilisateurs sélectionnés**, **pas** une publication Play Store publique (voir aussi la section Stratégie de build Android). Jalons validés : **MVP 1 / Offre chauffeur** (Auth, records Firestore, statuts, approuver/refuser, fondateur, doublons, **aucune notification requise**) ; **MVP 1B / Vérification** (uploads Storage, documents, selfie, validation manuelle admin) ; **MVP 2 / Demande passager** (demande de course, prix transparent, validation polygone de zone, pas de dispatch complexe si pas prêt) ; **MVP 3 / Dispatch réel** (notifications minimales requises, vagues de dispatch, accept/refus chauffeur, carte de confiance passager, navigation externe Google Maps/Waze).
+
+### I. Pix rule (unchanged) / règle Pix (inchangée)
+
+**EN:** Passenger pays the driver directly by Pix; DriveLocal does **not** hold passenger ride money in V1; no Pix automation until explicitly approved; no card; no cash; no Pix split in V1.
+
+**FR:** Le passager paie le chauffeur directement par Pix ; DriveLocal ne **détient pas** l'argent de la course en V1 ; pas d'automatisation Pix sans accord explicite ; pas de carte ; pas d'espèces ; pas de split Pix en V1.
+
+### J. Do NOT build yet / NE PAS construire pour l'instant
+
+**EN / FR — do not build yet:** wallet automation; Pix automation; PSP integration; Cloud Functions unless specifically approved; public Play Store release; production multi-city rollout; biometric verification; facial recognition; complex anti-fraud ML; full Uber-like matching; heavy background tracking; passenger/driver web flows; notification system during Iteration 1A.
+
+---
+
 ## 4. Service Area Model — Modèle de zone de service
 
 **EN:** DriveLocal must be local-first but scalable. MVP V1 operates only in Horizonte. Do **not** hardcode Horizonte into business logic everywhere — use a `serviceArea` configuration so future cities are addable without rewriting core logic.
