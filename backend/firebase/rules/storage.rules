@@ -1,0 +1,10 @@
+﻿rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Storage rules will be implemented when document/selfie upload starts.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,10 @@
+﻿rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Rules will be implemented after Firebase project setup.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
