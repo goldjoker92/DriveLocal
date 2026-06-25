@@ -1,243 +1,353 @@
 # DriveLocal
 
-> **Bilingual document — Document bilingue.** Each section is written in English (**EN**) and immediately followed by French (**FR**). Product/UI strings stay in Brazilian Portuguese on purpose.
+DriveLocal is a local ride-hailing MVP starting in **Horizonte, Ceará, Brazil**.
+
+**Positioning:** _"Uber-level trust, local MVP simplicity."_
+
+DriveLocal is built to be:
+
+- **Local-first** — focused on one service area before expanding.
+- **Android-first** for Passenger and Driver — the mobile app is the product.
+- **Browser/web reserved for Admin operations** — not a passenger/driver channel.
+- **Simple before complex** — ship a market-ready MVP before payment/tracking automation.
+- **Direct payment** — the passenger pays the driver directly by Pix.
+- **Sustainably monetized** — DriveLocal earns via driver commission and subscription, not by holding passenger money.
+
+> ⚠️ **Status note:** This repository is an early MVP. Backend, Firebase, real Pix integration, wallet automation, and live tracking are **planned and not implemented yet** unless explicitly present in the codebase and approved. Nothing here should be read as production-ready.
+
+---
+
+## 1. Overview
+
+DriveLocal connects passengers with verified local drivers for moto and car rides in a single pilot city. The passenger pays the driver directly by Pix; DriveLocal monetizes through a driver commission and a monthly subscription. The architecture is designed to scale by service area, but V1 runs in Horizonte only.
+
+| Item | Decision |
+| --------------------- | ------------------------------------- |
+| Pilot city | Horizonte, Ceará, Brazil |
+| Service area ID | `HORIZONTE_CE_BR` |
+| Product type | Local ride-hailing MVP |
+| Passenger platform | Android app / mobile-first |
+| Driver platform | Android app / mobile-first |
+| Admin platform | Browser/web dashboard |
+| Main payment model | Passenger pays Driver directly by Pix |
+| Platform monetization | Driver commission + subscription |
+| Backend | Planned later with Firebase |
+| Current priority | Simple market-ready MVP |
+
+---
+
+## 2. Product positioning
+
+DriveLocal is **not** an over-engineered Uber clone. It aims to deliver cheaper rides for passengers, better net earnings for drivers, verified local drivers, direct Pix payment, admin-controlled operations, and an architecture that scales by service area.
+
+| Promise | Meaning |
+| ---------------------- | -------------------------------------------------------- |
+| Cheaper for passengers | Transparent local pricing and no heavy platform overhead |
+| Better for drivers | Lower commission and direct Pix payment |
+| Local trust | Verified drivers, vehicle identity, admin approval |
+| Simple MVP | Build only what is needed to test the market |
+| Scalable | Service-area model for future cities |
+
+---
+
+## 3. Platform scope
+
+| Actor | Platform | MVP decision |
+| ---------------------- | ---------------- | ------------------------------------------------------------------- |
+| Passenger / Passageiro | Android app | Mobile-first ride request, price, driver info, Pix payment |
+| Driver / Motorista | Android app | Ride acceptance, navigation via Maps/Waze, Pix confirmation, wallet |
+| Admin / Operação | Browser/web | Driver approval, documents, wallet/top-ups, rides, fraud review |
+| Expo Web | Development only | Smoke testing and visual review, not passenger/driver product scope |
+
+- Do **not** build passenger web/PWA flows for the MVP.
+- Do **not** build driver web/PWA flows for the MVP.
+- Browser product scope is **Admin only**.
+
+---
+
+## 4. Actors and responsibilities
+
+| Actor | Main goal | Core responsibilities |
+| ---------------------- | ---------------------------- | -------------------------------------------------------------------------------------- |
+| Passenger / Passageiro | Request safe local rides | Choose route, see price, identify driver, pay by Pix, rate ride |
+| Driver / Motorista | Earn from local rides | Register, get approved, accept rides, navigate, receive Pix, maintain Saldo DriveLocal |
+| Admin / Operação | Control trust and operations | Approve drivers, validate documents, manage wallets/top-ups, review fraud |
+
+---
+
+## 5. Passenger / Passageiro
+
+| Category | Rules |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Product rules | Passenger must see price before confirming; passenger must see verified driver identity after acceptance |
+| Business rules | Passenger pays Driver directly by Pix; Passenger does not pay DriveLocal in V1 |
+| Payment rules | QR Code Pix is primary; Pix Copia e Cola is fallback; passenger should not manually type driver Pix key |
+| Safety rules | Passenger should pay only through the QR Code displayed in DriveLocal; off-platform payment is a fraud/safety risk |
+| Technical rules | Passenger app is Android/mobile-first; Expo Web only for testing |
+| Planned files   | `src/app/(passenger)/select-route.jsx`, `confirm-price.jsx`, `driver-accepted.jsx`, `pix-payment.jsx`, `ride-completed.jsx` |
+
+**Passenger safety copy (PT-BR):**
+
+> _"Para sua segurança, pague somente pelo QR Code exibido no DriveLocal. Não envie Pix para outra chave informada fora do app."_
+
+---
+
+## 6. Driver / Motorista
+
+| Category | Rules |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Product rules | Driver must register, submit profile/vehicle/docs, and wait for admin approval before receiving rides |
+| Business rules | Standard commission is 15% per completed ride; subscription applies after the free period |
+| Payment rules | Driver receives ride payment directly from Passenger by Pix; Driver pays DriveLocal by recharging Saldo DriveLocal |
+| Wallet rules | Saldo DriveLocal is an internal prepaid balance, **not** a bank account |
+| Safety rules | Driver must use only the Pix key registered and validated in DriveLocal |
+| Technical rules | Driver app is Android/mobile-first; navigation uses Google Maps/Waze |
+| Planned files   | `src/app/(driver)/onboarding.jsx`, `profile.jsx`, `documents.jsx`, `active-ride.jsx`, `wallet.jsx` |
+
+**Driver warning copy (PT-BR):**
+
+> _"Use apenas a chave Pix cadastrada e validada no DriveLocal. Solicitar pagamento por outra chave pode gerar bloqueio."_
+
+---
+
+## 7. Admin / Operação
+
+| Category | Rules |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Product rules | Admin validates drivers, documents, vehicles, top-ups, ride issues, and fraud signals |
+| Business rules | Admin approval activates driver status and founder eligibility; approval does not debit commission |
+| Payment rules | Admin manually validates driver top-ups in the MVP |
+| Fraud rules | Admin reviews suspicious cancellations, off-platform payment signals, duplicate accounts |
+| Technical rules | Admin platform is browser/web; admin routes should stay separate from passenger/driver flows |
+| Planned files   | `src/app/(admin)/dashboard.jsx`, `drivers-pending.jsx`, `driver-detail.jsx`, `topups-pending.jsx`, `wallets.jsx`, `reports.jsx` |
+
+The admin entry route is kept discreet at `/admin-login` and must not collide with a public `/login`.
+
+---
+
+## 8. Business model
+
+| Revenue item | Rule |
+| ---------------------------- | ------------------------------------------- |
+| Ride commission | 15% per completed ride for standard drivers |
+| Moto subscription | R$9,90/month after free period |
+| Carro subscription | R$19,90/month after free period |
+| Passenger payment | Passenger pays Driver directly by Pix |
+| Driver payment to DriveLocal | Driver recharges Saldo DriveLocal by Pix |
+| Minimum ride price Moto | R$5 |
+| Minimum ride price Carro | R$8 |
+| Card payment | Not in V1 |
+| Cash payment | Not in V1 |
+| Pix split | Not in V1 |
+
+---
+
+## 9. Founder driver offer
+
+| Driver group | Commission | Subscription | Notes |
+| ----------------------------- | ----------------------------- | --------------------------- | -------------------------------------- |
+| Drivers #1–100 admin-approved | 0% for 60 days | R$0 for 60 days | Motoristas Fundadores |
+| Drivers #101 onward | 15% from first completed ride | R$0 for first 60 days | Standard commission starts immediately |
+| After 60 days | 15% | Moto R$9,90 / Carro R$19,90 | Normal rules apply |
+
+- The founder counter is based on **admin-approved** drivers, not registrations.
+- Moto and Carro drivers count together.
+- Founder benefit may be removed after confirmed fraud (post admin review).
+
+---
+
+## 10. Pix and Saldo DriveLocal
+
+DriveLocal V1 has **two separate Pix flows**.
+
+| Flow | Who pays | Who receives | Purpose |
+| ------------------- | --------- | ------------ | ------------------------------------------- |
+| Passenger → Driver | Passenger | Driver | Ride payment |
+| Driver → DriveLocal | Driver | DriveLocal | Wallet recharge for commission/subscription |
+
+### Passenger → Driver Pix
+
+- QR Code Pix is the **primary** flow.
+- Pix Copia e Cola is the **fallback**.
+- The passenger does **not** manually type the Pix key.
+- The QR Code should include the ride amount when possible.
+- The driver must use the **registered/validated** Pix key only.
+
+### Driver → DriveLocal Pix
+
+- The driver recharges **Saldo DriveLocal**.
+- Saldo DriveLocal is **not** a bank account — it is an internal prepaid ledger.
+- Real money goes to DriveLocal via Pix.
+- The admin validates the top-up **manually** in the MVP.
+- The app then credits the driver's internal balance.
+
+**Example flow:**
+
+| Step | Example |
+| ---------------- | ----------------------------------- |
+| Driver recharge | Carlos sends R$20 Pix to DriveLocal |
+| Admin validation | Admin approves top-up |
+| Internal balance | Carlos has R$20 Saldo DriveLocal |
+| Ride completed | Passenger pays Carlos R$20 |
+| Commission | 15% = R$3 |
+| Wallet debit | Carlos balance becomes R$17 |
+
+> **Not implemented yet:** Pix API, PSP integration, webhooks, and automatic reconciliation are **planned only** and require explicit approval before any implementation.
+
+---
+
+## 11. Saldo DriveLocal rules
+
+| Rule | Value |
+| ------------------- | ------------------------------------------------- |
+| Minimum recharge | R$10 |
+| Low balance warning | Around R$7 |
+| General block | Saldo DriveLocal ≤ R$3 |
+| Per-ride block | Saldo DriveLocal < estimated commission |
+| Commission rate | 15% |
+| Founder exception | No commission wallet block during 60-day 0% promo |
+
+**Per-ride commission coverage formula:**
+
+```
+estimatedCommission = estimatedRidePrice * 15%
+```
+
+A standard driver can accept a ride only if `Saldo DriveLocal >= estimatedCommission`.
+
+| Ride price | Estimated commission | Required balance |
+| ---------- | -------------------: | ---------------: |
+| R$20 | R$3,00 | At least R$3,00 |
+| R$30 | R$4,50 | At least R$4,50 |
+| R$40 | R$6,00 | At least R$6,00 |
+
+**Driver-facing copy (PT-BR):**
+
+> _"Mantenha seu Saldo DriveLocal acima de R$3,00 para continuar recebendo corridas."_
 >
-> _Chaque section est rédigée en anglais (**EN**) puis suivie de sa traduction française (**FR**). Les libellés produit/UI restent en portugais brésilien volontairement._
+> _"Para algumas corridas, o app pode solicitar um saldo maior para cobrir a taxa estimada da plataforma."_
 
 ---
 
-## Project Overview — Vue d'ensemble
+## 12. Trust, safety, and anti-fraud
 
-**EN:** DriveLocal is a local ride-hailing platform for small and medium cities, starting with Horizonte, Ceará, Brazil. It connects passengers with approved local drivers for moto and car rides. The product emphasizes simplicity, local trust, direct Pix payment, and a lower driver commission than large ride-hailing platforms.
+| Risk | Rule / response |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| Driver asks for another Pix key | Fraud signal |
+| Fake cancellation after contact | Admin review |
+| Repeated cancellations same pair | Fraud flag |
+| Duplicate driver account | Check WhatsApp, email, CNH, plate, Pix key |
+| Off-platform ride | Warning, suspension, founder benefit removal, commission recovery, account removal |
 
-**FR:** DriveLocal est une plateforme de VTC locale pour petites et moyennes villes, à commencer par Horizonte (Ceará, Brésil). Elle met en relation des passagers avec des chauffeurs locaux approuvés, en moto ou en voiture. Le produit met l'accent sur la simplicité, la confiance locale, le paiement direct par Pix et une commission chauffeur plus faible que les grandes plateformes.
+Trust foundations:
 
----
-
-## Product Vision — Vision produit
-
-**EN:** Make local mobility feel premium and trustworthy in cities the big platforms underserve. Passengers get a fast, clear ride request and pay the driver directly by Pix. Drivers keep more of their earnings thanks to a low commission and a prepaid wallet model. The experience is mobile-first, calm, and credible — without copying any competitor's brand assets.
-
-**FR:** Rendre la mobilité locale premium et digne de confiance dans des villes mal desservies par les grandes plateformes. Les passagers commandent une course rapide et claire et paient le chauffeur directement par Pix. Les chauffeurs conservent une plus grande part de leurs revenus grâce à une commission faible et un portefeuille prépayé. L'expérience est mobile-first, sobre et crédible — sans copier les éléments de marque d'un concurrent.
-
----
-
-## MVP Scope — Périmètre du MVP
-
-**EN:**
-- Frontend Step 1 in progress / partially validated.
-- Expo React Native app, Android-first, JavaScript / JSX only.
-- UI is **mock-only**: no real auth, no real Google Auth, no real Pix processing, no real maps/GPS, no backend production logic.
-- Service area limited to Horizonte (`HORIZONTE_CE_BR`) for V1.
-
-**FR:**
-- Frontend Step 1 en cours / partiellement validé.
-- Appli Expo React Native, priorité Android, JavaScript / JSX uniquement.
-- UI **mock uniquement** : pas d'auth réelle, pas de Google Auth réel, pas de traitement Pix réel, pas de cartes/GPS réels, pas de logique backend de production.
-- Zone de service limitée à Horizonte (`HORIZONTE_CE_BR`) pour la V1.
+- Verified drivers only (no rides before admin approval).
+- Driver photo and vehicle info.
+- Vehicle plate.
+- Driver rating, or **"Novo motorista verificado"** for new drivers.
+- Admin review before any sanction.
 
 ---
 
-## Business Model — Modèle économique
+## 13. Navigation and live map
 
-**EN:**
-- **Monthly subscription:** Car driver R$19,90 / month; Moto driver R$9,90 / month.
-- **Commission:** 15% per ride (moto and car), charged from the driver wallet.
-- **Minimum ride price:** Moto R$5; Car R$8.
-- **Founder promo** overrides commission/subscription during the promo period.
+| Feature | MVP decision |
+| -------------------------------- | ----------------------------------- |
+| Driver navigation | Google Maps/Waze |
+| Internal turn-by-turn navigation | Not in V1 |
+| Passenger live map | Planned during accepted/active ride |
+| Background tracking | Not in V1 unless approved |
+| Location sharing | Only during accepted/active ride |
 
-**FR:**
-- **Abonnement mensuel :** voiture R$19,90 / mois ; moto R$9,90 / mois.
-- **Commission :** 15 % par course (moto et voiture), prélevée sur le portefeuille du chauffeur.
-- **Prix minimum :** moto R$5 ; voiture R$8.
-- **Promo fondateur** : prime sur commission/abonnement pendant la période de promo.
+DriveLocal does not replace Google Maps/Waze in V1; the driver navigates with external apps while the passenger map exists for trust, visibility, and ride status.
 
 ---
 
-## User Roles — Rôles utilisateurs
+## 14. Roadmap / iterations
 
-**EN:**
-- **Passenger / Passageiro:** request a local ride quickly, pay the driver directly by Pix, avoid complex checkout, see clear ride status.
-- **Driver / Motorista:** receive local ride requests, pay a lower commission, receive payment directly by Pix, manage a prepaid wallet for commission, benefit from the founder offer if among the first approved.
-- **Admin / Operação:** approve/reject drivers, review documents, monitor rides and wallet balances, validate manual Pix top-ups, track the founder count, manage service-area operations.
+| Iteration | Focus | Main actors |
+| --------- | -------------------------------------------------- | ------------------------ |
+| 0 | Documentation and landing lock | All |
+| 1 | Driver onboarding + Admin approval + Founder rules | Driver, Admin |
+| 2 | Passenger ride request + transparent price | Passenger |
+| 3 | Driver accepted + trust card + live map MVP | Passenger, Driver |
+| 4 | Active ride flow | Passenger, Driver |
+| 5 | Wallet / commission MVP | Driver, Admin |
+| 6 | Anti-fraud and cancellation review | Admin, Driver, Passenger |
+| 7 | Firebase backend later | All |
 
-**FR:**
-- **Passager / Passageiro :** commander une course locale rapidement, payer le chauffeur directement par Pix, éviter un paiement complexe, suivre clairement le statut de la course.
-- **Chauffeur / Motorista :** recevoir des demandes de courses locales, payer une commission plus faible, être payé directement par Pix, gérer un portefeuille prépayé pour la commission, profiter de l'offre fondateur s'il fait partie des premiers approuvés.
-- **Admin / Operação :** approuver/refuser les chauffeurs, vérifier les documents, surveiller les courses et les soldes, valider les recharges Pix manuelles, suivre le compteur de fondateurs, gérer les opérations de la zone de service.
-
----
-
-## Payment Model — Modèle de paiement
-
-**EN:** V1 uses **direct Pix** from passenger to driver — no in-app card, no cash, no in-app Pix split. The passenger sees a Pix QR code / payment instructions in the mock flow. The app does **not** intercept passenger payment in V1; it only charges the 15% commission from the driver's prepaid wallet.
-
-Wallet: prepaid, recharged via Pix, minimum top-up R$10. If balance ≤ R$3, the driver stops receiving new rides unless the founder promo is active. Transaction types: top-up requested, top-up approved, commission debited, adjustment, blocked/insufficient balance.
-
-**FR:** La V1 utilise le **Pix direct** du passager au chauffeur — pas de carte intégrée, pas d'espèces, pas de split Pix intégré. Le passager voit un QR code Pix / des instructions de paiement dans le flux mock. L'appli n'intercepte **pas** le paiement passager en V1 ; elle prélève uniquement la commission de 15 % sur le portefeuille prépayé du chauffeur.
-
-Portefeuille : prépayé, rechargé via Pix, recharge minimale R$10. Si le solde ≤ R$3, le chauffeur ne reçoit plus de nouvelles courses sauf si la promo fondateur est active. Types de transactions : recharge demandée, recharge approuvée, commission débitée, ajustement, bloqué/solde insuffisant.
+**Recommended next major build:** Iteration 1 — Driver onboarding + Admin approval + Founder rule + basic anti-duplicate identity checks. DriveLocal must first build trusted local supply; passengers only trust the app when drivers are verified, visible, and admin-approved.
 
 ---
 
-## Founder Driver Offer — Offre chauffeur fondateur
+## 15. Tech stack
 
-**EN:** The first **100 admin-approved** drivers become "Motorista Fundador" (moto and car count together). Benefits: **0% commission** and **R$0 subscription for 60 days**. Founder status is assigned only after admin approval, and the count is tracked globally per service area.
+| Area | Decision |
+| ----------------------- | ---------------------------------- |
+| Framework | Expo React Native |
+| Routing | Expo Router |
+| Language | JavaScript / JSX only |
+| Passenger/Driver target | Android-first |
+| Admin target | Browser/web |
+| Backend | Firebase planned later |
+| Cloud Functions | JavaScript planned later |
+| TypeScript | Not used |
+| Payments | Pix planned; no PSP automation yet |
 
-**FR:** Les **100 premiers chauffeurs approuvés** par l'admin deviennent « Motorista Fundador » (moto et voiture comptés ensemble). Avantages : **0 % de commission** et **abonnement à R$0 pendant 60 jours**. Le statut fondateur n'est attribué qu'après approbation admin, et le compteur est suivi globalement par zone de service.
+**Firebase — planned later (not implemented yet):**
 
----
+- Auth
+- Firestore
+- Storage
+- Cloud Functions (JavaScript)
+- Security Rules
+- Firebase Cloud Messaging (later)
 
-## Service Area Model — Modèle de zone de service
-
-**EN:** The app must be scalable per service area, so future cities can be added without rewrites. Horizonte must **not** be hardcoded into business logic — use a `serviceArea` configuration instead. Pilot area:
-- **ID:** `HORIZONTE_CE_BR`
-- **City:** Horizonte — **State:** Ceará — **Country:** Brazil
-
-MVP V1 is limited to Horizonte only.
-
-**FR:** L'appli doit être extensible par zone de service, afin d'ajouter de futures villes sans réécriture. Horizonte ne doit **pas** être codée en dur dans la logique métier — utiliser une configuration `serviceArea`. Zone pilote :
-- **ID :** `HORIZONTE_CE_BR`
-- **Ville :** Horizonte — **État :** Ceará — **Pays :** Brésil
-
-Le MVP V1 est limité à Horizonte uniquement.
-
----
-
-## UX/UI Principles — Principes UX/UI
-
-**EN:** Mobile-first, premium local-mobility feel. Inspired by product *principles* (not assets) from Uber, Bolt, 99, inDrive, Apple, Nubank, Revolut: map-first feeling, bottom-sheet action, clean Apple-like spacing, fintech-grade trust cards, strong CTA hierarchy, local trust signals, clear passenger-vs-driver motivation. Passenger CTA is primary; driver opportunity secondary but clear; admin access discreet; local anchoring shown as **Horizonte · CE**. Public UI never shows internal/technical labels.
-
-Shape rules: cards `borderRadius` 22–24; buttons 16–18; pills/chips fully rounded; bottom sheets large rounded corners; generous spacing; calm premium UI. See `CLAUDE.md` for the full color palette.
-
-**FR:** Mobile-first, ressenti d'une appli de mobilité locale premium. Inspiré des *principes* produit (pas des éléments de marque) d'Uber, Bolt, 99, inDrive, Apple, Nubank, Revolut : ressenti « carte d'abord », action en bottom-sheet, espacement épuré à la Apple, cartes de confiance dignes d'une fintech, hiérarchie de CTA forte, signaux de confiance locaux, motivation passager/chauffeur claire. CTA passager prioritaire ; offre chauffeur secondaire mais visible ; accès admin discret ; ancrage local **Horizonte · CE**. L'UI publique n'affiche jamais de libellés internes/techniques.
-
-Règles de forme : cartes `borderRadius` 22–24 ; boutons 16–18 ; pills/chips totalement arrondis ; bottom sheets à grands coins arrondis ; espacement généreux ; UI premium et sobre. Voir `CLAUDE.md` pour la palette de couleurs complète.
+> Backend, Firebase, Pix automation, wallet automation, and live tracking are **planned and not implemented** unless they are present in the codebase and have been explicitly approved.
 
 ---
 
-## Technical Stack — Stack technique
+## 16. Current status
 
-**EN:**
-- Expo React Native + Expo Router (file-based routing).
-- JavaScript / JSX only — **no TypeScript files**.
-- Android-first; web used for smoke testing and visual review.
-- Expo SDK v56 — read the versioned docs at <https://docs.expo.dev/versions/v56.0.0/> before writing code.
-
-**FR:**
-- Expo React Native + Expo Router (routage par fichiers).
-- JavaScript / JSX uniquement — **aucun fichier TypeScript**.
-- Priorité Android ; web utilisé pour les tests rapides et la revue visuelle.
-- Expo SDK v56 — lire la documentation versionnée sur <https://docs.expo.dev/versions/v56.0.0/> avant d'écrire du code.
-
----
-
-## Current Frontend Status — État actuel du frontend
-
-**EN:** Mock-only Step 1 UI. The landing page is accepted for now and should be kept as-is. The admin route stays discreet at `/admin-login`. No backend, auth, Pix processing, or maps/GPS are wired.
-
-**FR:** UI Step 1 en mode mock uniquement. La landing page est acceptée pour l'instant et doit être conservée telle quelle. La route admin reste discrète sur `/admin-login`. Aucun backend, auth, traitement Pix ou cartes/GPS n'est branché.
+| Item | Status |
+| ----------------------------- | ------------------- |
+| Landing page | Accepted for now |
+| Frontend structure | Exists |
+| Admin web scope | Planned/structured |
+| Passenger/Driver mobile scope | Android-first |
+| Backend | Planned later |
+| Real Pix integration | Not implemented yet |
+| Wallet automation | Not implemented yet |
+| PSP/webhooks | Not implemented yet |
 
 ---
 
-## Planned Backend Architecture — Architecture backend prévue
-
-**EN:** Planned but **not implemented**: Firebase Auth, Firestore, Firebase Storage, Cloud Functions (JavaScript, not TypeScript), Firebase Cloud Messaging, Firebase Security Rules.
-
-Responsibilities: driver approval, founder assignment, wallet commission debit, wallet top-up approval, ride-lifecycle events, notifications, admin operational logs.
-
-Planned Firestore collections: `serviceAreas`, `drivers`, `passengers`, `admins`, `rides`, `wallets`, `walletTransactions`, `driverDocuments`, `founderPromotions`, `topupRequests`, `adminLogs`, `notifications`.
-
-Ride statuses: `requested`, `searching_driver`, `driver_assigned`, `driver_accepted`, `driver_arrived_pickup`, `passenger_onboard`, `in_progress`, `waiting_payment`, `payment_received`, `completed`, `cancelled`.
-
-Driver statuses: `registered`, `onboarding_pending`, `documents_pending`, `pending_review`, `approved`, `rejected`, `suspended`.
-
-Navigation/GPS: no in-app turn-by-turn in V1 — rides open Google Maps / Waze externally; every ride carries `pickup` and `destination` with `address`, `lat`, `lng`.
-
-**FR:** Prévu mais **non implémenté** : Firebase Auth, Firestore, Firebase Storage, Cloud Functions (JavaScript, pas TypeScript), Firebase Cloud Messaging, Firebase Security Rules.
-
-Responsabilités : approbation des chauffeurs, attribution du statut fondateur, débit de commission, approbation des recharges, événements du cycle de vie des courses, notifications, journaux opérationnels admin.
-
-Collections Firestore prévues : voir la liste ci-dessus.
-
-Statuts des courses et des chauffeurs : voir les listes ci-dessus.
-
-Navigation/GPS : pas de navigation virage par virage intégrée en V1 — les courses ouvrent Google Maps / Waze en externe ; chaque course porte `pickup` et `destination` avec `address`, `lat`, `lng`.
-
----
-
-## Main Routes — Routes principales
-
-**EN:** (Expo Router, file-based; mock-only)
-- `/` — landing page (passenger-first, driver opportunity, discreet admin link).
-- `/select-route` — passenger destination / ride request (mock).
-- `/onboarding` — driver onboarding entry (mock).
-- `/admin-login` — discreet internal admin access.
-- Route groups under `src/app/`: `(passenger)`, `(driver)`, `(admin)`, `(auth)`.
-
-**FR :** (Expo Router, basé sur les fichiers ; mock uniquement)
-- `/` — landing page (passager d'abord, offre chauffeur, lien admin discret).
-- `/select-route` — destination passager / demande de course (mock).
-- `/onboarding` — entrée d'onboarding chauffeur (mock).
-- `/admin-login` — accès admin interne discret.
-- Groupes de routes sous `src/app/` : `(passenger)`, `(driver)`, `(admin)`, `(auth)`.
-
----
-
-## Development Commands — Commandes de développement
+## 17. Development
 
 ```bash
-# Install dependencies / Installer les dépendances
 npm install
-
-# Start (Android-first) / Démarrer (priorité Android)
 npx expo start
-
-# Web smoke test / Test rapide web
 npx expo start --web --clear
 ```
 
-**EN:** Test in an incognito window if Chrome extension errors appear. JSHint / VS Code extension errors are not app errors. Do not run `npm run lint` or install packages without explicit approval.
-
-**FR :** Tester en navigation privée si des erreurs d'extensions Chrome apparaissent. Les erreurs JSHint / extensions VS Code ne sont pas des erreurs d'appli. Ne pas exécuter `npm run lint` ni installer de paquets sans accord explicite.
-
----
-
-## Known Limitations — Limitations connues
-
-**EN:**
-- Mock-only: no persistence, no real auth, no real Pix, no real maps/GPS.
-- Single service area (Horizonte) in V1.
-- No background location tracking and no in-app navigation engine.
-- Web is for review only; the product is Android-first.
-
-**FR:**
-- Mock uniquement : pas de persistance, pas d'auth réelle, pas de Pix réel, pas de cartes/GPS réels.
-- Une seule zone de service (Horizonte) en V1.
-- Pas de suivi de localisation en arrière-plan ni de moteur de navigation intégré.
-- Le web sert uniquement à la revue ; le produit est orienté Android.
+- Expo Web is for **smoke testing / visual review** only.
+- Use an incognito window if browser extensions cause errors.
+- Do **not** treat browser-extension errors as app errors.
 
 ---
 
-## Roadmap — Feuille de route
+## 18. Repository rules
 
-**EN:**
-1. **Step 1 (current):** mock-only landing + core screens, accepted for now.
-2. **Auth screens (next, when approved):** passenger login, passenger create account, driver login, driver create account, admin login.
-3. **Driver onboarding & documents** with admin approval flow.
-4. **Backend (Firebase, when approved):** auth, Firestore data model, wallet/commission logic, founder assignment, ride lifecycle, notifications.
-5. **External navigation handoff** (Google Maps / Waze) for active rides.
-6. **Multi-service-area** expansion beyond Horizonte.
-
-**FR:**
-1. **Step 1 (actuel) :** landing + écrans clés en mock, acceptés pour l'instant.
-2. **Écrans d'authentification (prochaine étape, après accord) :** connexion passager, création de compte passager, connexion chauffeur, création de compte chauffeur, connexion admin.
-3. **Onboarding & documents chauffeur** avec flux d'approbation admin.
-4. **Backend (Firebase, après accord) :** auth, modèle de données Firestore, logique portefeuille/commission, attribution fondateur, cycle de vie des courses, notifications.
-5. **Relais de navigation externe** (Google Maps / Waze) pour les courses actives.
-6. **Extension multi-zones** au-delà d'Horizonte.
+| Rule | Decision |
+| ------------- | ----------------------------------------------- |
+| Secrets | Never commit secrets |
+| Language | JavaScript/JSX only |
+| TypeScript | Do not add |
+| Backend | Do not implement without approval |
+| Firebase | Planned later |
+| Payments | No real Pix/PSP implementation without approval |
+| Scope control | Keep MVP simple and market-ready |
 
 ---
 
-> See `CLAUDE.md` for the full set of working rules and constraints for AI-assisted development.
-> _Voir `CLAUDE.md` pour l'ensemble des règles et contraintes de développement assisté par IA._
+> For the full bilingual (EN/FR) product, business, technical, UX, and anti-fraud context that guides development and AI-assisted sessions, see [`CLAUDE.md`](./CLAUDE.md).
