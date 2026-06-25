@@ -41,3 +41,27 @@ example
 # generated native folders
 /ios
 /android
+
+# Local / accidental files
+*.lnk
+_handoff/
+*handoff*
+pasted-*
+*.log
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local / accidental files
+*.lnk
+_handoff/
+*handoff*
+pasted-*
+*.log
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
