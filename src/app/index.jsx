@@ -172,7 +172,7 @@ export default function Landing() {
           </Text>
         </View>
 
-        <CtaButton label="Dirigir com DriveLocal" onPress={() => router.push('/onboarding')} kind="secondary" />
+        <CtaButton label="Dirigir com DriveLocal" onPress={() => router.push('/email-register')} kind="secondary" />
       </View>
 
       {/* Discreet internal access (link, not a button) */}
