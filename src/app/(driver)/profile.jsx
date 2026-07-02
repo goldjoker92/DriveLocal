@@ -1,7 +1,7 @@
 // ============================================================
 // Driver profile (route "/profile"). Iteration 1B.
 // Charge/sauvegarde le profil chauffeur dans Firestore drivers/{uid}.
-// Champs : fullName, cpf (validé), whatsApp, pixKeyType (select), pixKey.
+// Champs : fullName, cpf (validÃƒÂ©), whatsApp, pixKeyType (select), pixKey.
 // ============================================================
 
 import { useEffect, useState } from 'react';
@@ -16,11 +16,11 @@ import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
-import { getDriver, updateDriverProfile, checkDuplicates } from '../../services/driverService';
+import { getDriver, updateDriverProfile } from '../../services/driverService';
 import { validateCPF } from '../../utils/validation';
 
-// Options de type de clé Pix (libellés PT-BR).
-const PIX_KEY_TYPES = ['CPF', 'Telefone', 'E-mail', 'Chave aleatória'];
+// Options de type de clÃƒÂ© Pix (libellÃƒÂ©s PT-BR).
+const PIX_KEY_TYPES = ['CPF', 'Telefone', 'E-mail', 'Chave aleatÃƒÂ³ria'];
 
 // Petit message d'erreur/alerte sous un champ.
 function FieldHint({ message, tone = 'danger' }) {
@@ -29,7 +29,7 @@ function FieldHint({ message, tone = 'danger' }) {
   return <Text style={[{ fontFamily, color }, typography.small]}>{message}</Text>;
 }
 
-// Sélecteur simple (chips) pour le type de clé Pix.
+// SÃƒÂ©lecteur simple (chips) pour le type de clÃƒÂ© Pix.
 function PixKeyTypeSelect({ value, onChange }) {
   return (
     <View style={{ gap: spacing.xs }}>
@@ -74,7 +74,7 @@ export default function Profile() {
   const [errors, setErrors] = useState({}); // erreurs bloquantes par champ
   const [warnings, setWarnings] = useState({}); // alertes doublon (non bloquantes)
 
-  // Charge les données existantes au montage.
+  // Charge les donnÃƒÂ©es existantes au montage.
   useEffect(() => {
     let active = true;
     const uid = auth.currentUser && auth.currentUser.uid;
@@ -100,7 +100,7 @@ export default function Profile() {
     };
   }, []);
 
-  // Validation CPF en temps réel pendant la saisie.
+  // Validation CPF en temps rÃƒÂ©el pendant la saisie.
   function onChangeCpf(text) {
     setCpf(text);
     if (text.trim() === '') {
@@ -111,20 +111,20 @@ export default function Profile() {
     setErrors((e) => ({ ...e, cpf: res.valid ? '' : res.message }));
   }
 
-  // Sauvegarde le profil après validation + contrôle de doublons.
+  // Sauvegarde le profil aprÃƒÂ¨s validation + contrÃƒÂ´le de doublons.
   async function handleSave() {
     const uid = auth.currentUser && auth.currentUser.uid;
     if (!uid) {
-      setErrors({ form: 'Sessão expirada. Entre novamente.' });
+      setErrors({ form: 'SessÃƒÂ£o expirada. Entre novamente.' });
       return;
     }
 
     // 1. Valide le CPF.
     const cpfRes = validateCPF(cpf);
-    // 2. Vérifie que tous les champs sont remplis.
+    // 2. VÃƒÂ©rifie que tous les champs sont remplis.
     const nextErrors = {};
     if (!fullName.trim()) nextErrors.fullName = 'Informe seu nome completo.';
-    if (!cpfRes.valid) nextErrors.cpf = cpfRes.message || 'CPF inválido.';
+    if (!cpfRes.valid) nextErrors.cpf = cpfRes.message || 'CPF invÃƒÂ¡lido.';
     if (!whatsApp.trim()) nextErrors.whatsApp = 'Informe seu WhatsApp.';
     if (!pixKeyType) nextErrors.pixKeyType = 'Escolha o tipo de chave Pix.';
     if (!pixKey.trim()) nextErrors.pixKey = 'Informe sua chave Pix.';
@@ -137,19 +137,9 @@ export default function Profile() {
 
     setSaving(true);
     try {
-      // 3. Contrôle de doublons (CPF, WhatsApp, clé Pix). Plaque non concernée ici.
-      const dup = await checkDuplicates(cpf.trim(), whatsApp.trim(), null, pixKey.trim(), uid);
-      // 4. Affiche les warnings par champ — sans bloquer (l'admin décide).
-      const nextWarnings = {};
-      if (dup.cpf) nextWarnings.cpf = 'Atenção: este CPF já consta em outro cadastro.';
-      if (dup.phone) nextWarnings.whatsApp = 'Atenção: este WhatsApp já consta em outro cadastro.';
-      if (dup.pixKey) nextWarnings.pixKey = 'Atenção: esta chave Pix já consta em outro cadastro.';
-      setWarnings(nextWarnings);
-      if (Object.keys(nextWarnings).length > 0) {
-        console.log('[PROFILE] duplicate warnings', JSON.stringify(Object.keys(nextWarnings)));
-      }
-
-      // 5. Sauvegarde -> profileStatus passe à "complete" si tout est rempli.
+      // 3. Sauvegarde -> profileStatus passe à "complete" si tout est rempli.
+      // Le contrôle de doublons global est réservé à l'admin pour respecter les règles Firestore.
+      setWarnings({});
       await updateDriverProfile(uid, {
         fullName: fullName.trim(),
         cpf: cpf.trim(),
@@ -162,7 +152,7 @@ export default function Profile() {
       router.replace('/(driver)/vehicle');
     } catch (e) {
       console.log('[PROFILE] save error', e.message);
-      setErrors({ form: 'Não foi possível salvar. Tente novamente.' });
+      setErrors({ form: 'NÃƒÂ£o foi possÃƒÂ­vel salvar. Tente novamente.' });
       setSaving(false);
     }
   }

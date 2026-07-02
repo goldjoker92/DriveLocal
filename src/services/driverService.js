@@ -1,4 +1,4 @@
-// Driver service — Firestore reads/writes for the driver lifecycle and the
+// Driver service â€” Firestore reads/writes for the driver lifecycle and the
 // admin approve/reject flow. Iteration 1A (Firebase real backend).
 
 import {
@@ -65,21 +65,10 @@ export async function updateDriverProfile(driverId, profileData) {
 
 // Runs duplicate checks, then moves the driver to "pending_review".
 export async function submitForReview(driverId) {
-  const driver = (await getDriver(driverId)) || {};
-  const duplicates = await checkDuplicates(
-    driver.cpf,
-    driver.phone || driver.whatsApp,
-    driver.vehiclePlate,
-    driver.pixKey,
-    driverId
-  );
-
-  const hasDuplicate =
-    duplicates.cpf || duplicates.phone || duplicates.vehiclePlate || duplicates.pixKey;
-
   await updateDoc(doc(db, 'drivers', driverId), {
     verificationStatus: 'pending_review',
-    duplicateCheckStatus: hasDuplicate ? 'warning' : 'clear',
+    duplicateCheckStatus: 'pending_admin_review',
+    submittedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }
@@ -181,7 +170,7 @@ async function fieldExists(field, value, excludeUid) {
 
 // ---- Iteration 1B additions ------------------------------------------------
 
-// Champs véhicule obligatoires pour passer vehicleStatus à "complete".
+// Champs vÃ©hicule obligatoires pour passer vehicleStatus Ã  "complete".
 const REQUIRED_VEHICLE_FIELDS = [
   'vehicleType',
   'vehicleBrand',
@@ -204,7 +193,7 @@ const DOC_FIELD_MAP = {
 // Documents obligatoires pour tous + le certificat motofrete pour la moto.
 const BASE_REQUIRED_DOCS = ['selfie', 'cnh_frente', 'cnh_verso', 'crlv', 'vehicle_photo'];
 
-// Met à jour les infos véhicule et recalcule vehicleStatus.
+// Met Ã  jour les infos vÃ©hicule et recalcule vehicleStatus.
 export async function updateVehicleInfo(driverId, vehicleData) {
   console.log('[DRIVER] updateVehicleInfo driverId=', driverId);
   const current = (await getDriver(driverId)) || {};
@@ -223,11 +212,11 @@ export async function updateVehicleInfo(driverId, vehicleData) {
   });
 }
 
-// Enregistre l'URL d'un document uploadé et passe son statut à "submitted".
+// Enregistre l'URL d'un document uploadÃ© et passe son statut Ã  "submitted".
 export async function updateDocumentUrl(driverId, docType, url) {
   console.log('[DRIVER] updateDocumentUrl docType=', docType);
   const fields = DOC_FIELD_MAP[docType];
-  if (!fields) throw new Error(`updateDocumentUrl: docType inválido (${docType})`);
+  if (!fields) throw new Error(`updateDocumentUrl: docType invÃ¡lido (${docType})`);
 
   await updateDoc(doc(db, 'drivers', driverId), {
     [fields.url]: url,
@@ -236,7 +225,7 @@ export async function updateDocumentUrl(driverId, docType, url) {
   });
 }
 
-// Vérifie que tous les documents obligatoires ont le statut "submitted".
+// VÃ©rifie que tous les documents obligatoires ont le statut "submitted".
 // La moto exige en plus motofrete_cert. Retourne { allSubmitted, missing }.
 export function checkAllDocumentsSubmitted(driver, vehicleType) {
   const d = driver || {};
