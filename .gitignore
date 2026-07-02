@@ -9,8 +9,6 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Firebase config (secrets — do not commit)
-google-services.json
 
 # Native
 .kotlin/
