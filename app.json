@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "DriveLocal",
-    "slug": "DriveLocal",
+    "slug": "drivelocal",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -42,6 +42,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e092828d-247b-4a55-a0fc-1b691f5b065a"
+      }
+    },
+    "owner": "goldjoker92"
   }
 }
