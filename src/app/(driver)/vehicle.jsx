@@ -1,7 +1,7 @@
 // ============================================================
-// Écran véhicule chauffeur DriveLocal — Iteration 1B
+// Ã‰cran vÃ©hicule chauffeur DriveLocal â€” Iteration 1B
 // Route: /(driver)/vehicle
-// Charge/sauvegarde les infos véhicule dans Firestore drivers/{uid}.
+// Charge/sauvegarde les infos vÃ©hicule dans Firestore drivers/{uid}.
 // ============================================================
 
 import { useEffect, useState } from 'react';
@@ -16,7 +16,7 @@ import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
-import { getDriver, updateVehicleInfo, checkDuplicates } from '../../services/driverService';
+import { getDriver, updateVehicleInfo } from '../../services/driverService';
 import { validatePlate, validateVehicleYear } from '../../utils/validation';
 import { VEHICLE_MOTO, VEHICLE_CAR, VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 
@@ -32,7 +32,7 @@ function VehicleTypeRadio({ value, onChange }) {
   const options = [VEHICLE_MOTO, VEHICLE_CAR];
   return (
     <View style={{ gap: spacing.xs }}>
-      <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Tipo de veículo</Text>
+      <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Tipo de veÃ­culo</Text>
       <View style={{ flexDirection: 'row', gap: spacing.sm }}>
         {options.map((opt) => {
           const selected = value === opt;
@@ -75,7 +75,7 @@ export default function Vehicle() {
   const [errors, setErrors] = useState({});
   const [warnings, setWarnings] = useState({});
 
-  // Charge les données existantes au montage.
+  // Charge les donnÃ©es existantes au montage.
   useEffect(() => {
     let active = true;
     const uid = auth.currentUser && auth.currentUser.uid;
@@ -102,17 +102,17 @@ export default function Vehicle() {
     };
   }, []);
 
-  // Valide puis sauvegarde les infos véhicule.
+  // Valide puis sauvegarde les infos vÃ©hicule.
   async function handleSave() {
     const uid = auth.currentUser && auth.currentUser.uid;
     if (!uid) {
-      setErrors({ form: 'Sessão expirada. Entre novamente.' });
+      setErrors({ form: 'SessÃ£o expirada. Entre novamente.' });
       return;
     }
 
     // 1. Champs obligatoires.
     const nextErrors = {};
-    if (!vehicleType) nextErrors.vehicleType = 'Escolha o tipo de veículo.';
+    if (!vehicleType) nextErrors.vehicleType = 'Escolha o tipo de veÃ­culo.';
     if (!vehicleBrand.trim()) nextErrors.vehicleBrand = 'Informe a marca.';
     if (!vehicleModel.trim()) nextErrors.vehicleModel = 'Informe o modelo.';
     if (!vehicleColor.trim()) nextErrors.vehicleColor = 'Informe a cor.';
@@ -121,7 +121,7 @@ export default function Vehicle() {
     const plateRes = validatePlate(vehiclePlate);
     if (!plateRes.valid) nextErrors.vehiclePlate = plateRes.message;
 
-    // 3. Année.
+    // 3. AnnÃ©e.
     const yearRes = validateVehicleYear(vehicleYear);
     if (!yearRes.valid) nextErrors.vehicleYear = yearRes.message;
 
@@ -133,16 +133,9 @@ export default function Vehicle() {
 
     setSaving(true);
     try {
-      // 4. Contrôle de doublon sur la plaque (l'admin décide en cas de warning).
-      const dup = await checkDuplicates(null, null, vehiclePlate.trim().toUpperCase(), null, uid);
-      if (dup.vehiclePlate) {
-        console.log('[VEHICLE] duplicate plate warning');
-        setWarnings({ vehiclePlate: 'Atenção: esta placa já consta em outro cadastro.' });
-      } else {
-        setWarnings({});
-      }
-
-      // 5. Sauvegarde -> vehicleStatus passe à "complete".
+      // 4. Contrôle de doublon réservé à l'admin pour éviter une lecture globale de drivers côté chauffeur.
+      setWarnings({});
+      // 5. Sauvegarde -> vehicleStatus passe Ã  "complete".
       await updateVehicleInfo(uid, {
         vehicleType,
         vehicleBrand: vehicleBrand.trim(),
@@ -156,7 +149,7 @@ export default function Vehicle() {
       router.replace('/(driver)/documents');
     } catch (e) {
       console.log('[VEHICLE] save error', e.message);
-      setErrors({ form: 'Não foi possível salvar. Tente novamente.' });
+      setErrors({ form: 'NÃ£o foi possÃ­vel salvar. Tente novamente.' });
       setSaving(false);
     }
   }
@@ -164,7 +157,7 @@ export default function Vehicle() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Seu veículo" subtitle="Etapa 2 de 3" onBack={() => router.back()} />
+        <Header title="Seu veÃ­culo" subtitle="Etapa 2 de 3" onBack={() => router.back()} />
         <AppCard>
           {loading ? (
             <Text style={[{ fontFamily, color: colors.textMuted }, typography.body]}>Carregando...</Text>

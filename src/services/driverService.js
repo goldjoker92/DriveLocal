@@ -1,4 +1,4 @@
-// Driver service â€” Firestore reads/writes for the driver lifecycle and the
+// Driver service Ã¢â‚¬â€ Firestore reads/writes for the driver lifecycle and the
 // admin approve/reject flow. Iteration 1A (Firebase real backend).
 
 import {
@@ -29,13 +29,8 @@ const REQUIRED_PROFILE_FIELDS = [
   'fullName',
   'whatsApp',
   'cpf',
-  'vehicleType',
   'pixKeyType',
   'pixKey',
-  'vehiclePlate',
-  'vehicleBrand',
-  'vehicleModel',
-  'vehicleColor',
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -170,7 +165,7 @@ async function fieldExists(field, value, excludeUid) {
 
 // ---- Iteration 1B additions ------------------------------------------------
 
-// Champs vÃ©hicule obligatoires pour passer vehicleStatus Ã  "complete".
+// Champs vÃƒÂ©hicule obligatoires pour passer vehicleStatus ÃƒÂ  "complete".
 const REQUIRED_VEHICLE_FIELDS = [
   'vehicleType',
   'vehicleBrand',
@@ -193,7 +188,7 @@ const DOC_FIELD_MAP = {
 // Documents obligatoires pour tous + le certificat motofrete pour la moto.
 const BASE_REQUIRED_DOCS = ['selfie', 'cnh_frente', 'cnh_verso', 'crlv', 'vehicle_photo'];
 
-// Met Ã  jour les infos vÃ©hicule et recalcule vehicleStatus.
+// Met ÃƒÂ  jour les infos vÃƒÂ©hicule et recalcule vehicleStatus.
 export async function updateVehicleInfo(driverId, vehicleData) {
   console.log('[DRIVER] updateVehicleInfo driverId=', driverId);
   const current = (await getDriver(driverId)) || {};
@@ -212,11 +207,11 @@ export async function updateVehicleInfo(driverId, vehicleData) {
   });
 }
 
-// Enregistre l'URL d'un document uploadÃ© et passe son statut Ã  "submitted".
+// Enregistre l'URL d'un document uploadÃƒÂ© et passe son statut ÃƒÂ  "submitted".
 export async function updateDocumentUrl(driverId, docType, url) {
   console.log('[DRIVER] updateDocumentUrl docType=', docType);
   const fields = DOC_FIELD_MAP[docType];
-  if (!fields) throw new Error(`updateDocumentUrl: docType invÃ¡lido (${docType})`);
+  if (!fields) throw new Error(`updateDocumentUrl: docType invÃƒÂ¡lido (${docType})`);
 
   await updateDoc(doc(db, 'drivers', driverId), {
     [fields.url]: url,
@@ -225,7 +220,7 @@ export async function updateDocumentUrl(driverId, docType, url) {
   });
 }
 
-// VÃ©rifie que tous les documents obligatoires ont le statut "submitted".
+// VÃƒÂ©rifie que tous les documents obligatoires ont le statut "submitted".
 // La moto exige en plus motofrete_cert. Retourne { allSubmitted, missing }.
 export function checkAllDocumentsSubmitted(driver, vehicleType) {
   const d = driver || {};

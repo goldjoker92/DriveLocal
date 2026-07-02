@@ -1,0 +1,710 @@
+
+
+===== package.json =====
+
+{
+  "name": "drivelocal",
+  "main": "expo-router/entry",
+  "version": "1.0.0",
+  "dependencies": {
+    "@expo/ui": "~56.0.19",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-firebase/app": "^25.1.0",
+    "@react-native-firebase/storage": "^25.1.0",
+    "expo": "~56.0.13",
+    "expo-constants": "~56.0.18",
+    "expo-dev-client": "~56.0.21",
+    "expo-device": "~56.0.4",
+    "expo-font": "~56.0.7",
+    "expo-glass-effect": "~56.0.4",
+    "expo-image": "~56.0.11",
+    "expo-image-manipulator": "~56.0.20",
+    "expo-image-picker": "~56.0.19",
+    "expo-linking": "~56.0.14",
+    "expo-router": "~56.2.12",
+    "expo-splash-screen": "~56.0.11",
+    "expo-status-bar": "~56.0.4",
+    "expo-symbols": "~56.0.6",
+    "expo-system-ui": "~56.0.5",
+    "expo-web-browser": "~56.0.5",
+    "firebase": "^12.15.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-gesture-handler": "~2.31.1",
+    "react-native-reanimated": "4.3.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "4.25.2",
+    "react-native-web": "~0.21.0",
+    "react-native-worklets": "0.8.3"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "reset-project": "node ./scripts/reset-project.js",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "expo lint",
+    "start:dev": "expo start --dev-client"
+  },
+  "private": true
+}
+
+
+===== app.json =====
+
+{
+  "expo": {
+    "name": "DriveLocal",
+    "slug": "drivelocal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "drivelocal",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./assets/expo.icon"
+    },
+    "android": {
+      "package": "com.drivelocal.app",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "@react-native-firebase/app",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#208AEF",
+          "android": {
+            "image": "./assets/images/splash-icon.png",
+            "imageWidth": 76
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e092828d-247b-4a55-a0fc-1b691f5b065a"
+      }
+    },
+    "owner": "goldjoker92"
+  }
+}
+
+
+===== app.config.js =====
+
+const appJson = require("./app.json");
+
+const expoConfig = appJson.expo;
+
+module.exports = ({ config }) => ({
+  ...config,
+  ...expoConfig,
+  android: {
+    ...expoConfig.android,
+    googleServicesFile:
+      process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
+  },
+});
+
+
+===== src\config\firebase.js =====
+
+import { initializeApp, getApp, getApps } from "firebase/app";
+import {
+  initializeAuth,
+  getAuth,
+  getReactNativePersistence,
+} from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
+import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCjOL8bIjXIvWqdnda5vpdBuCHIaM-liBg",
+  authDomain: "drivelocal-dev.firebaseapp.com",
+  projectId: "drivelocal-dev",
+  storageBucket: "drivelocal-dev.firebasestorage.app",
+  messagingSenderId: "539625523844",
+  appId: "1:539625523844:web:00fcd2e9af3432f00090d1"
+};
+
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+
+const appStorage = ReactNativeAsyncStorage;
+
+let auth;
+
+try {
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(appStorage),
+  });
+} catch (error) {
+  auth = getAuth(app);
+}
+
+const db = getFirestore(app);
+const storage = getStorage(app);
+
+export { app, auth, db, storage };
+
+
+===== src\services\authService.js =====
+
+// Auth service — Firebase Auth (email/password) + driver/admin role resolution.
+// Iteration 1A. No WhatsApp OTP, no Storage, no push notifications here.
+
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { auth, db } from '../config/firebase';
+import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
+
+// Creates a Firebase Auth user, then a drivers/{uid} document in "draft" state.
+// Returns the Firebase user.
+export async function registerDriver(email, password) {
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  const user = credential.user;
+
+  await setDoc(doc(db, 'drivers', user.uid), {
+    uid: user.uid,
+    email,
+    verificationStatus: 'draft',
+    profileStatus: 'incomplete',
+    vehicleStatus: 'incomplete',
+    documentsStatus: 'missing',
+    selfieStatus: 'missing',
+    duplicateCheckStatus: 'clear',
+    serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return user;
+}
+
+// Signs the user in, then resolves their role.
+// Order: admins/{uid} first, then drivers/{uid}, otherwise "unknown".
+// Returns { user, role, driver? }.
+export async function loginUser(email, password) {
+  const credential = await signInWithEmailAndPassword(auth, email, password);
+  const user = credential.user;
+
+  const adminSnap = await getDoc(doc(db, 'admins', user.uid));
+  if (adminSnap.exists()) {
+    return { user, role: 'admin' };
+  }
+
+  const driverSnap = await getDoc(doc(db, 'drivers', user.uid));
+  if (driverSnap.exists()) {
+    return { user, role: 'driver', driver: driverSnap.data() };
+  }
+
+  return { user, role: 'unknown' };
+}
+
+// Signs the current user out of Firebase Auth.
+export async function logoutUser() {
+  await signOut(auth);
+}
+
+// Returns the current Firebase Auth user (or null).
+export function getCurrentUser() {
+  return auth.currentUser;
+}
+
+
+===== src\services\driverService.js =====
+
+// Driver service â€” Firestore reads/writes for the driver lifecycle and the
+// admin approve/reject flow. Iteration 1A (Firebase real backend).
+
+import {
+  doc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  collection,
+  query,
+  where,
+  arrayUnion,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
+import {
+  FOUNDER_DEFAULT_MAX_DRIVERS,
+  FOUNDER_DEFAULT_COMMISSION_FREE_DAYS,
+  FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS,
+} from '../constants/founderOfferRules';
+import {
+  getApprovedCount,
+  incrementApprovedCount,
+} from './founderService';
+
+// Profile fields that must all be filled for profileStatus to be "complete".
+const REQUIRED_PROFILE_FIELDS = [
+  'fullName',
+  'whatsApp',
+  'cpf',
+  'vehicleType',
+  'pixKeyType',
+  'pixKey',
+  'vehiclePlate',
+  'vehicleBrand',
+  'vehicleModel',
+  'vehicleColor',
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Reads drivers/{driverId}. Returns the document data, or null when missing.
+export async function getDriver(driverId) {
+  const snap = await getDoc(doc(db, 'drivers', driverId));
+  return snap.exists() ? snap.data() : null;
+}
+
+// Updates the driver profile and recomputes profileStatus.
+export async function updateDriverProfile(driverId, profileData) {
+  const current = (await getDriver(driverId)) || {};
+  const merged = { ...current, ...profileData };
+
+  const complete = REQUIRED_PROFILE_FIELDS.every((field) => {
+    const value = merged[field];
+    return value !== undefined && value !== null && String(value).trim() !== '';
+  });
+
+  await updateDoc(doc(db, 'drivers', driverId), {
+    ...profileData,
+    profileStatus: complete ? 'complete' : 'incomplete',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// Runs duplicate checks, then moves the driver to "pending_review".
+export async function submitForReview(driverId) {
+  await updateDoc(doc(db, 'drivers', driverId), {
+    verificationStatus: 'pending_review',
+    duplicateCheckStatus: 'pending_admin_review',
+    submittedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// Returns all drivers currently waiting for admin review.
+export async function getPendingDrivers() {
+  const q = query(
+    collection(db, 'drivers'),
+    where('verificationStatus', '==', 'pending_review')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// Admin approves a driver. Applies founder or standard (#101+) rules and
+// increments the per-service-area approved counter.
+export async function approveDriver(driverId, adminUid) {
+  const driver = (await getDriver(driverId)) || {};
+  const serviceAreaId = driver.serviceAreaId || SERVICE_AREA_HORIZONTE_CE_BR;
+
+  const count = await getApprovedCount(serviceAreaId);
+  const isFounder = count < FOUNDER_DEFAULT_MAX_DRIVERS;
+  const now = new Date();
+
+  const base = {
+    verificationStatus: 'approved',
+    reviewedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    approvalNumber: count + 1,
+    statusHistory: arrayUnion({
+      status: 'approved',
+      changedAt: now,
+      changedBy: adminUid,
+    }),
+  };
+
+  let roleFields;
+  if (isFounder) {
+    roleFields = {
+      founderEligible: true,
+      founderGrantedAt: serverTimestamp(),
+      founderExpiresAt: new Date(now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS),
+      commissionRate: 0,
+      subscriptionFree: true,
+      subscriptionFreeUntil: new Date(now.getTime() + FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS * DAY_MS),
+    };
+  } else {
+    roleFields = {
+      founderEligible: false,
+      commissionRate: 0,
+      subscriptionActive: true,
+      subscriptionStartAt: serverTimestamp(),
+      subscriptionFreeUntil: null,
+    };
+  }
+
+  await updateDoc(doc(db, 'drivers', driverId), { ...base, ...roleFields });
+  await incrementApprovedCount(serviceAreaId);
+}
+
+// Admin rejects a driver with a reason.
+export async function rejectDriver(driverId, adminUid, rejectionReason) {
+  const now = new Date();
+  await updateDoc(doc(db, 'drivers', driverId), {
+    verificationStatus: 'rejected',
+    reviewedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    rejectionReason,
+    statusHistory: arrayUnion({
+      status: 'rejected',
+      changedAt: now,
+      changedBy: adminUid,
+    }),
+  });
+}
+
+// Checks whether the given identity values already exist on another driver.
+// excludeUid is the current driver, so it is not compared against itself.
+// Returns { cpf, phone, vehiclePlate, pixKey } as booleans.
+export async function checkDuplicates(cpf, phone, vehiclePlate, pixKey, excludeUid) {
+  const result = {
+    cpf: await fieldExists('cpf', cpf, excludeUid),
+    phone: await fieldExists('phone', phone, excludeUid),
+    vehiclePlate: await fieldExists('vehiclePlate', vehiclePlate, excludeUid),
+    pixKey: await fieldExists('pixKey', pixKey, excludeUid),
+  };
+  return result;
+}
+
+// True when another driver document (id != excludeUid) has field == value.
+async function fieldExists(field, value, excludeUid) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return false;
+  }
+  const q = query(collection(db, 'drivers'), where(field, '==', value));
+  const snap = await getDocs(q);
+  return snap.docs.some((d) => d.id !== excludeUid);
+}
+
+// ---- Iteration 1B additions ------------------------------------------------
+
+// Champs vÃ©hicule obligatoires pour passer vehicleStatus Ã  "complete".
+const REQUIRED_VEHICLE_FIELDS = [
+  'vehicleType',
+  'vehicleBrand',
+  'vehicleModel',
+  'vehicleColor',
+  'vehiclePlate',
+  'vehicleYear',
+];
+
+// Mapping docType -> { champ URL, champ statut } sur le document driver.
+const DOC_FIELD_MAP = {
+  selfie: { url: 'selfieUrl', status: 'selfieStatus' },
+  cnh_frente: { url: 'cnhFrenteUrl', status: 'cnhFrenteStatus' },
+  cnh_verso: { url: 'cnhVersoUrl', status: 'cnhVersoStatus' },
+  crlv: { url: 'crlvUrl', status: 'crlvStatus' },
+  vehicle_photo: { url: 'vehiclePhotoUrl', status: 'vehiclePhotoStatus' },
+  motofrete_cert: { url: 'motofreteUrl', status: 'motofreteStatus' },
+};
+
+// Documents obligatoires pour tous + le certificat motofrete pour la moto.
+const BASE_REQUIRED_DOCS = ['selfie', 'cnh_frente', 'cnh_verso', 'crlv', 'vehicle_photo'];
+
+// Met Ã  jour les infos vÃ©hicule et recalcule vehicleStatus.
+export async function updateVehicleInfo(driverId, vehicleData) {
+  console.log('[DRIVER] updateVehicleInfo driverId=', driverId);
+  const current = (await getDriver(driverId)) || {};
+  const merged = { ...current, ...vehicleData };
+
+  // vehicleStatus "complete" seulement si tous les champs obligatoires sont remplis.
+  const complete = REQUIRED_VEHICLE_FIELDS.every((field) => {
+    const value = merged[field];
+    return value !== undefined && value !== null && String(value).trim() !== '';
+  });
+
+  await updateDoc(doc(db, 'drivers', driverId), {
+    ...vehicleData,
+    vehicleStatus: complete ? 'complete' : 'incomplete',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// Enregistre l'URL d'un document uploadÃ© et passe son statut Ã  "submitted".
+export async function updateDocumentUrl(driverId, docType, url) {
+  console.log('[DRIVER] updateDocumentUrl docType=', docType);
+  const fields = DOC_FIELD_MAP[docType];
+  if (!fields) throw new Error(`updateDocumentUrl: docType invÃ¡lido (${docType})`);
+
+  await updateDoc(doc(db, 'drivers', driverId), {
+    [fields.url]: url,
+    [fields.status]: 'submitted',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// VÃ©rifie que tous les documents obligatoires ont le statut "submitted".
+// La moto exige en plus motofrete_cert. Retourne { allSubmitted, missing }.
+export function checkAllDocumentsSubmitted(driver, vehicleType) {
+  const d = driver || {};
+  const required = [...BASE_REQUIRED_DOCS];
+  if (vehicleType === 'moto') required.push('motofrete_cert');
+
+  const missing = required.filter((docType) => {
+    const fields = DOC_FIELD_MAP[docType];
+    return d[fields.status] !== 'submitted';
+  });
+
+  console.log('[DRIVER] checkAllDocuments missing=', JSON.stringify(missing));
+  return { allSubmitted: missing.length === 0, missing };
+}
+
+
+===== src\services\storageService.js =====
+
+// ============================================================
+// Storage service DriveLocal — Iteration 1B
+// Basé sur uploadCore.native.js de VigiApp
+// Upload via @react-native-firebase/storage putFile()
+// Zéro blob, zéro fetch() — putFile() accepte file:// et content://
+// Fallback content:// -> cache file:// via expo-file-system (legacy)
+// IMPORTANT: actif uniquement après dev build Android
+// // TODO: ce service nécessite @react-native-firebase et un dev build Android
+// // Sur web il échouera — prévu, l'upload réel se teste uniquement sur Android
+// ============================================================
+
+import { getApp } from '@react-native-firebase/app';
+import storage from '@react-native-firebase/storage';
+// SDK 56 : l'API legacy (cacheDirectory/copyAsync/getInfoAsync) vit sous
+// 'expo-file-system/legacy' — l'entrée principale lèverait une erreur runtime.
+import * as FileSystem from 'expo-file-system/legacy';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { Platform } from 'react-native';
+
+// Constantes
+const NS = '[STORAGE]';
+const MAX_WIDTH = 1200;
+const COMPRESS_QUALITY = 0.7;
+const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 Mo
+
+// Documents DriveLocal autorisés
+const DRIVER_DOCS = Object.freeze({
+  selfie: 'selfie',
+  cnh_frente: 'cnh_frente',
+  cnh_verso: 'cnh_verso',
+  crlv: 'crlv',
+  vehicle_photo: 'vehicle_photo',
+  motofrete_cert: 'motofrete_cert',
+});
+
+export { DRIVER_DOCS };
+
+// Compresse et redimensionne une image en JPEG (API contextuelle SDK 56).
+// Retourne l'URI de l'image compressée.
+export async function compressImage(uri) {
+  console.log(NS, 'compressing image...');
+  // API objet : manipulate -> resize -> renderAsync -> saveAsync.
+  const context = ImageManipulator.manipulate(uri);
+  context.resize({ width: MAX_WIDTH, height: null });
+  const rendered = await context.renderAsync();
+  const result = await rendered.saveAsync({
+    format: SaveFormat.JPEG,
+    compress: COMPRESS_QUALITY,
+  });
+
+  // Log de la taille compressée si disponible.
+  try {
+    const info = await FileSystem.getInfoAsync(result.uri);
+    if (info && info.size) {
+      console.log(NS, 'compressed size KB:', Math.round(info.size / 1024));
+    }
+  } catch (e) {
+    console.log(NS, 'compressed size unknown:', e.message);
+  }
+
+  return result.uri;
+}
+
+// Fallback UNIQUEMENT pour un content:// non résolu : lit l'URI via XHR -> blob.
+// (Pattern hérité de VigiApp ; rarement nécessaire avec putFile.)
+export function uriToBlob_XHR(uri) {
+  console.log(NS, 'XHR blob fallback for content://');
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.onload = () => resolve(xhr.response);
+    xhr.onerror = () => reject(new Error('uriToBlob_XHR failed'));
+    xhr.responseType = 'blob';
+    xhr.open('GET', uri, true);
+    xhr.send(null);
+  });
+}
+
+// Copie un content:// vers le cache en file:// (identique à VigiApp).
+// Retourne le nouvel URI file://.
+export async function materializeContentUri(uri, ext) {
+  console.log(NS, 'materializing content:// -> file://');
+  const safeExt = ext || 'jpg';
+  const target = `${FileSystem.cacheDirectory}dl_upload_${Date.now()}.${safeExt}`;
+  await FileSystem.copyAsync({ from: uri, to: target });
+  return target;
+}
+
+// Upload d'un document chauffeur vers Firebase Storage.
+// { driverId, docType, uri, mime, onProgress } -> { url, path, contentType }
+export async function uploadDriverDocument({ driverId, docType, uri, mime, onProgress }) {
+  // Validation des entrées.
+  if (!driverId) throw new Error('uploadDriverDocument: driverId manquant');
+  if (!DRIVER_DOCS[docType]) throw new Error(`uploadDriverDocument: docType inválido (${docType})`);
+  if (!uri) throw new Error('uploadDriverDocument: uri manquant');
+
+  // Garde web : l'upload réel n'existe que sur le dev build Android.
+  if (Platform.OS === 'web') {
+    throw new Error('Upload indisponível na web — use o dev build Android.');
+  }
+
+  console.log(NS, `uploadDriverDocument start docType=${docType} driverId=${driverId}`);
+
+  const contentType = mime || 'image/jpeg';
+  const path = `drivers/${driverId}/${docType}.jpg`;
+
+  // 1. Compresse l'image avant l'upload.
+  const compressedUri = await compressImage(uri);
+
+  // Garde de taille : refuse les fichiers > 5 Mo (aligné avec storage.rules).
+  try {
+    const info = await FileSystem.getInfoAsync(compressedUri);
+    if (info && info.size && info.size > MAX_SIZE_BYTES) {
+      throw new Error('Arquivo muito grande (máx. 5 MB).');
+    }
+  } catch (e) {
+    if (e && e.message && e.message.indexOf('5 MB') !== -1) throw e;
+    console.log(NS, 'size check skipped:', e.message);
+  }
+
+  // Référence Storage (app par défaut).
+  const ref = storage(getApp()).ref(path);
+
+  // Lance l'upload et suit la progression.
+  async function runPutFile(localUri) {
+    const task = ref.putFile(localUri, { contentType });
+    // 4. Progression via state_changed.
+    task.on('state_changed', (snapshot) => {
+      const pct = snapshot.totalBytes
+        ? Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100)
+        : 0;
+      console.log(NS, `progress ${pct}% docType=${docType}`);
+      if (typeof onProgress === 'function') onProgress(pct);
+    });
+    await task;
+  }
+
+  try {
+    // 2. Tente putFile() direct (file:// ou content://).
+    await runPutFile(compressedUri);
+  } catch (err) {
+    // 3. Si content:// échoue -> materialize -> putFile().
+    if (typeof compressedUri === 'string' && compressedUri.startsWith('content://')) {
+      console.log(NS, 'direct putFile failed for content:// — materializing', err.message);
+      const fileUri = await materializeContentUri(compressedUri, 'jpg');
+      await runPutFile(fileUri);
+    } else {
+      throw err;
+    }
+  }
+
+  // 5. URL de téléchargement après succès.
+  const url = await ref.getDownloadURL();
+  console.log(NS, `uploadDriverDocument success url=${url}`);
+
+  return { url, path, contentType };
+}
+
+
+===== backend\firebase\rules\firestore.rules =====
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /admins/{adminId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /drivers/{driverId} {
+      allow read: if request.auth != null &&
+        (request.auth.uid == driverId ||
+         exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      allow create: if request.auth != null && request.auth.uid == driverId;
+      allow update: if request.auth != null &&
+        (request.auth.uid == driverId ||
+         exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      allow delete: if false;
+    }
+
+    match /counters/{counterId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+
+===== backend\firebase\rules\storage.rules =====
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Documents chauffeur
+    // Écriture : uniquement le chauffeur lui-même (auth.uid == driverId)
+    // Lecture : uniquement les admins (vérifiée via Firestore)
+    match /drivers/{driverId}/{document=**} {
+      allow write: if request.auth != null
+                   && request.auth.uid == driverId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow read: if request.auth != null;
+    }
+
+    // Tout le reste : fermé
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
