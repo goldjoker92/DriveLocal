@@ -1,10 +1,14 @@
-// DriveLocal landing page (route "/").
-// Premium, mobile-first local ride-hailing landing — map-first with a
-// bottom-sheet style passenger action that overlaps the map.
-// Mock-only: buttons navigate to existing mock routes; no backend, no auth,
-// no real map.
+// DriveLocal landing page (route "/"). Iteration 1D.
+// Passenger-first: keep the existing Uber-like map/card visual, but organize
+// content as ride-intent first, then a clear motorista entry, then an existing-
+// account login, and finally a discreet internal ("Área interna") link.
+//
+// The passenger ride flow is NOT implemented yet, so the ride CTA shows a clean
+// "Em breve" message instead of navigating into mock ride data.
+// No backend calls here; auth/role routing lives in the auth screens.
 
-import { View, Text, Pressable } from 'react-native';
+import { useState } from 'react';
+import { View, Text, TextInput, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import MobileShell from '../components/MobileShell';
 import MockMapCard from '../components/MockMapCard';
@@ -23,6 +27,7 @@ const C = {
   amber: '#F59E0B',
   mapBlue: '#EAF2FF',
   softAmber: '#FFF7E6',
+  green: '#10B981',
 };
 
 // Shared premium card style (soft shadow, large radius).
@@ -79,12 +84,50 @@ function CtaButton({ label, onPress, kind = 'primary' }) {
   );
 }
 
+// A single ride-intent field (colored dot + editable input) matching the map card.
+function RideField({ dotColor, placeholder, value, onChangeText }) {
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        backgroundColor: C.bg,
+        borderWidth: 1,
+        borderColor: C.border,
+        borderRadius: 14,
+        paddingVertical: 4,
+        paddingHorizontal: 14,
+      }}
+    >
+      <View style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: dotColor }} />
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={C.muted}
+        style={{ flex: 1, fontSize: 15, color: C.text, fontWeight: '500', paddingVertical: 11 }}
+      />
+    </View>
+  );
+}
+
 export default function Landing() {
   const router = useRouter();
+  const [origem, setOrigem] = useState('');
+  const [destino, setDestino] = useState('');
+  const [rideSoon, setRideSoon] = useState(false);
+
+  // Passenger ride flow is not built yet: show a clean "Em breve" message
+  // instead of navigating into mock ride data.
+  function onRequestRide() {
+    console.log('[LANDING] ride CTA pressed (flow not implemented) -> Em breve message');
+    setRideSoon(true);
+  }
 
   return (
     <MobileShell>
-      {/* Top bar: wordmark + service area pill */}
+      {/* Header: wordmark + service area, then the local tagline */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text style={{ fontSize: 20, fontWeight: '800', color: C.brandNavy }}>DriveLocal</Text>
         <View style={{ backgroundColor: C.mapBlue, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12 }}>
@@ -92,50 +135,38 @@ export default function Landing() {
         </View>
       </View>
 
-      {/* Hero */}
       <View style={{ gap: 6 }}>
         <Text style={{ fontSize: 26, fontWeight: '800', color: C.brandNavy, lineHeight: 32 }}>
-          Corridas locais, com motoristas da sua cidade.
+          Corridas locais em Horizonte
         </Text>
         <Text style={{ fontSize: 14, fontWeight: '600', color: C.muted }}>
           Rápido. Local. Pago por Pix.
         </Text>
       </View>
 
-      {/* Map + passenger bottom-sheet (sheet overlaps the map) */}
+      {/* Map + passenger ride-intent bottom-sheet (sheet overlaps the map) */}
       <View>
         <MockMapCard />
 
-        <View style={[card, { marginTop: -28, gap: 14, zIndex: 2 }]}>
+        <View style={[card, { marginTop: -28, gap: 12, zIndex: 2 }]}>
           {/* bottom-sheet grabber */}
           <View style={{ alignSelf: 'center', width: 40, height: 5, borderRadius: 999, backgroundColor: '#E2E8F0', marginBottom: 2 }} />
 
           <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>Para onde você vai?</Text>
 
-          {/* Input-like field (mock) */}
-          <Pressable
-            onPress={() => router.push('/select-route')}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 10,
-              backgroundColor: C.bg,
-              borderWidth: 1,
-              borderColor: C.border,
-              borderRadius: 14,
-              paddingVertical: 15,
-              paddingHorizontal: 14,
-            }}
-          >
-            <View style={{ width: 8, height: 8, borderRadius: 999, backgroundColor: C.cta }} />
-            <Text style={{ fontSize: 15, color: C.muted, fontWeight: '500' }}>Buscar destino</Text>
-          </Pressable>
+          {/* Origem / Destino (editable, no mock ride data behind them) */}
+          <RideField dotColor={C.green} placeholder="Origem" value={origem} onChangeText={setOrigem} />
+          <RideField dotColor={C.cta} placeholder="Destino" value={destino} onChangeText={setDestino} />
 
-          <Text style={{ fontSize: 13, color: C.muted }}>
-            Pagamento direto por Pix ao motorista.
-          </Text>
+          <CtaButton label="Ver preço / pedir corrida" onPress={onRequestRide} kind="primary" />
 
-          <CtaButton label="Pedir uma corrida" onPress={() => router.push('/select-route')} kind="primary" />
+          {rideSoon ? (
+            <Text style={{ fontSize: 13.5, color: C.cta, fontWeight: '700' }}>
+              Em breve: solicitação de corrida em Horizonte.
+            </Text>
+          ) : (
+            <Text style={{ fontSize: 13, color: C.muted }}>Pagamento direto por Pix ao motorista.</Text>
+          )}
 
           {/* Trust chips */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2 }}>
@@ -146,9 +177,9 @@ export default function Landing() {
         </View>
       </View>
 
-      {/* Driver opportunity (secondary to passenger) */}
+      {/* Motorista entry (professional, secondary to passenger) */}
       <View style={[card, { gap: 12 }]}>
-        <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>Você é motorista?</Text>
+        <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>Sou motorista?</Text>
         <Text style={{ fontSize: 14, color: C.muted, lineHeight: 20 }}>
           Ganhe corridas locais com menos comissão e mais controle.
         </Text>
@@ -172,12 +203,38 @@ export default function Landing() {
           </Text>
         </View>
 
-        <CtaButton label="Dirigir com DriveLocal" onPress={() => router.push('/email-register')} kind="secondary" />
+        <CtaButton
+          label="Entrar ou cadastrar motorista"
+          onPress={() => {
+            console.log('[LANDING] motorista CTA -> /driver-auth');
+            router.push('/driver-auth');
+          }}
+          kind="secondary"
+        />
       </View>
 
-      {/* Discreet internal access (link, not a button) */}
-      <Pressable onPress={() => router.push('/admin-login')} style={{ alignSelf: 'center', paddingVertical: 6 }}>
-        <Text style={{ fontSize: 12.5, color: C.muted, fontWeight: '500' }}>Acesso interno</Text>
+      {/* Existing account (any role) — general email login, redirects by role */}
+      <View style={[card, { gap: 10 }]}>
+        <Text style={{ fontSize: 16, fontWeight: '800', color: C.text }}>Já tenho conta?</Text>
+        <CtaButton
+          label="Entrar com e-mail"
+          onPress={() => {
+            console.log('[LANDING] existing account -> /email-login');
+            router.push('/email-login');
+          }}
+          kind="secondary"
+        />
+      </View>
+
+      {/* Discreet internal access (strict admin only, handled after login) */}
+      <Pressable
+        onPress={() => {
+          console.log('[LANDING] Área interna -> /email-login?intent=internal');
+          router.push({ pathname: '/email-login', params: { intent: 'internal' } });
+        }}
+        style={{ alignSelf: 'center', paddingVertical: 6 }}
+      >
+        <Text style={{ fontSize: 12.5, color: C.muted, fontWeight: '500' }}>Área interna</Text>
       </Pressable>
     </MobileShell>
   );

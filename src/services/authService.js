@@ -39,7 +39,8 @@ export async function registerDriver(email, password) {
 }
 
 // Signs the user in, then resolves their role.
-// Order: admins/{uid} first, then drivers/{uid}, otherwise "unknown".
+// Order matters: admins/{uid} first (highest privilege), then drivers/{uid},
+// then passengers/{uid}, otherwise "unknown".
 // Returns { user, role, driver? }.
 export async function loginUser(email, password) {
   const credential = await signInWithEmailAndPassword(auth, email, password);
@@ -53,6 +54,18 @@ export async function loginUser(email, password) {
   const driverSnap = await getDoc(doc(db, 'drivers', user.uid));
   if (driverSnap.exists()) {
     return { user, role: 'driver', driver: driverSnap.data() };
+  }
+
+  // Passengers are not part of Iteration 1: the collection may not exist yet and
+  // security rules can deny the read. Guard it so an unknown account never
+  // red-screens — a denied/missing read simply falls through to "unknown".
+  try {
+    const passengerSnap = await getDoc(doc(db, 'passengers', user.uid));
+    if (passengerSnap.exists()) {
+      return { user, role: 'passenger' };
+    }
+  } catch (e) {
+    console.log('[AUTH_FLOW] passenger lookup skipped:', e.code || e.message);
   }
 
   return { user, role: 'unknown' };

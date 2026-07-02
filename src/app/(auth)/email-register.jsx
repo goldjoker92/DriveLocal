@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import { ScrollView, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
@@ -17,7 +17,10 @@ import { registerDriver } from '../../services/authService';
 
 export default function EmailRegister() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const params = useLocalSearchParams();
+  // Pre-fill email when coming from a failed login (VigiApp-style continuity).
+  // roleIntent is driver-only for now; future Google login will use it too.
+  const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,10 +29,12 @@ export default function EmailRegister() {
     setError('');
     setLoading(true);
     try {
+      console.log('[AUTH_FLOW] registerDriver roleIntent=', params.roleIntent || 'driver');
       await registerDriver(email.trim(), password);
       router.replace('/(driver)/onboarding');
     } catch (e) {
-      setError(e.message || e.code || 'Erro desconhecido');
+      console.log('[AUTH_FLOW] register error', e.code || e.message);
+      setError('Não foi possível criar a conta. Verifique o e-mail e a senha (mínimo 6 caracteres).');
     } finally {
       setLoading(false);
     }

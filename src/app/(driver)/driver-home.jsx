@@ -81,7 +81,7 @@ export default function DriverHome() {
 
             <WalletCard balanceCents={driver.balanceCents || 0} isFounderActive={founderActive} />
 
-            <MapPlaceholder label="Mapa do motorista (placeholder)" />
+            <MapPlaceholder label="Mapa do motorista" />
 
             {/* Navigation to the driver sub-screens (Step 1 reachability). */}
             <AppButton title="Ver pedido de corrida" onPress={() => router.push('/ride-request')} />

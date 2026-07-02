@@ -1,10 +1,14 @@
-// Admin login (route "/admin-login"). Step 1 frontend only — mock auth.
+// Admin login (route "/admin-login"). LEGACY / DEV ONLY — mock auth.
+//
+// Iteration 1D: real admin access is via the general email login + the discreet
+// landing "Área interna" link (/email-login?intent=internal), which does real
+// Firebase Auth and role detection. This mock screen is NO LONGER linked from
+// the landing or any public navigation. Kept only as a dev shortcut; do not
+// expose it as a real path.
 //
 // NOTE: named "admin-login" (not "login") on purpose. Route groups like
 // (admin) are silent in the URL, so a file named "login.jsx" here would
-// resolve to "/login" and COLLIDE with (auth)/login.jsx. "admin-login" keeps
-// both screens reachable without a collision.
-// TODO(backend): real admin auth (Firebase Auth + admin custom claim).
+// resolve to "/login" and COLLIDE with (auth)/login.jsx.
 
 import { useState } from 'react';
 import { ScrollView } from 'react-native';

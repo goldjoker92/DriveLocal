@@ -58,6 +58,21 @@ export function useDriverRedirect() {
       return;
     }
 
+    // 6bis. Correction demandée par l'admin -> suivi de vérification
+    // (affiche le motif + bouton pour renvoyer les documents).
+    if (d.verificationStatus === 'correction_requested') {
+      console.log('[REDIRECT] driver status correction_requested -> /(driver)/verification-status');
+      router.replace('/(driver)/verification-status');
+      return;
+    }
+
+    // 6ter. Suspendu -> suivi de vérification (écran de statut bloqué).
+    if (d.verificationStatus === 'suspended') {
+      console.log('[REDIRECT] driver status suspended -> /(driver)/verification-status');
+      router.replace('/(driver)/verification-status');
+      return;
+    }
+
     // 7. Défaut -> onboarding.
     console.log('[REDIRECT] driver status default -> /(driver)/onboarding');
     router.replace('/(driver)/onboarding');

@@ -1,7 +1,8 @@
 // ============================================================
-// Driver detail (route "/driver-detail"). Iteration 1B.
-// Vue admin complète : identité, véhicule, statuts, doublons, documents,
-// historique et actions approuver/rejeter. Garde admin au montage.
+// Driver detail (route "/(admin)/driver-detail"). Iteration 1C.
+// Vue admin complète : résumé, identité, véhicule, statuts, doublons, documents,
+// historique et actions (aprovar / solicitar correção / recusar) selon le statut.
+// Garde admin au montage. Toutes les erreurs passent par un message UI.
 // ============================================================
 
 import { useEffect, useState } from 'react';
@@ -13,14 +14,26 @@ import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
+import AppBadge from '../../components/AppBadge';
 import AdminTableRow from '../../components/AdminTableRow';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { VEHICLE_LABELS_PT_BR, VEHICLE_MOTO } from '../../constants/vehicleTypes';
 import { auth, db } from '../../config/firebase';
-import { getDriver, approveDriver, rejectDriver } from '../../services/driverService';
+import {
+  getDriver,
+  approveDriver,
+  rejectDriver,
+  requestDriverCorrection,
+} from '../../services/driverService';
 import { formatCPF } from '../../utils/validation';
+import {
+  VERIFICATION_STATUS,
+  verificationLabel,
+  verificationTone,
+} from '../../constants/driverStatuses';
+import { showConfirmAlert } from '../../utils/alertUtils';
 
 // Documents affichables avec leur champ URL sur le document driver.
 const DOC_LINKS = [
@@ -41,13 +54,10 @@ function formatDateTime(value) {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} às ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// Variante courte "28/06/2026 14:33" pour l'historique.
-function formatShort(value) {
-  if (!value) return '—';
-  const date = typeof value.toDate === 'function' ? value.toDate() : value instanceof Date ? value : null;
-  if (!date) return '—';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+// Qui a fait l'action. On n'expose JAMAIS l'UID technique dans l'UI admin :
+// tant qu'il n'y a pas de noms d'admin, on affiche "Admin".
+function whoLabel(entry) {
+  return entry && (entry.changedBy || entry.reviewedBy) ? 'Admin' : '—';
 }
 
 // Millisecondes d'un Timestamp/Date pour le tri.
@@ -67,6 +77,46 @@ function SectionTitle({ children }) {
   );
 }
 
+// Bandeau d'information (statut en lecture seule).
+function InfoBanner({ tone = 'neutral', title, body }) {
+  const map = {
+    success: { bg: colors.successBg, fg: colors.success },
+    warning: { bg: colors.warningBg, fg: colors.warning },
+    danger: { bg: colors.dangerBg, fg: colors.danger },
+    neutral: { bg: colors.primaryTint, fg: colors.primary },
+  };
+  const c = map[tone] || map.neutral;
+  return (
+    <View style={{ backgroundColor: c.bg, borderRadius: radius.md, padding: spacing.md, gap: spacing.xs }}>
+      <Text style={[{ fontFamily, color: c.fg }, typography.bodyBold]}>{title}</Text>
+      {body ? <Text style={[{ fontFamily, color: colors.text }, typography.small]}>{body}</Text> : null}
+    </View>
+  );
+}
+
+// Une entrée d'historique, compacte : statut + Por / Data / Motivo.
+// Ne rend jamais l'objet brut ni l'UID. `divider` sépare les entrées.
+function HistoryItem({ entry, divider }) {
+  const line = { fontFamily, color: colors.textMuted };
+  return (
+    <View
+      style={{
+        paddingVertical: spacing.sm,
+        gap: 2,
+        borderTopWidth: divider ? 1 : 0,
+        borderTopColor: colors.border,
+      }}
+    >
+      <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
+        {verificationLabel(entry.status)}
+      </Text>
+      <Text style={[line, typography.small]}>Por: {whoLabel(entry)}</Text>
+      <Text style={[line, typography.small]}>Data: {formatDateTime(entry.changedAt) || '—'}</Text>
+      <Text style={[line, typography.small]}>Motivo: {entry.reason ? entry.reason : '—'}</Text>
+    </View>
+  );
+}
+
 export default function DriverDetail() {
   const router = useRouter();
   const { driverId } = useLocalSearchParams();
@@ -80,7 +130,7 @@ export default function DriverDetail() {
   useEffect(() => {
     let active = true;
     const uid = auth.currentUser && auth.currentUser.uid;
-    console.log('[ADMIN] guard check uid=', uid);
+    console.log('[ADMIN_DRIVER_DETAIL] guard check uid=', uid);
     if (!uid) {
       router.replace('/(auth)/login');
       return undefined;
@@ -89,7 +139,7 @@ export default function DriverDetail() {
       .then((snap) => {
         if (!active) return;
         if (!snap.exists()) {
-          console.log('[ADMIN] guard failed -> /(auth)/login');
+          console.log('[ADMIN_DRIVER_DETAIL] guard failed -> /(auth)/login');
           router.replace('/(auth)/login');
         }
       })
@@ -101,7 +151,24 @@ export default function DriverDetail() {
     };
   }, []);
 
-  // Charge le document driver.
+  // Charge (ou recharge) le document driver.
+  function loadDriver() {
+    if (!driverId) {
+      setLoading(false);
+      return Promise.resolve();
+    }
+    return getDriver(driverId)
+      .then((data) => {
+        setDriver(data);
+        console.log('[ADMIN_HISTORY] entries=', (data && data.statusHistory ? data.statusHistory.length : 0));
+      })
+      .catch((e) => {
+        console.log('[ADMIN_DRIVER_DETAIL] load error', e.message);
+        setError('Não foi possível carregar o motorista.');
+      })
+      .finally(() => setLoading(false));
+  }
+
   useEffect(() => {
     let active = true;
     if (!driverId) {
@@ -110,7 +177,14 @@ export default function DriverDetail() {
     }
     getDriver(driverId)
       .then((data) => {
-        if (active) setDriver(data);
+        if (active) {
+          setDriver(data);
+          console.log('[ADMIN_HISTORY] entries=', (data && data.statusHistory ? data.statusHistory.length : 0));
+        }
+      })
+      .catch((e) => {
+        console.log('[ADMIN_DRIVER_DETAIL] load error', e.message);
+        if (active) setError('Não foi possível carregar o motorista.');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -120,47 +194,175 @@ export default function DriverDetail() {
     };
   }, [driverId]);
 
-  // Approbation.
-  async function handleApprove() {
-    setError('');
-    setSubmitting(true);
-    try {
-      const adminUid = auth.currentUser && auth.currentUser.uid;
-      console.log('[ADMIN] approveDriver driverId=', driverId);
-      await approveDriver(driverId, adminUid);
-      router.replace('/(admin)/drivers-pending');
-    } catch (e) {
-      console.log('[ADMIN] approveDriver error', e.message);
-      setError('Não foi possível aprovar o motorista.');
-      setSubmitting(false);
-    }
+  const adminUid = () => auth.currentUser && auth.currentUser.uid;
+
+  // Approbation — avec confirmation. Aucune commission prélevée ici (règle métier).
+  function handleApprove() {
+    showConfirmAlert({
+      title: 'Aprovar motorista?',
+      message: 'Este motorista poderá ficar disponível para corridas após aprovação.',
+      confirmText: 'Aprovar',
+      onConfirm: async () => {
+        setError('');
+        setSubmitting(true);
+        try {
+          console.log('[ADMIN_DRIVER_DETAIL] approved driverId=', driverId);
+          await approveDriver(driverId, adminUid());
+          await loadDriver();
+        } catch (e) {
+          console.log('[ADMIN_DRIVER_DETAIL] approve error', e.message);
+          setError('Não foi possível aprovar o motorista.');
+        } finally {
+          setSubmitting(false);
+        }
+      },
+    });
   }
 
-  // Rejet avec motif.
-  async function handleReject() {
-    setError('');
-    setSubmitting(true);
-    try {
-      const adminUid = auth.currentUser && auth.currentUser.uid;
-      console.log('[ADMIN] rejectDriver driverId=', driverId, 'reason=', reason.trim());
-      await rejectDriver(driverId, adminUid, reason.trim());
-      router.replace('/(admin)/drivers-pending');
-    } catch (e) {
-      console.log('[ADMIN] rejectDriver error', e.message);
-      setError('Não foi possível rejeitar o motorista.');
-      setSubmitting(false);
+  // Demande de correction — nécessite un motif.
+  function handleCorrection() {
+    const text = reason.trim();
+    if (!text) {
+      setError('Informe o que precisa ser corrigido.');
+      return;
     }
+    showConfirmAlert({
+      title: 'Solicitar correção',
+      message: 'Informe o que precisa ser corrigido. O motorista poderá reenviar.',
+      confirmText: 'Solicitar',
+      onConfirm: async () => {
+        setError('');
+        setSubmitting(true);
+        try {
+          console.log('[ADMIN_DRIVER_DETAIL] correction requested driverId=', driverId, 'reason=', text);
+          await requestDriverCorrection(driverId, adminUid(), text);
+          setReason('');
+          await loadDriver();
+        } catch (e) {
+          console.log('[ADMIN_DRIVER_DETAIL] correction error', e.message);
+          setError('Não foi possível solicitar a correção.');
+        } finally {
+          setSubmitting(false);
+        }
+      },
+    });
   }
 
-  // Ouvre l'URL d'un document.
+  // Rejet — nécessite un motif, avec confirmation.
+  function handleReject() {
+    const text = reason.trim();
+    if (!text) {
+      setError('Informe o motivo da recusa.');
+      return;
+    }
+    showConfirmAlert({
+      title: 'Recusar cadastro?',
+      message: 'O motorista não poderá receber corridas. Esta ação pode ser revista depois.',
+      confirmText: 'Recusar',
+      destructive: true,
+      onConfirm: async () => {
+        setError('');
+        setSubmitting(true);
+        try {
+          console.log('[ADMIN_DRIVER_DETAIL] rejected driverId=', driverId, 'reason=', text);
+          await rejectDriver(driverId, adminUid(), text);
+          setReason('');
+          await loadDriver();
+        } catch (e) {
+          console.log('[ADMIN_DRIVER_DETAIL] reject error', e.message);
+          setError('Não foi possível recusar o motorista.');
+        } finally {
+          setSubmitting(false);
+        }
+      },
+    });
+  }
+
+  // Ouvre l'URL d'un document dans le navigateur (MVP).
   function openDoc(url) {
     if (url) Linking.openURL(url);
   }
 
   const isMoto = driver && driver.vehicleType === VEHICLE_MOTO;
+  const status = driver && driver.verificationStatus;
   const history = (driver && Array.isArray(driver.statusHistory) ? [...driver.statusHistory] : []).sort(
     (a, b) => toMillis(a.changedAt) - toMillis(b.changedAt)
   );
+
+  // Bloc d'actions selon le statut de vérification.
+  function renderActions() {
+    if (status === VERIFICATION_STATUS.PENDING_REVIEW) {
+      return (
+        <>
+          <AppInput
+            label="Motivo (para correção ou recusa)"
+            value={reason}
+            onChangeText={setReason}
+            placeholder="Descreva o que precisa ser corrigido ou o motivo da recusa"
+          />
+          <AppButton
+            title={submitting ? 'Processando…' : 'Aprovar motorista'}
+            onPress={handleApprove}
+            disabled={submitting}
+          />
+          <AppButton
+            title={submitting ? 'Processando…' : 'Solicitar correção'}
+            variant="secondary"
+            onPress={handleCorrection}
+            disabled={submitting}
+          />
+          <AppButton
+            title={submitting ? 'Processando…' : 'Recusar'}
+            variant="ghost"
+            onPress={handleReject}
+            disabled={submitting}
+          />
+        </>
+      );
+    }
+    if (status === VERIFICATION_STATUS.CORRECTION_REQUESTED) {
+      return (
+        <InfoBanner
+          tone="warning"
+          title="Correção solicitada"
+          body={
+            driver.correctionReason
+              ? `Aguardando novo envio do motorista. Motivo: ${driver.correctionReason}`
+              : 'Aguardando novo envio do motorista.'
+          }
+        />
+      );
+    }
+    if (status === VERIFICATION_STATUS.APPROVED) {
+      return (
+        <InfoBanner
+          tone="success"
+          title="Motorista aprovado"
+          body={driver.approvalNumber ? `Número de aprovação #${driver.approvalNumber}.` : null}
+        />
+      );
+    }
+    if (status === VERIFICATION_STATUS.REJECTED) {
+      return (
+        <InfoBanner
+          tone="danger"
+          title="Cadastro recusado"
+          body={driver.rejectionReason ? `Motivo: ${driver.rejectionReason}` : null}
+        />
+      );
+    }
+    if (status === VERIFICATION_STATUS.SUSPENDED) {
+      return <InfoBanner tone="danger" title="Motorista suspenso" />;
+    }
+    // draft (ou statut inconnu) : pas d'action possible.
+    return (
+      <InfoBanner
+        tone="neutral"
+        title="Cadastro em rascunho"
+        body="O motorista ainda não enviou o cadastro para análise."
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -169,7 +371,7 @@ export default function DriverDetail() {
 
         {loading ? (
           <AppCard>
-            <AdminTableRow label="Carregando..." />
+            <AdminTableRow label="Carregando…" />
           </AppCard>
         ) : !driver ? (
           <AppCard>
@@ -179,42 +381,36 @@ export default function DriverDetail() {
           <>
             {/* Alerte doublon */}
             {driver.duplicateCheckStatus === 'warning' ? (
-              <View
-                style={{
-                  backgroundColor: colors.warningBg,
-                  borderColor: colors.warning,
-                  borderWidth: 1,
-                  borderRadius: radius.md,
-                  padding: spacing.md,
-                }}
-              >
-                <Text style={[{ fontFamily, color: colors.warning }, typography.bodyBold]}>
-                  Atenção: possível duplicata detectada. Verifique CPF, telefone, placa e chave Pix.
-                </Text>
-              </View>
+              <InfoBanner
+                tone="warning"
+                title="Atenção: possível duplicata detectada."
+                body="Verifique CPF, telefone, placa e chave Pix."
+              />
             ) : null}
 
-            {/* IDENTIFICAÇÃO */}
+            {/* RESUMO */}
             <AppCard>
-              <SectionTitle>IDENTIFICAÇÃO</SectionTitle>
-              <AdminTableRow label="ID técnico" value={driver.uid || driverId} />
-              {driver.approvalNumber ? (
-                <AdminTableRow label="Número de aprovação" value={`#${driver.approvalNumber}`} />
-              ) : null}
-              <AdminTableRow label="Inscrito em" value={formatDateTime(driver.createdAt) || '—'} />
+              <SectionTitle>RESUMO</SectionTitle>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm }}>
+                <Text style={[{ fontFamily, color: colors.text, flexShrink: 1 }, typography.h3]}>
+                  {driver.fullName || driver.displayName || driver.email || driverId}
+                </Text>
+                <AppBadge label={verificationLabel(status)} tone={verificationTone(status)} />
+              </View>
+              <AdminTableRow label="Área de serviço" value={driver.serviceAreaId || '—'} />
               <AdminTableRow label="Enviado em" value={formatDateTime(driver.submittedAt) || '—'} />
+              <AdminTableRow label="Verificação de duplicata" value={driver.duplicateCheckStatus || '—'} />
             </AppCard>
 
-            {/* INFORMAÇÕES PESSOAIS */}
+            {/* IDENTIDADE */}
             <AppCard>
-              <SectionTitle>INFORMAÇÕES PESSOAIS</SectionTitle>
+              <SectionTitle>IDENTIDADE</SectionTitle>
               <AdminTableRow label="Nome" value={driver.fullName || '—'} />
-              <AdminTableRow label="E-mail" value={driver.email || '—'} />
               <AdminTableRow label="CPF" value={driver.cpf ? formatCPF(driver.cpf) : '—'} />
               <AdminTableRow label="WhatsApp" value={driver.whatsApp || driver.phone || '—'} />
+              <AdminTableRow label="E-mail" value={driver.email || '—'} />
               <AdminTableRow label="Tipo de chave Pix" value={driver.pixKeyType || '—'} />
               <AdminTableRow label="Chave Pix" value={driver.pixKey || '—'} />
-              <AdminTableRow label="Área de serviço" value={driver.serviceAreaId || '—'} />
             </AppCard>
 
             {/* VEÍCULO */}
@@ -222,7 +418,7 @@ export default function DriverDetail() {
               <SectionTitle>VEÍCULO</SectionTitle>
               <AdminTableRow
                 label="Tipo"
-                value={driver.vehicleType ? VEHICLE_LABELS_PT_BR[driver.vehicleType] : '—'}
+                value={driver.vehicleType ? VEHICLE_LABELS_PT_BR[driver.vehicleType] || driver.vehicleType : '—'}
               />
               <AdminTableRow label="Marca" value={driver.vehicleBrand || '—'} />
               <AdminTableRow label="Modelo" value={driver.vehicleModel || '—'} />
@@ -231,10 +427,10 @@ export default function DriverDetail() {
               <AdminTableRow label="Ano" value={driver.vehicleYear ? String(driver.vehicleYear) : '—'} />
             </AppCard>
 
-            {/* STATUTS */}
+            {/* STATUS (détail technique) */}
             <AppCard>
               <SectionTitle>STATUS</SectionTitle>
-              <AdminTableRow label="verificationStatus" value={driver.verificationStatus || '—'} />
+              <AdminTableRow label="verificationStatus" value={status || '—'} />
               <AdminTableRow label="profileStatus" value={driver.profileStatus || '—'} />
               <AdminTableRow label="vehicleStatus" value={driver.vehicleStatus || '—'} />
               <AdminTableRow label="documentsStatus" value={driver.documentsStatus || '—'} />
@@ -242,7 +438,7 @@ export default function DriverDetail() {
               <AdminTableRow label="duplicateCheckStatus" value={driver.duplicateCheckStatus || '—'} />
             </AppCard>
 
-            {/* DOCUMENTS */}
+            {/* DOCUMENTOS */}
             <AppCard>
               <SectionTitle>DOCUMENTOS</SectionTitle>
               {DOC_LINKS.filter((d) => !d.motoOnly || isMoto).map((d) => {
@@ -254,7 +450,9 @@ export default function DriverDetail() {
                     right={
                       url ? (
                         <Pressable onPress={() => openDoc(url)} hitSlop={8}>
-                          <Text style={[{ fontFamily, color: colors.primary }, typography.bodyBold]}>Abrir</Text>
+                          <Text style={[{ fontFamily, color: colors.primary }, typography.bodyBold]}>
+                            Ver documento
+                          </Text>
                         </Pressable>
                       ) : (
                         <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Não enviado</Text>
@@ -265,43 +463,26 @@ export default function DriverDetail() {
               })}
             </AppCard>
 
-            {/* HISTORIQUE */}
+            {/* HISTÓRICO — jamais d'objet brut ni d'UID; entrées compactes. */}
             <AppCard>
               <SectionTitle>HISTÓRICO</SectionTitle>
               {history.length === 0 ? (
-                <AdminTableRow label="Sem histórico" />
+                <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+                  Nenhum histórico ainda.
+                </Text>
               ) : (
                 history.map((h, i) => (
-                  <AdminTableRow
-                    key={`${h.status}-${i}`}
-                    label={`${formatShort(h.changedAt)} — ${h.status}`}
-                    value={h.changedBy ? `(${h.changedBy})` : ''}
-                  />
+                  <HistoryItem key={`${h.status}-${i}`} entry={h} divider={i > 0} />
                 ))
               )}
             </AppCard>
 
-            {/* ACTIONS ADMIN */}
+            {/* AÇÕES ADMIN */}
+            <SectionTitle>AÇÕES</SectionTitle>
             {error ? (
               <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
             ) : null}
-            <AppButton
-              title={submitting ? 'Aprovando...' : 'Aprovar motorista'}
-              onPress={handleApprove}
-              disabled={submitting}
-            />
-            <AppInput
-              label="Motivo da rejeição"
-              value={reason}
-              onChangeText={setReason}
-              placeholder="Descreva o motivo"
-            />
-            <AppButton
-              title={submitting ? 'Rejeitando...' : 'Rejeitar'}
-              variant="ghost"
-              onPress={handleReject}
-              disabled={submitting}
-            />
+            {renderActions()}
           </>
         )}
       </ScrollView>

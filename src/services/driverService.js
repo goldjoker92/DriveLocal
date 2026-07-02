@@ -78,6 +78,21 @@ export async function getPendingDrivers() {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
+// Returns every driver document. Admin-only: Firestore rules only allow reading
+// the full "drivers" collection when the caller exists in admins/{uid}. The
+// admin console filters by status client-side, so no composite index is needed.
+export async function getAllDrivers() {
+  const snap = await getDocs(collection(db, 'drivers'));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// Returns drivers matching a single verificationStatus.
+export async function getDriversByStatus(status) {
+  const q = query(collection(db, 'drivers'), where('verificationStatus', '==', status));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
 // Admin approves a driver. Applies founder or standard (#101+) rules and
 // increments the per-service-area approved counter.
 export async function approveDriver(driverId, adminUid) {
@@ -124,18 +139,40 @@ export async function approveDriver(driverId, adminUid) {
   await incrementApprovedCount(serviceAreaId);
 }
 
-// Admin rejects a driver with a reason.
+// Admin rejects a driver with a reason. Terminal state: the driver stays
+// blocked from rides. No money is moved here.
 export async function rejectDriver(driverId, adminUid, rejectionReason) {
   const now = new Date();
   await updateDoc(doc(db, 'drivers', driverId), {
     verificationStatus: 'rejected',
+    rejectionReason: rejectionReason || '',
     reviewedAt: serverTimestamp(),
     reviewedBy: adminUid,
-    rejectionReason,
+    updatedAt: serverTimestamp(),
     statusHistory: arrayUnion({
       status: 'rejected',
       changedAt: now,
       changedBy: adminUid,
+      reason: rejectionReason || '',
+    }),
+  });
+}
+
+// Admin asks the driver to fix/resend something (not a rejection). The driver
+// app should surface correctionReason and let them resubmit for review.
+export async function requestDriverCorrection(driverId, adminUid, correctionReason) {
+  const now = new Date();
+  await updateDoc(doc(db, 'drivers', driverId), {
+    verificationStatus: 'correction_requested',
+    correctionReason: correctionReason || '',
+    correctionRequestedAt: serverTimestamp(),
+    reviewedBy: adminUid,
+    updatedAt: serverTimestamp(),
+    statusHistory: arrayUnion({
+      status: 'correction_requested',
+      changedAt: now,
+      changedBy: adminUid,
+      reason: correctionReason || '',
     }),
   });
 }

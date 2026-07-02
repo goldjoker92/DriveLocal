@@ -22,6 +22,7 @@ const STATUS_LABELS_PT_BR = {
   draft: 'Cadastro em andamento',
   pending_review: 'Aguardando aprovação',
   approved: 'Motorista aprovado',
+  correction_requested: 'Correção solicitada',
   rejected: 'Cadastro recusado',
   suspended: 'Cadastro suspenso',
 };
@@ -29,7 +30,7 @@ const STATUS_LABELS_PT_BR = {
 // Maps a verification status to the colored badge tone.
 function badgeStatus(status) {
   if (status === 'approved') return 'online';
-  if (status === 'pending_review') return 'pending';
+  if (status === 'pending_review' || status === 'correction_requested') return 'pending';
   return 'offline';
 }
 
@@ -91,6 +92,13 @@ export default function VerificationStatus() {
                   {driver.rejectionReason}
                 </Text>
               ) : null}
+              {status === 'correction_requested' ? (
+                <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>
+                  {driver.correctionReason
+                    ? `O que precisa ser corrigido: ${driver.correctionReason}`
+                    : 'A administração solicitou uma correção no seu cadastro.'}
+                </Text>
+              ) : null}
             </>
           )}
         </AppCard>
@@ -98,6 +106,12 @@ export default function VerificationStatus() {
           <AppButton
             title="Ir para o painel do motorista"
             onPress={() => router.replace('/(driver)/driver-home')}
+          />
+        ) : null}
+        {status === 'correction_requested' ? (
+          <AppButton
+            title="Revisar e reenviar documentos"
+            onPress={() => router.replace('/(driver)/documents')}
           />
         ) : null}
       </ScrollView>
