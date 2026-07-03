@@ -1,6 +1,8 @@
-// Driver onboarding (route "/onboarding"). Step 1 frontend only.
-// Highlights the Founder offer. TODO(backend): create the driver profile.
+// Driver onboarding (route "/onboarding"). Iteration 1A.
+// Highlights the Founder offer and shows the live remaining founder slots,
+// read from the Firestore counter. TODO(next): build the profile form.
 
+import { useEffect, useState } from 'react';
 import { ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -14,10 +16,33 @@ import { spacing } from '../../constants/spacing';
 import {
   FOUNDER_OFFER_HEADLINE_PT_BR,
   FOUNDER_DEFAULT_COMMISSION_FREE_DAYS,
+  FOUNDER_DEFAULT_MAX_DRIVERS,
 } from '../../constants/founderOfferRules';
+import { SERVICE_AREA_HORIZONTE_CE_BR } from '../../constants/serviceAreaIds';
+import { getApprovedCount } from '../../services/founderService';
 
 export default function Onboarding() {
   const router = useRouter();
+  const [remaining, setRemaining] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    getApprovedCount(SERVICE_AREA_HORIZONTE_CE_BR)
+      .then((count) => {
+        if (active) {
+          setRemaining(Math.max(FOUNDER_DEFAULT_MAX_DRIVERS - count, 0));
+        }
+      })
+      .catch(() => {
+        if (active) setRemaining(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const remainingLabel =
+    remaining === null ? '...' : `${remaining} de ${FOUNDER_DEFAULT_MAX_DRIVERS}`;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -27,9 +52,10 @@ export default function Onboarding() {
           <FounderOfferBadge />
           <AdminTableRow label="Oferta" value={FOUNDER_OFFER_HEADLINE_PT_BR} />
           <AdminTableRow label="Comissão grátis" value={`${FOUNDER_DEFAULT_COMMISSION_FREE_DAYS} dias`} />
+          <AdminTableRow label="Vagas fundador restantes" value={remainingLabel} />
           <AdminTableRow label="Pix" value="100% do valor da corrida" />
         </AppCard>
-        <AppButton title="Começar cadastro" onPress={() => router.push('/profile')} />
+        <AppButton title="Começar cadastro" onPress={() => router.push('/(driver)/profile')} />
       </ScrollView>
     </SafeAreaView>
   );

@@ -21,10 +21,11 @@ export default function Dashboard() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
         <Header title="Painel" subtitle="Horizonte / CE" onBack={() => router.back()} />
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md }}>
-          <AdminStatCard label="Aprovados" value={String(approved)} />
-          <AdminStatCard label="Pendentes" value={String(pending)} />
-          <AdminStatCard label="Corridas" value={String(mockRides.length)} />
+        {/* AdminStatCard is layout-neutral now: parent sets the cell width. */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: spacing.md }}>
+          <AdminStatCard style={{ width: '48%' }} label="Aprovados" value={String(approved)} />
+          <AdminStatCard style={{ width: '48%' }} label="Pendentes" value={String(pending)} />
+          <AdminStatCard style={{ width: '48%' }} label="Corridas" value={String(mockRides.length)} />
         </View>
         <AppButton title="Motoristas pendentes" onPress={() => router.push('/drivers-pending')} />
         <AppButton title="Recargas pendentes" variant="secondary" onPress={() => router.push('/topups-pending')} />

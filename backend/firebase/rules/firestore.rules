@@ -1,8 +1,29 @@
-﻿rules_version = '2';
-
+rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Rules will be implemented after Firebase project setup.
+
+    match /admins/{adminId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /drivers/{driverId} {
+      allow read: if request.auth != null &&
+        (request.auth.uid == driverId ||
+         exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      allow create: if request.auth != null && request.auth.uid == driverId;
+      allow update: if request.auth != null &&
+        (request.auth.uid == driverId ||
+         exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      allow delete: if false;
+    }
+
+    match /counters/{counterId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
