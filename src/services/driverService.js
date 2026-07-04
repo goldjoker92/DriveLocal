@@ -58,6 +58,19 @@ export async function updateDriverProfile(driverId, profileData) {
   });
 }
 
+// Sets the approved driver's availability (drivers/{uid}.availabilityStatus).
+// availabilityStatus: 'available' | 'offline'. Iteration 2A.
+// Eligibility (approved + allowed to receive rides) is enforced by the caller
+// via deriveEligibility; this only persists the chosen state. No money moves.
+export async function setDriverAvailability(driverId, availabilityStatus) {
+  console.log('[AVAILABILITY] setDriverAvailability', driverId, availabilityStatus);
+  await updateDoc(doc(db, 'drivers', driverId), {
+    availabilityStatus,
+    availabilityUpdatedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 // Runs duplicate checks, then moves the driver to "pending_review".
 export async function submitForReview(driverId) {
   await updateDoc(doc(db, 'drivers', driverId), {
@@ -115,23 +128,44 @@ export async function approveDriver(driverId, adminUid) {
     }),
   };
 
+  // Approval does NOT move money. It only sets the driver's role, promo window
+  // and ride-eligibility flags so the driver cockpit (deriveEligibility) can
+  // read a single source of truth. Manual subscription activation for #101+ is
+  // deferred to Iteration 2B — approval only writes the "required" state here.
   let roleFields;
   if (isFounder) {
+    // Founder #001-#100: subscription and commission are free for the window,
+    // and the driver can receive rides immediately.
+    const founderCommissionFreeUntil = new Date(now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS);
+    const founderSubscriptionFreeUntil = new Date(now.getTime() + FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS * DAY_MS);
     roleFields = {
       founderEligible: true,
       founderGrantedAt: serverTimestamp(),
-      founderExpiresAt: new Date(now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS),
-      commissionRate: 0,
-      subscriptionFree: true,
-      subscriptionFreeUntil: new Date(now.getTime() + FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS * DAY_MS),
+      // Kept for isFounderCommissionFreeActive (drives the cockpit 0% display).
+      founderExpiresAt: founderCommissionFreeUntil,
+      subscriptionActive: true,
+      subscriptionStatus: 'free_founder',
+      subscriptionFreeUntil: founderSubscriptionFreeUntil,
+      commissionRateBps: 0,
+      commissionFreeUntil: founderCommissionFreeUntil,
+      canReceiveRides: true,
+      canReceiveRidesReason: 'founder_benefit_active',
+      walletStatus: 'not_required_during_commission_free_period',
     };
   } else {
+    // #101+: approved but NOT yet able to receive rides. Subscription must be
+    // activated first (Iteration 2B). No founder badge, no active subscription.
     roleFields = {
       founderEligible: false,
-      commissionRate: 0,
-      subscriptionActive: true,
-      subscriptionStartAt: serverTimestamp(),
+      subscriptionActive: false,
+      subscriptionStatus: 'required',
       subscriptionFreeUntil: null,
+      commissionRateBps: 0,
+      commissionFreeUntil: null,
+      commissionPromoStatus: 'pending_subscription_activation',
+      canReceiveRides: false,
+      canReceiveRidesReason: 'subscription_required',
+      walletStatus: 'not_required_yet',
     };
   }
 
