@@ -153,18 +153,21 @@ export function subscriptionDisplay(driver, nowMs) {
     return { mode: 'free', dateMs: freeMs };
   }
   if (d.subscriptionActive === true || d.subscriptionStatus === 'active') {
-    return { mode: 'active', dateMs: 0 };
+    // dateMs = when the active subscription expires (0 when not set).
+    return { mode: 'active', dateMs: toMillis(d.subscriptionExpiresAt) };
   }
   return { mode: 'required', dateMs: 0 };
 }
 
 // Commission display state for the dashboard.
-//   'free'     -> founder 0% window (dateMs = when it ends)
+//   'free'     -> 0% commission window (dateMs = when it ends)
 //   'standard' -> standard 15% per completed ride
-// Never reports "free"/0% without an expiry date (product rule).
+// The 0% window covers both the founder period (founderExpiresAt) and the
+// non-founder post-subscription promo (commissionFreeUntil set on activation).
+// Never reports "free"/0% without a future expiry date (product rule).
 export function commissionDisplay(driver, nowMs) {
   const freeMs = commissionFreeUntilMs(driver);
-  if (isFounderCommissionFreeActive(driver) && freeMs && nowMs < freeMs) {
+  if (freeMs && nowMs < freeMs) {
     return { mode: 'free', dateMs: freeMs };
   }
   return { mode: 'standard', dateMs: 0 };

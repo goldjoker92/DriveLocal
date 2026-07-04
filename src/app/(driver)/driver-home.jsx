@@ -9,7 +9,7 @@
 // wallet recharge, Pix, IAP or subscription payment happen here (Iteration 2A).
 
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
@@ -105,6 +105,10 @@ export default function DriverHome() {
   }, []);
 
   const nowMs = Date.now();
+  const { width } = useWindowDimensions();
+  // Stack the availability buttons vertically on narrow phones so the labels
+  // ("Disponível" / "Indisponível") never wrap awkwardly side by side.
+  const stackAvailabilityButtons = width < 360;
   const uid = auth.currentUser && auth.currentUser.uid;
   const displayName = driver && (driver.displayName || driver.fullName || driver.email);
   const founderActive = isFounderCommissionFreeActive(driver);
@@ -224,20 +228,25 @@ export default function DriverHome() {
             {/* DISPONIBILIDADE */}
             <AppCard>
               <SectionTitle>DISPONIBILIDADE</SectionTitle>
-              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <View
+                style={{
+                  flexDirection: stackAvailabilityButtons ? 'column' : 'row',
+                  gap: spacing.sm,
+                }}
+              >
                 <AppButton
                   title="Disponível"
                   variant={isAvailable ? 'primary' : 'secondary'}
                   onPress={goAvailable}
                   disabled={savingAvailability}
-                  style={{ flex: 1 }}
+                  style={stackAvailabilityButtons ? undefined : { flex: 1 }}
                 />
                 <AppButton
                   title="Indisponível"
                   variant={!isAvailable ? 'primary' : 'secondary'}
                   onPress={goOffline}
                   disabled={savingAvailability}
-                  style={{ flex: 1 }}
+                  style={stackAvailabilityButtons ? undefined : { flex: 1 }}
                 />
               </View>
               {!eligibility.eligible ? (
@@ -266,7 +275,12 @@ export default function DriverHome() {
               {subscription.mode === 'free' ? (
                 <Line tone="success">{`Assinatura grátis até ${formatDateBR(subscription.dateMs)}`}</Line>
               ) : subscription.mode === 'active' ? (
-                <Line tone="text">Assinatura ativa.</Line>
+                <>
+                  <Line tone="text">Assinatura ativa.</Line>
+                  {subscription.dateMs ? (
+                    <Line>{`Válida até ${formatDateBR(subscription.dateMs)}`}</Line>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <Line tone="text">Para receber corridas, ative sua assinatura.</Line>
