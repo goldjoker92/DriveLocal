@@ -23,6 +23,11 @@ import {
   getApprovedCount,
   incrementApprovedCount,
 } from './founderService';
+import {
+  SUBSCRIPTION_ACTIVE_DAYS,
+  SUBSCRIPTION_COMMISSION_FREE_DAYS,
+  SUBSCRIPTION_PAYMENT_MODE,
+} from '../constants/subscriptionRules';
 
 // Profile fields that must all be filled for profileStatus to be "complete".
 const REQUIRED_PROFILE_FIELDS = [
@@ -54,6 +59,19 @@ export async function updateDriverProfile(driverId, profileData) {
   await updateDoc(doc(db, 'drivers', driverId), {
     ...profileData,
     profileStatus: complete ? 'complete' : 'incomplete',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+// Sets the approved driver's availability (drivers/{uid}.availabilityStatus).
+// availabilityStatus: 'available' | 'offline'. Iteration 2A.
+// Eligibility (approved + allowed to receive rides) is enforced by the caller
+// via deriveEligibility; this only persists the chosen state. No money moves.
+export async function setDriverAvailability(driverId, availabilityStatus) {
+  console.log('[AVAILABILITY] setDriverAvailability', driverId, availabilityStatus);
+  await updateDoc(doc(db, 'drivers', driverId), {
+    availabilityStatus,
+    availabilityUpdatedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
 }
@@ -97,6 +115,15 @@ export async function getDriversByStatus(status) {
 // increments the per-service-area approved counter.
 export async function approveDriver(driverId, adminUid) {
   const driver = (await getDriver(driverId)) || {};
+
+  // Guard against double approval: an already-approved driver must not be
+  // re-approved, must not re-increment the founder counter, and must not append
+  // a duplicate "approved" history entry. No-op, so the caller just reloads.
+  if (driver.verificationStatus === 'approved') {
+    console.log('[APPROVE] Motorista já aprovado driverId=', driverId, '— ignorado');
+    return { alreadyApproved: true };
+  }
+
   const serviceAreaId = driver.serviceAreaId || SERVICE_AREA_HORIZONTE_CE_BR;
 
   const count = await getApprovedCount(serviceAreaId);
@@ -115,23 +142,44 @@ export async function approveDriver(driverId, adminUid) {
     }),
   };
 
+  // Approval does NOT move money. It only sets the driver's role, promo window
+  // and ride-eligibility flags so the driver cockpit (deriveEligibility) can
+  // read a single source of truth. Manual subscription activation for #101+ is
+  // deferred to Iteration 2B — approval only writes the "required" state here.
   let roleFields;
   if (isFounder) {
+    // Founder #001-#100: subscription and commission are free for the window,
+    // and the driver can receive rides immediately.
+    const founderCommissionFreeUntil = new Date(now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS);
+    const founderSubscriptionFreeUntil = new Date(now.getTime() + FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS * DAY_MS);
     roleFields = {
       founderEligible: true,
       founderGrantedAt: serverTimestamp(),
-      founderExpiresAt: new Date(now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS),
-      commissionRate: 0,
-      subscriptionFree: true,
-      subscriptionFreeUntil: new Date(now.getTime() + FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS * DAY_MS),
+      // Kept for isFounderCommissionFreeActive (drives the cockpit 0% display).
+      founderExpiresAt: founderCommissionFreeUntil,
+      subscriptionActive: true,
+      subscriptionStatus: 'free_founder',
+      subscriptionFreeUntil: founderSubscriptionFreeUntil,
+      commissionRateBps: 0,
+      commissionFreeUntil: founderCommissionFreeUntil,
+      canReceiveRides: true,
+      canReceiveRidesReason: 'founder_benefit_active',
+      walletStatus: 'not_required_during_commission_free_period',
     };
   } else {
+    // #101+: approved but NOT yet able to receive rides. Subscription must be
+    // activated first (Iteration 2B). No founder badge, no active subscription.
     roleFields = {
       founderEligible: false,
-      commissionRate: 0,
-      subscriptionActive: true,
-      subscriptionStartAt: serverTimestamp(),
+      subscriptionActive: false,
+      subscriptionStatus: 'required',
       subscriptionFreeUntil: null,
+      commissionRateBps: 0,
+      commissionFreeUntil: null,
+      commissionPromoStatus: 'pending_subscription_activation',
+      canReceiveRides: false,
+      canReceiveRidesReason: 'subscription_required',
+      walletStatus: 'not_required_yet',
     };
   }
 
@@ -175,6 +223,75 @@ export async function requestDriverCorrection(driverId, adminUid, correctionReas
       reason: correctionReason || '',
     }),
   });
+}
+
+// True when a driver holds an active founder benefit and must NOT be touched by
+// the non-founder subscription actions (protects founder fields, Iteration 2B).
+function isFounderDriverDoc(driver) {
+  const d = driver || {};
+  return d.founderEligible === true || d.subscriptionStatus === 'free_founder';
+}
+
+// Admin/dev test action (Iteration 2B): manually mark an approved NON-founder
+// driver's subscription as active so #101+ ride-eligibility can be tested before
+// real Pix payments exist. Active for 30 days; grants 0% commission for 60 days.
+// Refuses to run on founder drivers so their benefits are never overwritten.
+// No money is moved and no real payment integration is involved.
+export async function activateDriverSubscription(driverId) {
+  const driver = (await getDriver(driverId)) || {};
+  if (isFounderDriverDoc(driver)) {
+    console.log('[SUBSCRIPTION] activate ignorado — motorista fundador driverId=', driverId);
+    return { skipped: 'founder' };
+  }
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + SUBSCRIPTION_ACTIVE_DAYS * DAY_MS);
+  const commissionFreeUntil = new Date(now.getTime() + SUBSCRIPTION_COMMISSION_FREE_DAYS * DAY_MS);
+  console.log('[SUBSCRIPTION] activate driverId=', driverId);
+  await updateDoc(doc(db, 'drivers', driverId), {
+    subscriptionStatus: 'active',
+    subscriptionActive: true,
+    subscriptionActivatedAt: serverTimestamp(),
+    subscriptionExpiresAt: expiresAt,
+    subscriptionPaymentMode: SUBSCRIPTION_PAYMENT_MODE.MANUAL_ADMIN_TEST,
+    subscriptionLastConfirmedAt: serverTimestamp(),
+    canReceiveRides: true,
+    canReceiveRidesReason: 'subscription_active',
+    commissionRateBps: 0,
+    commissionFreeUntil,
+    commissionPromoStatus: 'active_after_subscription',
+    walletStatus: 'not_required_during_commission_free_period',
+    updatedAt: serverTimestamp(),
+  });
+  return { activated: true };
+}
+
+// Admin/dev test action (Iteration 2B): reset an approved NON-founder driver's
+// subscription back to "required" so the #101+ blocked state can be re-tested.
+// Also forces availability offline. Refuses to run on founder drivers.
+export async function resetDriverSubscription(driverId) {
+  const driver = (await getDriver(driverId)) || {};
+  if (isFounderDriverDoc(driver)) {
+    console.log('[SUBSCRIPTION] reset ignorado — motorista fundador driverId=', driverId);
+    return { skipped: 'founder' };
+  }
+  console.log('[SUBSCRIPTION] reset driverId=', driverId);
+  await updateDoc(doc(db, 'drivers', driverId), {
+    subscriptionStatus: 'required',
+    subscriptionActive: false,
+    subscriptionActivatedAt: null,
+    subscriptionExpiresAt: null,
+    subscriptionPaymentMode: null,
+    subscriptionLastConfirmedAt: null,
+    canReceiveRides: false,
+    canReceiveRidesReason: 'subscription_required',
+    commissionRateBps: 0,
+    commissionFreeUntil: null,
+    commissionPromoStatus: 'pending_subscription_activation',
+    walletStatus: 'not_required_yet',
+    availabilityStatus: 'offline',
+    updatedAt: serverTimestamp(),
+  });
+  return { reset: true };
 }
 
 // Checks whether the given identity values already exist on another driver.
