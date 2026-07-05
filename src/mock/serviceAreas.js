@@ -11,6 +11,13 @@ export const mockServiceAreas = [
     id: SERVICE_AREA_HORIZONTE_CE_BR,
     name: 'Horizonte / CE',
     active: true,
+    // City/state used by the SIMPLE service-area check (utils/serviceArea.js).
+    // stateNames covers both the abbreviation and the full name a reverse
+    // geocode may return ("CE" or "Ceará"). Not a polygon (deferred).
+    city: 'Horizonte',
+    state: 'CE',
+    stateNames: ['CE', 'Ceará'],
+    country: 'BR',
     center: { lat: -4.0992, lng: -38.4958 },
     features: {
       vehicleTypes: [VEHICLE_MOTO, VEHICLE_CAR],

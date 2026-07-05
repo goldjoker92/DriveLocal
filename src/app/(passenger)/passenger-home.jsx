@@ -1,37 +1,51 @@
-// Passenger home (route "/passenger-home").
-// Placeholder: map stand-in + this passenger's rides from mock data.
+// Passenger home (route "/passenger-home"). Iteration 3A.
+// Real signed-in passenger (passengers/{uid}); no mock rides. Entry point to the
+// ride-request form. Ride history/status is a later iteration.
 
-import { ScrollView } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ScrollView, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import MapPlaceholder from '../../components/MapPlaceholder';
-import RideRequestCard from '../../components/RideRequestCard';
 import AppButton from '../../components/AppButton';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
-import { mockRides } from '../../mock/mockRides';
+import { typography, fontFamily } from '../../constants/typography';
+import { auth } from '../../config/firebase';
+import { getPassenger } from '../../services/passengerService';
 
 export default function PassengerHome() {
   const router = useRouter();
-  // For Step 1 we hard-code the signed-in passenger.
-  const myRides = mockRides.filter((r) => r.passengerId === 'u_p1');
+  const [passenger, setPassenger] = useState(null);
+
+  useEffect(() => {
+    const uid = auth.currentUser && auth.currentUser.uid;
+    if (!uid) {
+      router.replace('/passenger-register');
+      return;
+    }
+    getPassenger(uid)
+      .then((p) => setPassenger(p))
+      .catch((e) => console.log('[PASSENGER_HOME] load error', e.message));
+  }, []);
 
   return (
-    <SafeAreaView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      edges={['top', 'bottom']}
-    >
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Passageiro" subtitle="Maria Souza" onBack={() => router.back()} />
+        <Header
+          title="Passageiro"
+          subtitle={passenger && passenger.fullName ? passenger.fullName : 'Horizonte / CE'}
+          onBack={() => router.back()}
+        />
 
         <MapPlaceholder label="Sua localização (placeholder)" />
 
-        <AppButton title="Pedir corrida" onPress={() => router.push('/select-route')} />
+        <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+          Pagamento direto por Pix ao motorista.
+        </Text>
 
-        {myRides.map((ride) => (
-          <RideRequestCard key={ride.id} ride={ride} />
-        ))}
+        <AppButton title="Pedir corrida" onPress={() => router.push('/request-ride')} />
       </ScrollView>
     </SafeAreaView>
   );

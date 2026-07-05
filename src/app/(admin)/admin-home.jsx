@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react';
 import { ScrollView, View, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
 import AdminStatCard from '../../components/AdminStatCard';
 import { colors } from '../../constants/colors';
@@ -23,6 +23,7 @@ import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth, db } from '../../config/firebase';
 import { VERIFICATION_STATUS } from '../../constants/driverStatuses';
+import { RIDE_REQUEST_PENDING } from '../../constants/rideRequestStatuses';
 
 // A titled section: caption title once, then its content below. Vertical
 // spacing between sections is handled by the ScrollView's `gap`.
@@ -68,6 +69,9 @@ export default function AdminHome() {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Iteration 3A: live count of pending passenger ride requests.
+  const [rideRequestsPending, setRideRequestsPending] = useState(0);
+  const [reqLoading, setReqLoading] = useState(true);
 
   // Garde admin : l'utilisateur courant doit exister dans admins/{uid}.
   useEffect(() => {
@@ -107,6 +111,24 @@ export default function AdminHome() {
         console.log('[ADMIN] admin-home snapshot error', e.message);
         setError('Não foi possível carregar os motoristas.');
         setLoading(false);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  // Real-time count of pending ride requests. Errors are logged, not shown, so
+  // they never disrupt the drivers console. (Iteration 3A.)
+  useEffect(() => {
+    const q = query(collection(db, 'rideRequests'), where('status', '==', RIDE_REQUEST_PENDING));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setRideRequestsPending(snapshot.size);
+        setReqLoading(false);
+      },
+      (e) => {
+        console.log('[ADMIN] admin-home rideRequests snapshot error', e.message);
+        setReqLoading(false);
       }
     );
     return () => unsubscribe();
@@ -199,6 +221,18 @@ export default function AdminHome() {
               label="Todos"
               value={loadingValue(drivers.length)}
               onPress={() => openList('all')}
+            />
+          </Grid>
+        </Section>
+
+        {/* SOLICITAÇÕES DE CORRIDA — real pending count (Iteration 3A). Clickable. */}
+        <Section title="SOLICITAÇÕES DE CORRIDA">
+          <Grid>
+            <AdminStatCard
+              style={CELL}
+              label="Corridas pendentes"
+              value={reqLoading ? '…' : String(rideRequestsPending)}
+              onPress={() => router.push('/(admin)/ride-requests')}
             />
           </Grid>
         </Section>
