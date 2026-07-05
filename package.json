@@ -17,6 +17,7 @@
     "expo-image-manipulator": "~56.0.20",
     "expo-image-picker": "~56.0.19",
     "expo-linking": "~56.0.14",
+    "expo-location": "~56.0.19",
     "expo-router": "~56.2.12",
     "expo-splash-screen": "~56.0.11",
     "expo-status-bar": "~56.0.4",

@@ -37,6 +37,12 @@
             "imageWidth": 76
           }
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "O DriveLocal usa sua localização para preencher o endereço de origem da sua corrida."
+        }
       ]
     ],
     "experiments": {

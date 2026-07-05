@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import MobileShell from '../components/MobileShell';
 import MockMapCard from '../components/MockMapCard';
 import TrustChip from '../components/TrustChip';
+import { auth } from '../config/firebase';
 
 // Landing palette (kept local so the rest of the app stays unchanged).
 const C = {
@@ -116,13 +117,24 @@ export default function Landing() {
   const router = useRouter();
   const [origem, setOrigem] = useState('');
   const [destino, setDestino] = useState('');
-  const [rideSoon, setRideSoon] = useState(false);
 
-  // Passenger ride flow is not built yet: show a clean "Em breve" message
-  // instead of navigating into mock ride data.
+  // Passenger ride flow (Iteration 3A). Signed-in passengers go straight to the
+  // ride-request form; new passengers create an account first. The typed
+  // origin/destination are forwarded so nothing the passenger wrote is lost.
   function onRequestRide() {
-    console.log('[LANDING] ride CTA pressed (flow not implemented) -> Em breve message');
-    setRideSoon(true);
+    const signedIn = !!(auth.currentUser && auth.currentUser.uid);
+    console.log('[LANDING] ride CTA pressed signedIn=', signedIn);
+    if (signedIn) {
+      router.push({
+        pathname: '/request-ride',
+        params: { originText: origem.trim(), destinationText: destino.trim() },
+      });
+    } else {
+      router.push({
+        pathname: '/passenger-register',
+        params: { origem: origem.trim(), destino: destino.trim() },
+      });
+    }
   }
 
   return (
@@ -160,13 +172,7 @@ export default function Landing() {
 
           <CtaButton label="Ver preço / pedir corrida" onPress={onRequestRide} kind="primary" />
 
-          {rideSoon ? (
-            <Text style={{ fontSize: 13.5, color: C.cta, fontWeight: '700' }}>
-              Em breve: solicitação de corrida em Horizonte.
-            </Text>
-          ) : (
-            <Text style={{ fontSize: 13, color: C.muted }}>Pagamento direto por Pix ao motorista.</Text>
-          )}
+          <Text style={{ fontSize: 13, color: C.muted }}>Pagamento direto por Pix ao motorista.</Text>
 
           {/* Trust chips */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2 }}>
