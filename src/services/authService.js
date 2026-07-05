@@ -38,6 +38,28 @@ export async function registerDriver(email, password) {
   return user;
 }
 
+// Creates a Firebase Auth user, then a passengers/{uid} document. Iteration 3A.
+// Passengers are simple: no CPF, no documents, no vehicle. `role` is stored for
+// convenience, but the source of truth is still collection membership.
+export async function registerPassenger(email, password, profile) {
+  const p = profile || {};
+  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  const user = credential.user;
+
+  await setDoc(doc(db, 'passengers', user.uid), {
+    uid: user.uid,
+    email,
+    fullName: p.fullName || '',
+    whatsApp: p.whatsApp || '',
+    role: 'passenger',
+    serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return user;
+}
+
 // Signs the user in, then resolves their role.
 // Order matters: admins/{uid} first (highest privilege), then drivers/{uid},
 // then passengers/{uid}, otherwise "unknown".
