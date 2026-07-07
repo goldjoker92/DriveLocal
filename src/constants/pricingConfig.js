@@ -15,6 +15,10 @@
 
 import { VEHICLE_MOTO, VEHICLE_CAR } from './vehicleTypes';
 
+// Version tag stored on a priced ride so a historical ride keeps the pricing it
+// was created with, even after the tables change. Bump on any tier/commission change.
+export const PRICING_VERSION = 'v1';
+
 // ---------------------------------------------------------------------------
 // Ride price tiers (centavos)
 // ---------------------------------------------------------------------------
