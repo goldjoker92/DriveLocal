@@ -56,3 +56,43 @@ export function checkOriginServiceArea({ city, state, source } = {}) {
     expectedState,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Ride-level service-area validation (DriveLocal V1 pricing foundation).
+// ---------------------------------------------------------------------------
+// Business rule (see CLAUDE.md §G and the pricing spec):
+//   - Reject when the PICKUP is outside Horizonte      -> OUT_OF_SERVICE_AREA
+//   - Reject when the DESTINATION is outside Horizonte -> OUT_OF_SERVICE_AREA
+//   - Accept when BOTH are inside Horizonte            -> ALLOWED (price by distance)
+//
+// IMPORTANT: distance is NOT a rejection reason. A valid local ride inside
+// Horizonte can be > 10 km — never return OUT_OF_RANGE for it. Distance only
+// selects the price tier in utils/ridePricing.js.
+//
+// TODO(service-area): this reuses the SIMPLE city/state check (no polygon yet).
+// When the official Horizonte boundary (polygon/multipolygon + border buffer)
+// is available, plug the GPS point-in-polygon test in HERE only — the ride flow
+// calls this function and must not need to change. See mock/serviceAreas.js and
+// seed/serviceAreas/HORIZONTE_CE_BR.json for where the boundary config will live.
+//
+// `pickup` and `destination` accept { city, state, source } (source 'gps' or
+// 'manual'), matching checkOriginServiceArea. When a point cannot be determined
+// we ask for manual confirmation instead of hard-blocking (locked 3A behavior).
+export function checkRideServiceArea({ pickup, destination } = {}) {
+  const pickupCheck = checkOriginServiceArea(pickup || {});
+  const destinationCheck = checkOriginServiceArea(destination || {});
+
+  if (pickupCheck.status === 'blocked') {
+    console.log('[PricingV1] pickup OUT_OF_SERVICE_AREA');
+    return { status: 'OUT_OF_SERVICE_AREA', at: 'pickup', pickupCheck, destinationCheck };
+  }
+  if (destinationCheck.status === 'blocked') {
+    console.log('[PricingV1] destination OUT_OF_SERVICE_AREA');
+    return { status: 'OUT_OF_SERVICE_AREA', at: 'destination', pickupCheck, destinationCheck };
+  }
+  if (pickupCheck.status === 'undetermined' || destinationCheck.status === 'undetermined') {
+    return { status: 'NEEDS_MANUAL_CONFIRMATION', pickupCheck, destinationCheck };
+  }
+
+  return { status: 'ALLOWED', pickupCheck, destinationCheck };
+}
