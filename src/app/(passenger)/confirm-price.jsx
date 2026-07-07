@@ -10,6 +10,7 @@
 // geocoded points + Firestore ride creation are wired in a later step — see the
 // TODO(ride-flow) block below for exactly which fields to persist.
 
+import { useState } from 'react';
 import { ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -25,6 +26,8 @@ import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { PRICING_VERSION } from '../../constants/pricingConfig';
 import { getRidePricing } from '../../utils/ridePricing';
 import { checkRideServiceArea } from '../../utils/serviceArea';
+import { auth } from '../../config/firebase';
+import { createRideRequest } from '../../services/rideRequestService';
 
 // PT-BR copy shown when the ride is outside the Horizonte service area.
 const OUT_OF_AREA_MSG =
@@ -32,6 +35,7 @@ const OUT_OF_AREA_MSG =
 
 export default function ConfirmPrice() {
   const router = useRouter();
+  const [submitting, setSubmitting] = useState(false);
   const ride = mockRides[0]; // Step 1 mock origin/destination + vehicle/distance.
 
   // Distance in km (pricing tiers are in km; mock stores meters). All money below
@@ -81,10 +85,41 @@ export default function ConfirmPrice() {
       }
     : null;
 
-  function handleRequest() {
+  async function handleRequest() {
     if (outOfArea) return;
-    // Carry the price snapshot forward to the (mock) searching screen. Harmless
-    // for the mock flow; becomes the ride creation payload once wired.
+    const uid = auth.currentUser && auth.currentUser.uid;
+
+    // Persist a REAL priced rideRequest so the driver flow can later settle
+    // commission against a real rideId. Falls back to the mock navigation when
+    // the passenger is not signed in or persistence fails — the Step 1 flow
+    // must never break. Origin/destination text still come from the mock ride;
+    // TODO(ride-flow): replace with the real select-route origin/destination.
+    if (uid && priceSnapshot) {
+      try {
+        setSubmitting(true);
+        const rideId = await createRideRequest({
+          passengerId: uid,
+          originText: ride.pickup.address,
+          destinationText: ride.destination.address,
+          vehicleType: ride.vehicleType,
+          ridePriceCentavos: priceSnapshot.ridePriceCentavos,
+          driverAmountCentavos: priceSnapshot.driverAmountCentavos,
+          distanceKm: priceSnapshot.distanceKm,
+          paymentMethod: priceSnapshot.paymentMethod,
+          pricingVersion: priceSnapshot.pricingVersion,
+          serviceAreaId: priceSnapshot.serviceAreaId,
+        });
+        console.log('[PricingV1] persisted rideRequest rideId=', rideId);
+        router.push({ pathname: '/searching', params: { rideId } });
+        return;
+      } catch (e) {
+        console.log('[PricingV1] persist failed, using mock nav', e.code || e.message);
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    // Mock fallback: carry the snapshot forward only (no real ride doc).
     router.push({
       pathname: '/searching',
       params: { priceSnapshot: JSON.stringify(priceSnapshot) },
@@ -110,7 +145,11 @@ export default function ConfirmPrice() {
         {outOfArea ? (
           <AdminTableRow label={OUT_OF_AREA_MSG} />
         ) : null}
-        <AppButton title="Pedir corrida" onPress={handleRequest} disabled={outOfArea} />
+        <AppButton
+          title={submitting ? 'Enviando…' : 'Pedir corrida'}
+          onPress={handleRequest}
+          disabled={outOfArea || submitting}
+        />
       </ScrollView>
     </SafeAreaView>
   );

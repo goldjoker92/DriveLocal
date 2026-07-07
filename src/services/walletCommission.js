@@ -86,6 +86,25 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
     const commissionBps = calculateCommissionBps(vehicleType, distanceKm, driver, now);
     const platformFeeCentavos = calculatePlatformFeeCentavos(ridePriceCentavos, commissionBps);
 
+    const currentBalance = Number(driver.walletBalanceCentavos) || 0;
+
+    // Reject settlement when commission applies but the wallet cannot cover it.
+    // The ride is NOT marked settled here, so it can be retried after a recharge
+    // (no counter increment, no debit). Business rule: only commissionable rides
+    // are ever blocked by the wallet — a 0% ride always settles.
+    if (platformFeeCentavos > 0 && currentBalance < platformFeeCentavos) {
+      console.log(
+        '[WalletCommission] rejected WALLET_BALANCE_TOO_LOW rideId=', rideId,
+        'need=', platformFeeCentavos, 'have=', currentBalance
+      );
+      return {
+        rejected: true,
+        reason: 'WALLET_BALANCE_TOO_LOW',
+        platformFeeCentavos,
+        walletBalanceCentavos: currentBalance,
+      };
+    }
+
     // Non-founder free-ride counter increments once per completed ride.
     const driverWrite = { updatedAt: serverTimestamp() };
     if (!isFounderDriver(driver)) {
@@ -93,17 +112,14 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
       driverWrite.freeRideCountUsed = used + 1;
     }
 
-    // Debit the wallet only when commission actually applies. Eligibility checks
-    // (canDriverReceiveRide) already prevent low-balance drivers from accepting
-    // commissionable rides, so a debit that dips below zero is an edge case we
-    // record rather than reject (the ride already happened).
-    let newBalance = Number(driver.walletBalanceCentavos) || 0;
+    // Debit the wallet only when commission actually applies.
+    let newBalance = currentBalance;
     if (platformFeeCentavos > 0) {
-      newBalance = newBalance - platformFeeCentavos;
+      newBalance = currentBalance - platformFeeCentavos;
       driverWrite.walletBalanceCentavos = newBalance;
-      console.log('[WalletCommission] debit', platformFeeCentavos, 'centavos -> balance', newBalance);
+      console.log('[WalletCommission] debit success', platformFeeCentavos, 'centavos -> balance', newBalance);
     } else {
-      console.log('[WalletCommission] no commission for rideId=', rideId, '(free window or 0% tier)');
+      console.log('[WalletCommission] skipped debit — 0% commission (free window or 0% tier) rideId=', rideId);
     }
 
     // Persist driver + ride idempotency fields in the same transaction.
@@ -113,6 +129,7 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
       platformFeeCentavos,
       commissionDebited: platformFeeCentavos > 0,
       commissionChargedAt: serverTimestamp(),
+      commissionSettledAt: serverTimestamp(),
       commissionTransactionId: `commission_${rideId}`,
       commissionSettled: true, //  the idempotency guard
       updatedAt: serverTimestamp(),
