@@ -8,6 +8,25 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
+    // True when {uid} is a registered AND admin-APPROVED driver.
+    // Source of truth: drivers/{uid}.verificationStatus == "approved"
+    // (written by driverService.approveDriver; the app has no isApproved field).
+    function isApprovedDriver(uid) {
+      return exists(/databases/$(database)/documents/drivers/$(uid)) &&
+        get(/databases/$(database)/documents/drivers/$(uid)).data.verificationStatus == 'approved';
+    }
+
+    // PricingV1: on a rideRequests update, the passenger-owned pricing snapshot
+    // must NOT change. Protects commission integrity from a driver rewriting the
+    // fare/distance. (Does NOT protect wallet/commission math — see note below.)
+    function ridePricingFieldsUnchanged() {
+      return request.resource.data.passengerId == resource.data.passengerId &&
+        request.resource.data.ridePriceCentavos == resource.data.ridePriceCentavos &&
+        request.resource.data.driverAmountCentavos == resource.data.driverAmountCentavos &&
+        request.resource.data.distanceKm == resource.data.distanceKm &&
+        request.resource.data.vehicleType == resource.data.vehicleType;
+    }
+
     match /admins/{adminId} {
       allow read: if request.auth != null;
       allow write: if false;
@@ -38,15 +57,38 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Iteration 3A — a passenger creates/reads their own ride requests; admins
-    // read all. Driver accept/dispatch/assignment is a LATER iteration, so
-    // update/delete stay closed and drivers have no access yet.
+    // PricingV1 bridge — a passenger creates/reads their own ride requests;
+    // admins read all; an APPROVED driver may read PENDING offers and rides
+    // assigned to them, claim a pending ride for themselves, then update the
+    // ride they own (accept -> complete -> commission settlement).
     match /rideRequests/{rideId} {
       allow create: if request.auth != null &&
         request.resource.data.passengerId == request.auth.uid;
-      allow read:   if request.auth != null &&
-        (resource.data.passengerId == request.auth.uid || isAdmin());
-      allow update, delete: if false;
+
+      // Read: passenger owner, the assigned driver, an admin, or an APPROVED
+      // driver but ONLY for still-pending offers (limits passenger data exposure).
+      allow read: if request.auth != null &&
+        (resource.data.passengerId == request.auth.uid ||
+         resource.data.driverId == request.auth.uid ||
+         isAdmin() ||
+         (isApprovedDriver(request.auth.uid) && resource.data.status == 'pending'));
+
+      // Update: admins always; otherwise an APPROVED driver who leaves the
+      // pricing snapshot unchanged AND either
+      //   (a) CLAIMS a pending, unassigned ride, setting driverId to themselves, or
+      //   (b) is the already-assigned driver (complete / settle commission).
+      allow update: if isAdmin() ||
+        (request.auth != null &&
+         isApprovedDriver(request.auth.uid) &&
+         ridePricingFieldsUnchanged() &&
+          (
+            (resource.data.driverId == null &&
+             resource.data.status == 'pending' &&
+             request.resource.data.driverId == request.auth.uid) ||
+            resource.data.driverId == request.auth.uid
+          ));
+
+      allow delete: if false;
     }
 
     match /{document=**} {
