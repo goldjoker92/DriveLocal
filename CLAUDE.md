@@ -230,7 +230,45 @@ rules.pickupMustBeInside, rules.destinationMustBeInside, rules.allowBorderlineMa
 
 ### J. Do NOT build yet / NE PAS construire pour l'instant
 
-**EN / FR — do not build yet:** wallet automation; Pix automation; PSP integration; Cloud Functions unless specifically approved; public Play Store release; production multi-city rollout; biometric verification; facial recognition; complex anti-fraud ML; full Uber-like matching; heavy background tracking; passenger/driver web flows; notification system during Iteration 1A.
+**EN / FR — still prohibited:** public Play Store release; production multi-city rollout; biometric verification; facial recognition; complex anti-fraud ML; full Uber-like matching; heavy background tracking; passenger/driver web flows. **Note:** Cloud Functions, Mercado Pago PSP integration, Pix subscription/top-up automation, wallet automation, backend commission settlement, and FCM notifications are **now APPROVED for dev implementation** — see §3ter (D2). Public production deployment, production credentials, and real-money testing remain prohibited without a separate explicit approval.
+
+---
+
+## 3ter. DriveLocal V1.1 — Approved Backend & Payments Scope (2026-07-14) / Périmètre backend & paiements approuvé
+
+> **EN — Precedence:** Formally approved by the project owner on 2026-07-14 (decisions D1–D4). This section **takes precedence** over any earlier prohibition in this document where they conflict (notably §3bis.A "no Cloud Functions", the "PSP integration / Pix automation / wallet automation" exclusions, and §16 Iteration 7). Approval is for **implementation only** — it does **not** authorize production deployment, production credentials, real public users, real-money production testing, or pushing/merging/deploying without a separate explicit approval.
+>
+> **FR — Précédence :** Approuvée par le propriétaire le 14/07/2026 (décisions D1–D4). Cette section **prévaut** sur toute interdiction antérieure en cas de conflit (notamment §3bis.A « pas de Cloud Functions », les exclusions « PSP / Pix / portefeuille », et §16 Itération 7). Approbation **pour l'implémentation uniquement** — n'autorise **pas** le déploiement production, les identifiants de production, de vrais utilisateurs publics, les tests en argent réel, ni push/merge/déploiement sans accord explicite distinct.
+
+### D1 — Backend language: JavaScript only / Langage backend : JavaScript uniquement
+
+**EN:** All Firebase Cloud Functions stay in **JavaScript** — **never TypeScript**, no TS compilation layer. For critical/financial backend code use: modern JS; small focused modules (one domain responsibility each); **JSDoc** for important domain objects and function contracts; input validation at every public function boundary; stable error codes; structured logs with `traceId`; deterministic tests (injected clock, integer centavos); `// @ts-check` where compatible and useful. Confirms §2 (JS/JSX only) for the backend as well.
+
+**FR:** Toutes les Cloud Functions restent en **JavaScript** — **jamais TypeScript**, pas de couche de compilation TS. Pour le code critique/financier : JS moderne ; petits modules à responsabilité unique ; **JSDoc** ; validation des entrées à chaque frontière publique ; codes d'erreur stables ; logs structurés avec `traceId` ; tests déterministes ; `// @ts-check` si utile.
+
+### D2 — Approved scope expansion (dev only) / Périmètre approuvé (dev uniquement)
+
+**EN — Now APPROVED for implementation:** Firebase Cloud Functions (JavaScript); Mercado Pago Orders API; Mercado Pago signed webhook; driver subscription payments by Pix; driver wallet top-ups by Pix; automated wallet ledger; wallet holds on secure ride acceptance; backend commission settlement; backend `freeRideCountUsed` increment; backend founder assignment; backend subscription activation; secure transactional ride acceptance; Firebase Cloud Messaging (FCM) notifications.
+- **Financial operations are backend-only.** The client never writes money/wallet/ledger/approval/founder/commission/subscription/completed-ride-counter fields.
+- **Secrets live only in Firebase Secret Manager** — never in the client, source files, Firestore, logs, docs, prompts, screenshots, or Git.
+- **Dev deployment is limited to `drivelocal-dev`**, and only inside the explicitly approved deployment block (BLOCK 13).
+
+**FR — Désormais APPROUVÉ :** Cloud Functions (JS) ; API Orders Mercado Pago ; webhook signé ; abonnements chauffeur par Pix ; recharges portefeuille par Pix ; grand livre automatisé ; holds à l'acceptation sécurisée ; règlement de commission backend ; incrément `freeRideCountUsed` backend ; attribution fondateur backend ; activation d'abonnement backend ; acceptation transactionnelle sécurisée ; notifications FCM. Opérations financières **backend uniquement** (le client n'écrit aucun champ argent/portefeuille/approbation/fondateur/commission/abonnement/compteur) ; secrets **uniquement** dans Firebase Secret Manager ; déploiement dev limité à **drivelocal-dev**.
+
+### D3 — Final pricing model / Modèle de prix final
+
+**EN:** Replaces the old distance-tier commission model. Horizonte initial pricing (integer centavos):
+- **Moto:** `baseFareCentavos 250`, `perKmCentavos 95`, `perMinuteCentavos 12`, `minimumPassengerFareCentavos 500`, `normalCommissionBps 1200`, `minimumDriverNetCentavos 500`.
+- **Car:** `baseFareCentavos 350`, `perKmCentavos 135`, `perMinuteCentavos 20`, `minimumPassengerFareCentavos 800`, `normalCommissionBps 1500`, `minimumDriverNetCentavos 800`.
+- **Remove** the old rule where moto rides over 5 km have 0% normal commission. Commission is **capped** when necessary to preserve the minimum driver net, and is **never negative**. Pricing stays **configurable per city**, **versioned**, computed in **integer centavos**, and persisted as an **immutable ride snapshot** (with `pricingConfigVersion`).
+
+**FR:** Remplace le modèle par paliers. Prix initial Horizonte (centavos entiers) — Moto : base 250, /km 95, /min 12, min passager 500, commission 1200 bps, net min 500 ; Carro : base 350, /km 135, /min 20, min passager 800, commission 1500 bps, net min 800. **Supprimer** la règle « moto > 5 km = 0 % ». Commission **plafonnée** pour préserver le net minimum, jamais négative. Prix **configurable par ville**, **versionné**, en **centavos entiers**, snapshot **immuable** par course.
+
+### D4 — Git sequencing / Séquencement Git
+
+**EN:** Do not merge the pricing branch before the new pricing corrections. Order: (1) clean the dirty package files (Expo SDK 56 patch alignment only) + governance; (2) implement **BLOCK 01** (pricing/domain) on `feature/v1-pricing-foundation-3a5`; (3) open the PR for the full pricing foundation; (4) merge to `main` **only after explicit approval**; (5) cut backend branches from the updated `main`. Post-merge block order: **02** functions/debug → **04** Firestore security → **03** secure driver domain → **05** MP order creation → **06** MP webhook → **07** real passenger request → **08** dispatch + wallet hold → **09** Android notifications → **10** ride lifecycle + settlement → **11** admin dashboard → **12** hardening → **13** drivelocal-dev E2E → **14** closed Android pilot. **Android-only MVP** (see Android Build Strategy). No production deploy, push, or merge without explicit approval.
+
+**FR:** Ne pas merger la branche pricing avant les corrections. Ordre : (1) nettoyer les fichiers package (alignement patch Expo SDK 56 uniquement) + gouvernance ; (2) **BLOC 01** sur `feature/v1-pricing-foundation-3a5` ; (3) PR de la fondation pricing ; (4) merge dans `main` **après accord explicite** ; (5) branches backend depuis `main` à jour. Ordre post-merge : 02 → 04 → 03 → 05 → 06 → 07 → 08 → 09 → 10 → 11 → 12 → 13 → 14. **MVP Android uniquement.** Pas de déploiement/push/merge production sans accord explicite.
 
 ---
 
