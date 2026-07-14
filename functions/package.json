@@ -1,0 +1,21 @@
+{
+  "name": "drivelocal-functions",
+  "version": "1.0.0",
+  "description": "DriveLocal Firebase Cloud Functions (JavaScript, gen 2).",
+  "private": true,
+  "main": "src/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "test": "jest --ci --runInBand",
+    "serve": "firebase emulators:start --only functions,firestore --project drivelocal-dev"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
