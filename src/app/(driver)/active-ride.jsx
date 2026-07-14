@@ -14,7 +14,7 @@
 import { useState } from 'react';
 import { ScrollView, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
@@ -30,7 +30,11 @@ import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 
 export default function ActiveRide() {
   const router = useRouter();
-  const ride = mockRides[0]; // mock active ride
+  const params = useLocalSearchParams();
+  // PricingV1 bridge: carry the real rideId (when present) through to finish-ride
+  // so commission is settled against the real ride document.
+  const rideId = typeof params.rideId === 'string' ? params.rideId : null;
+  const ride = mockRides[0]; // mock active ride display
 
   // phase: 'pickup'  -> driving to the passenger
   //        'arrived' -> at pickup, waiting for passenger to board
@@ -92,7 +96,12 @@ export default function ActiveRide() {
           <AppButton title="Passageiro embarcou" onPress={() => setPhase('dropoff')} />
         ) : null}
         {phase === 'dropoff' ? (
-          <AppButton title="Finalizar corrida" onPress={() => router.push('/finish-ride')} />
+          <AppButton
+            title="Finalizar corrida"
+            onPress={() =>
+              router.push(rideId ? { pathname: '/finish-ride', params: { rideId } } : '/finish-ride')
+            }
+          />
         ) : null}
       </ScrollView>
     </SafeAreaView>

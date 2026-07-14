@@ -44,6 +44,36 @@ export async function isFounderEligible(serviceAreaId) {
   return count < FOUNDER_DEFAULT_MAX_DRIVERS;
 }
 
+// Atomically claims the next approval slot for a service area.
+//
+// Business rule: the first 100 admin-approved drivers per service area become
+// founders. The claim MUST be atomic so two drivers approved at the same time
+// can never receive the same founderNumber (a Firestore transaction reads and
+// increments the counter in one shot).
+//
+// Returns { approvalNumber, isFounder, founderNumber } where:
+//   approvalNumber : sequential position among approved drivers (1-based)
+//   isFounder      : approvalNumber <= FOUNDER_DEFAULT_MAX_DRIVERS
+//   founderNumber  : same as approvalNumber when founder, else null
+export async function assignFounderStatusIfEligible(serviceAreaId) {
+  const ref = counterRef(serviceAreaId);
+  const approvalNumber = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.exists() ? snap.data().approvedCount || 0 : 0;
+    const next = current + 1;
+    tx.set(ref, { approvedCount: next }, { merge: true });
+    return next;
+  });
+
+  const isFounder = approvalNumber <= FOUNDER_DEFAULT_MAX_DRIVERS;
+  console.log('[SubscriptionV1] founder claim approvalNumber=', approvalNumber, 'isFounder=', isFounder);
+  return {
+    approvalNumber,
+    isFounder,
+    founderNumber: isFounder ? approvalNumber : null,
+  };
+}
+
 // True when a driver is a founder AND still inside the commission-free window.
 export function isFounderCommissionFreeActive(driver) {
   if (!driver || driver.founderEligible !== true) return false;

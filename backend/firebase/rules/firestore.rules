@@ -38,15 +38,20 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Iteration 3A — a passenger creates/reads their own ride requests; admins
-    // read all. Driver accept/dispatch/assignment is a LATER iteration, so
-    // update/delete stay closed and drivers have no access yet.
+    // Containment (pre-BLOCK 04/08). A passenger creates/reads ONLY their own
+    // ride request; admins may read. Drivers have NO access here: no listing or
+    // reading of pending rides, and no client-side claim/accept/assignment/
+    // status/pricing/commission/wallet/settlement/completion writes. All ride
+    // mutation, targeted driver offers, and transactional acceptance move to
+    // secure Cloud Functions (BLOCK 08) under the final authorization model
+    // (BLOCK 04). Client update and delete stay denied until then.
     match /rideRequests/{rideId} {
       allow create: if request.auth != null &&
         request.resource.data.passengerId == request.auth.uid;
-      allow read:   if request.auth != null &&
+      allow read: if request.auth != null &&
         (resource.data.passengerId == request.auth.uid || isAdmin());
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
     match /{document=**} {

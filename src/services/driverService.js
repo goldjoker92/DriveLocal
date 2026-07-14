@@ -15,19 +15,18 @@ import {
 import { db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
 import {
-  FOUNDER_DEFAULT_MAX_DRIVERS,
   FOUNDER_DEFAULT_COMMISSION_FREE_DAYS,
   FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS,
 } from '../constants/founderOfferRules';
+import { assignFounderStatusIfEligible } from './founderService';
 import {
-  getApprovedCount,
-  incrementApprovedCount,
-} from './founderService';
-import {
-  SUBSCRIPTION_ACTIVE_DAYS,
   SUBSCRIPTION_COMMISSION_FREE_DAYS,
   SUBSCRIPTION_PAYMENT_MODE,
 } from '../constants/subscriptionRules';
+import {
+  computeRenewedExpirationMs,
+  getSubscriptionMonthlyCentavos,
+} from '../utils/driverSubscription';
 
 // Profile fields that must all be filled for profileStatus to be "complete".
 const REQUIRED_PROFILE_FIELDS = [
@@ -126,15 +125,24 @@ export async function approveDriver(driverId, adminUid) {
 
   const serviceAreaId = driver.serviceAreaId || SERVICE_AREA_HORIZONTE_CE_BR;
 
-  const count = await getApprovedCount(serviceAreaId);
-  const isFounder = count < FOUNDER_DEFAULT_MAX_DRIVERS;
+  // Business rule: founderNumber must be assigned ATOMICALLY. Two drivers
+  // approved at the same time must never get the same number, so the counter is
+  // read-and-incremented inside a Firestore transaction (see founderService).
+  const { approvalNumber, isFounder, founderNumber } =
+    await assignFounderStatusIfEligible(serviceAreaId);
   const now = new Date();
 
   const base = {
     verificationStatus: 'approved',
+    // Business rule: the founder/free windows start at the ADMIN APPROVAL date,
+    // not signup. approvedAt is that reference; reviewedAt is kept for history.
+    approvedAt: serverTimestamp(),
     reviewedAt: serverTimestamp(),
     reviewedBy: adminUid,
-    approvalNumber: count + 1,
+    approvalNumber,
+    // Wallet + free-ride counter start neutral on approval (only if not set).
+    walletBalanceCentavos: driver.walletBalanceCentavos != null ? driver.walletBalanceCentavos : 0,
+    freeRideCountUsed: driver.freeRideCountUsed != null ? driver.freeRideCountUsed : 0,
     statusHistory: arrayUnion({
       status: 'approved',
       changedAt: now,
@@ -154,12 +162,16 @@ export async function approveDriver(driverId, adminUid) {
     const founderSubscriptionFreeUntil = new Date(now.getTime() + FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS * DAY_MS);
     roleFields = {
       founderEligible: true,
+      founderNumber, //  PricingV1: same as approvalNumber for founders.
       founderGrantedAt: serverTimestamp(),
       // Kept for isFounderCommissionFreeActive (drives the cockpit 0% display).
       founderExpiresAt: founderCommissionFreeUntil,
       subscriptionActive: true,
       subscriptionStatus: 'free_founder',
       subscriptionFreeUntil: founderSubscriptionFreeUntil,
+      // founderFreeUntil is the PricingV1 alias for the founder subscription-free
+      // window (getEffectiveSubscriptionStatus reads either name).
+      founderFreeUntil: founderSubscriptionFreeUntil,
       commissionRateBps: 0,
       commissionFreeUntil: founderCommissionFreeUntil,
       canReceiveRides: true,
@@ -167,24 +179,38 @@ export async function approveDriver(driverId, adminUid) {
       walletStatus: 'not_required_during_commission_free_period',
     };
   } else {
-    // #101+: approved but NOT yet able to receive rides. Subscription must be
-    // activated first (Iteration 2B). No founder badge, no active subscription.
+    // #101+: approved. Business rule (PricingV1): commission is 0% for the first
+    // 60 days from approval, so commissionFreeUntil is set here even though the
+    // cockpit gate (canReceiveRides) is left as-is for now.
+    //
+    // NOTE / DECISION NEEDED: the pricing spec also grants #101+ their first 5
+    // completed rides WITHOUT a subscription. That rule is implemented in the
+    // isolated helper utils/driverEligibility.js (canDriverReceiveRide), which
+    // the future ride-dispatch flow should use. To avoid regressing the current
+    // cockpit behavior (Iteration 2B kept #101+ blocked until subscription), we
+    // do NOT flip canReceiveRides here. When dispatch is wired, decide whether
+    // the cockpit should also adopt the 5-free-rides rule.
+    const nonFounderCommissionFreeUntil = new Date(
+      now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS
+    );
     roleFields = {
       founderEligible: false,
       subscriptionActive: false,
       subscriptionStatus: 'required',
       subscriptionFreeUntil: null,
       commissionRateBps: 0,
-      commissionFreeUntil: null,
-      commissionPromoStatus: 'pending_subscription_activation',
+      commissionFreeUntil: nonFounderCommissionFreeUntil,
+      commissionPromoStatus: 'launch_commission_free',
       canReceiveRides: false,
       canReceiveRidesReason: 'subscription_required',
-      walletStatus: 'not_required_yet',
+      walletStatus: 'not_required_during_commission_free_period',
     };
   }
 
+  // The founder counter was already incremented atomically inside
+  // assignFounderStatusIfEligible, so we only persist the driver document here.
   await updateDoc(doc(db, 'drivers', driverId), { ...base, ...roleFields });
-  await incrementApprovedCount(serviceAreaId);
+  return { approvalNumber, isFounder, founderNumber };
 }
 
 // Admin rejects a driver with a reason. Terminal state: the driver stays
@@ -244,9 +270,11 @@ export async function activateDriverSubscription(driverId) {
     return { skipped: 'founder' };
   }
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + SUBSCRIPTION_ACTIVE_DAYS * DAY_MS);
+  // Business rule (PricingV1): renewal never wastes remaining paid days —
+  // newExpiration = max(now, currentSubscriptionExpiresAt) + 30 days.
+  const expiresAt = new Date(computeRenewedExpirationMs(driver, now));
   const commissionFreeUntil = new Date(now.getTime() + SUBSCRIPTION_COMMISSION_FREE_DAYS * DAY_MS);
-  console.log('[SUBSCRIPTION] activate driverId=', driverId);
+  console.log('[SubscriptionV1] activate/renew driverId=', driverId, 'expiresAt=', expiresAt.toISOString());
   await updateDoc(doc(db, 'drivers', driverId), {
     subscriptionStatus: 'active',
     subscriptionActive: true,
@@ -292,6 +320,62 @@ export async function resetDriverSubscription(driverId) {
     updatedAt: serverTimestamp(),
   });
   return { reset: true };
+}
+
+// Admin action (PricingV1): activate OR renew a NON-founder driver's paid
+// subscription after a Pix payment is confirmed manually. Uses the renewal rule
+// max(now, currentExpiration) + 30 days so early renewals never lose paid days.
+// vehicleType is used only to record the monthly amount charged (display/audit).
+// Refuses to run on founder drivers so their benefits are never overwritten.
+// No automatic Pix confirmation — this is triggered by the admin (see §7 spec).
+export async function extendDriverSubscription(driverId, vehicleType) {
+  const driver = (await getDriver(driverId)) || {};
+  if (isFounderDriverDoc(driver)) {
+    console.log('[SubscriptionV1] extend ignored — founder driverId=', driverId);
+    return { skipped: 'founder' };
+  }
+  const now = new Date();
+  const expiresAt = new Date(computeRenewedExpirationMs(driver, now));
+  const monthlyCentavos = getSubscriptionMonthlyCentavos(vehicleType || driver.vehicleType);
+  console.log('[SubscriptionV1] extend driverId=', driverId, 'expiresAt=', expiresAt.toISOString());
+  await updateDoc(doc(db, 'drivers', driverId), {
+    subscriptionStatus: 'active',
+    subscriptionActive: true,
+    subscriptionExpiresAt: expiresAt,
+    subscriptionLastAmountCentavos: monthlyCentavos,
+    subscriptionPaymentMode: SUBSCRIPTION_PAYMENT_MODE.MANUAL_PIX,
+    subscriptionLastConfirmedAt: serverTimestamp(),
+    canReceiveRides: true,
+    canReceiveRidesReason: 'subscription_active',
+    updatedAt: serverTimestamp(),
+  });
+  return { extended: true, expiresAtMs: expiresAt.getTime() };
+}
+
+// Admin action (PricingV1): block / unblock a driver. Blocking sets isBlocked
+// and forces availability offline so a blocked driver receives no rides
+// (canDriverReceiveRide -> DRIVER_BLOCKED). No money is moved.
+export async function blockDriver(driverId, adminUid, reason) {
+  console.log('[DriverEligibility] block driverId=', driverId);
+  await updateDoc(doc(db, 'drivers', driverId), {
+    isBlocked: true,
+    blockReason: reason || '',
+    blockedAt: serverTimestamp(),
+    blockedBy: adminUid || null,
+    availabilityStatus: 'offline',
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function unblockDriver(driverId, adminUid) {
+  console.log('[DriverEligibility] unblock driverId=', driverId);
+  await updateDoc(doc(db, 'drivers', driverId), {
+    isBlocked: false,
+    blockReason: null,
+    unblockedAt: serverTimestamp(),
+    unblockedBy: adminUid || null,
+    updatedAt: serverTimestamp(),
+  });
 }
 
 // Checks whether the given identity values already exist on another driver.

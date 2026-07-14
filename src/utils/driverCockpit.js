@@ -10,7 +10,7 @@
 // approvalNumber) and the friendlier names used elsewhere (founderBadgeActive,
 // commissionFreeUntil, founderNumber). Missing fields never crash the UI.
 
-import { isFounderCommissionFreeActive } from '../services/founderService';
+import { passesSubscriptionOrTrial } from './driverEligibility';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -106,16 +106,20 @@ export function isSubscriptionActive(driver, nowMs) {
 
 // Derives whether an approved driver may currently go available.
 //
-// Business rule (protects the #101+ subscription rule): being approved is NOT
-// enough on its own. An approved driver may go available only when at least one
-// POSITIVE signal is present:
-//   - active founder benefit period (0% commission window), OR
-//   - an active subscription (free window or flagged active), OR
-//   - the admin explicitly set canReceiveRides === true.
+// Business rule: effective ride eligibility is computed with
+// canDriverReceiveRide() (via the shared passesSubscriptionOrTrial gate);
+// the stored canReceiveRides field is legacy/cache and must NOT be the final
+// gate. It is kept only for admin display and never used to block here.
 //
-// A missing canReceiveRides does NOT count as eligible. So an approved #101+
-// driver with no active founder period, no active subscription, and no explicit
-// allow is BLOCKED until they activate their subscription.
+// A driver may go available when they are approved, not blocked, and pass the
+// subscription/trial gate:
+//   - founder inside the free window, OR
+//   - a driver with an active/free subscription, OR
+//   - a non-founder still within their first free rides (#101+ launch rule).
+//
+// The per-ride checks (vehicle-type match and the wallet/commission check) are
+// applied later, at ride-accept time, by canDriverReceiveRide — they need the
+// specific ride request and must not block the availability toggle here.
 export function deriveEligibility(driver) {
   const d = driver || {};
   const nowMs = Date.now();
@@ -125,21 +129,19 @@ export function deriveEligibility(driver) {
     return { eligible: false, reasonCode: d.verificationStatus || 'not_approved' };
   }
 
-  // 2. Requires a positive signal — approved alone is never enough.
-  const founderActive = isFounderCommissionFreeActive(d); // #001-#100 in 0% window
-  const subscriptionActive = isSubscriptionActive(d, nowMs);
-  const explicitlyAllowed = d.canReceiveRides === true; // admin override
-  if (founderActive || subscriptionActive || explicitlyAllowed) {
+  // 2. Must not be blocked/suspended.
+  if (d.isBlocked === true || d.verificationStatus === 'suspended') {
+    console.log('[DriverEligibility] cockpit blocked reason=suspended');
+    return { eligible: false, reasonCode: 'suspended' };
+  }
+
+  // 3. Subscription / trial gate (single source of truth, shared with dispatch).
+  if (passesSubscriptionOrTrial(d, nowMs)) {
     return { eligible: true, reasonCode: null };
   }
 
-  // 3. Blocked. Prefer an explicit admin reason when one was set, otherwise
-  //    default to "activate your subscription" (the #101+ case).
-  const reasonCode =
-    d.canReceiveRides === false && d.canReceiveRidesReason
-      ? d.canReceiveRidesReason
-      : 'subscription_required';
-  return { eligible: false, reasonCode };
+  console.log('[DriverEligibility] cockpit blocked reason=subscription_required');
+  return { eligible: false, reasonCode: 'subscription_required' };
 }
 
 // Subscription display state for the dashboard.
