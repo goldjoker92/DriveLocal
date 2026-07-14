@@ -52,7 +52,11 @@
     "test": "jest --ci --runInBand"
   },
   "jest": {
-    "preset": "jest-expo"
+    "preset": "jest-expo",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/functions/"
+    ]
   },
   "private": true
 }
