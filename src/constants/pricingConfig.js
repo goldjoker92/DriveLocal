@@ -1,76 +1,83 @@
-// DriveLocal V1 pricing configuration.
+// @ts-check
+// DriveLocal V1.1 pricing configuration (governance D3).
 //
-// SINGLE SOURCE OF TRUTH for ride prices, commission rates and the wallet
-// threshold. Everything here is in INTEGER CENTAVOS (BRL cents). Never use
-// floats for money — see calculatePlatformFeeCentavos in utils/ridePricing.js.
+// SINGLE SOURCE OF TRUTH for fares, commission, the wallet threshold,
+// subscription prices, promotions, dynamic pricing and operating mode.
+// All money is INTEGER CENTAVOS (BRL cents) — never floats.
 //
-// Business model V1 (do NOT change without product confirmation):
-//   - Passenger pays the driver directly via Pix (driver gets the full ride price).
-//   - DriveLocal commission is collected SEPARATELY from the driver prepaid wallet.
-//   - During the free launch period commission is 0% (see commissionFreeUntil).
-//   - After the free period, commission depends on vehicle type and distance.
+// Deterministic rounding rule: every monetary result is rounded to the nearest
+// integer centavo using HALF-UP rounding on non-negative amounts, implemented as
+// Math.round(x) (ties go up, e.g. 702.5 -> 703). Fare inputs
+// (baseFare/perKm/perMinute/minimums) are integer centavos; distanceKm and
+// durationMin may be fractional. See utils/ridePricing.js roundCentavos().
 //
-// Service area: Horizonte-CE only. Valid local rides CAN be > 10 km — distance
-// only selects the price tier, it never rejects a ride (see utils/serviceArea.js).
+// Multi-city: pricing is keyed by serviceAreaId so new cities are added here
+// without touching the money formulas. Every priced ride must persist an
+// immutable snapshot carrying pricingConfigVersion (see utils/ridePricing.priceRide).
 
 import { VEHICLE_MOTO, VEHICLE_CAR } from './vehicleTypes';
 
-// Version tag stored on a priced ride so a historical ride keeps the pricing it
-// was created with, even after the tables change. Bump on any tier/commission change.
-export const PRICING_VERSION = 'v1';
+// Bump on ANY change to fares/commission so historical rides keep the pricing
+// they were created with, even after these tables change.
+export const PRICING_CONFIG_VERSION = 'horizonte-1.1.0';
+
+// Backward-compatible alias — confirm-price.jsx (Step 1) imports PRICING_VERSION.
+export const PRICING_VERSION = PRICING_CONFIG_VERSION;
+
+// Basis-points denominator (1 bps = 0.01%; 1200 bps = 12%, 1500 bps = 15%).
+export const BPS_DENOMINATOR = 10000;
 
 // ---------------------------------------------------------------------------
-// Ride price tiers (centavos)
+// Per-vehicle fare + commission model — Horizonte-CE (D3)
 // ---------------------------------------------------------------------------
-// Boundary rule: the upper bound `maxKm` is INCLUSIVE.
-//   - exactly 1.5 km  -> first tier
-//   - exactly 3.5 km  -> second tier
-//   - exactly 5 km    -> third tier
-// Tiers are evaluated top to bottom: the first tier whose maxKm >= distanceKm
-// wins. The last tier uses Infinity so any distance inside Horizonte is priced.
-export const RIDE_PRICE_TIERS_CENTAVOS = {
-  [VEHICLE_MOTO]: [
-    { maxKm: 1.5, priceCentavos: 450 },
-    { maxKm: 3.5, priceCentavos: 550 },
-    { maxKm: 5, priceCentavos: 650 },
-    { maxKm: 7, priceCentavos: 890 },
-    { maxKm: 10, priceCentavos: 1090 },
-    { maxKm: 15, priceCentavos: 1290 },
-    { maxKm: Infinity, priceCentavos: 1590 },
-  ],
-  [VEHICLE_CAR]: [
-    { maxKm: 1.5, priceCentavos: 790 },
-    { maxKm: 3.5, priceCentavos: 990 },
-    { maxKm: 5, priceCentavos: 1190 },
-    { maxKm: 7, priceCentavos: 1390 },
-    { maxKm: 10, priceCentavos: 1590 },
-    { maxKm: 15, priceCentavos: 1890 },
-    { maxKm: Infinity, priceCentavos: 2290 },
-  ],
+// NOTE (D3): the old distance-tier model AND the "moto rides over 5 km pay 0%
+// commission" rule are REMOVED. Commission is now a flat per-vehicle bps rate,
+// capped only to preserve the minimum driver net.
+export const HORIZONTE_VEHICLE_PRICING = {
+  [VEHICLE_MOTO]: {
+    baseFareCentavos: 250,
+    perKmCentavos: 95,
+    perMinuteCentavos: 12,
+    minimumPassengerFareCentavos: 500,
+    normalCommissionBps: 1200, // 12%
+    minimumDriverNetCentavos: 500,
+  },
+  [VEHICLE_CAR]: {
+    baseFareCentavos: 350,
+    perKmCentavos: 135,
+    perMinuteCentavos: 20,
+    minimumPassengerFareCentavos: 800,
+    normalCommissionBps: 1500, // 15%
+    minimumDriverNetCentavos: 800,
+  },
 };
 
-// ---------------------------------------------------------------------------
-// Commission (basis points, applied AFTER the free launch period)
-// ---------------------------------------------------------------------------
-// 1 bps = 0.01%. So 1200 bps = 12%, 1500 bps = 15%, 0 bps = 0%.
-export const COMMISSION_BPS = {
-  MOTO_SMALL: 1200, // Moto rides <= 5 km  -> 12%
-  MOTO_LONG: 0, //     Moto rides  > 5 km  -> 0%
-  CAR: 1500, //        All car rides        -> 15%
-  NONE: 0,
+// City-keyed pricing (multi-city ready). Add new serviceAreaIds here only.
+export const CITY_PRICING = {
+  HORIZONTE_CE_BR: {
+    serviceAreaId: 'HORIZONTE_CE_BR',
+    pricingConfigVersion: PRICING_CONFIG_VERSION,
+    vehicles: HORIZONTE_VEHICLE_PRICING,
+  },
 };
 
-// Distance (km) up to which a moto ride is considered "small" for commission.
-// Business rule: only small moto rides (<= 5 km) pay the 12% commission; longer
-// moto rides pay 0% to keep longer local trips attractive for moto drivers.
-export const MOTO_SMALL_RIDE_MAX_KM = 5;
+export const DEFAULT_SERVICE_AREA_ID = 'HORIZONTE_CE_BR';
+
+// Returns the per-vehicle pricing block for a service area, or null when the
+// service area / vehicle type is unknown. Falls back to the default service area
+// so a missing serviceAreaId never crashes pricing (V1 is single-city).
+export function getVehiclePricing(serviceAreaId, vehicleType) {
+  const city = CITY_PRICING[serviceAreaId] || CITY_PRICING[DEFAULT_SERVICE_AREA_ID];
+  if (!city) return null;
+  return city.vehicles[vehicleType] || null;
+}
 
 // ---------------------------------------------------------------------------
 // Wallet
 // ---------------------------------------------------------------------------
-// Minimum prepaid wallet balance (centavos) a driver must keep to receive rides
-// where commission may apply. Kept consistent with the existing wallet fallback
-// threshold (WALLET_FALLBACK_LOW_THRESHOLD_CENTS = 300).
+// Minimum prepaid wallet balance (centavos) a standard driver must keep to
+// receive rides where commission may apply. Kept consistent with the existing
+// wallet fallback threshold (WALLET_FALLBACK_LOW_THRESHOLD_CENTS = 300 = R$3,00).
 export const MIN_WALLET_BALANCE_CENTAVOS = 300;
 
 // ---------------------------------------------------------------------------
@@ -81,13 +88,32 @@ export const SUBSCRIPTION_MONTHLY_CENTAVOS = {
   [VEHICLE_CAR]: 1990, //  R$ 19,90 / month
 };
 
-// A paid subscription period lasts 30 days.
+// A paid subscription period lasts 30 rolling days.
 export const SUBSCRIPTION_PERIOD_DAYS = 30;
 
-// Free launch windows measured from the ADMIN APPROVAL date (not signup).
-export const FOUNDER_FREE_DAYS = 60; //  first 100 approved drivers
-export const COMMISSION_FREE_DAYS = 60; // commission is 0% for everyone for 60 days
-
-// Non-founder drivers may complete this many rides before an active
-// subscription is required (from the 6th completed ride onward).
+// Non-founder drivers may complete this many finalized rides before an active
+// subscription is required (an active subscription is required from the 6th
+// completed ride onward). Independent from the commission-free period.
 export const NON_FOUNDER_FREE_RIDES = 5;
+
+// Free launch windows measured from the ADMIN APPROVAL date (approvedAt).
+export const FOUNDER_FREE_DAYS = 60; //     first 100 approved drivers
+export const COMMISSION_FREE_DAYS = 60; //  commission is 0% for everyone for 60 days
+
+// ---------------------------------------------------------------------------
+// Dynamic pricing (D3) — disabled by default
+// ---------------------------------------------------------------------------
+// During the pilot, any dynamic surcharge belongs ENTIRELY to the driver
+// (see utils/ridePricing.applyDynamicPricing).
+export const DYNAMIC_PRICING_DEFAULT_ENABLED = false;
+export const DYNAMIC_PRICING_MAX_MULTIPLIER = 1.2;
+
+// ---------------------------------------------------------------------------
+// Operating mode (D3) — 24/7 by default, optional scheduled mode
+// ---------------------------------------------------------------------------
+// No driver-count threshold ever gates availability.
+export const OPERATING_MODE = {
+  ALWAYS: '24_7',
+  SCHEDULED: 'scheduled',
+};
+export const DEFAULT_OPERATING_MODE = OPERATING_MODE.ALWAYS;

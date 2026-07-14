@@ -9,11 +9,8 @@
 // commission may apply to THIS ride.
 
 import { calculateCommissionBps } from './ridePricing';
-import { getEffectiveSubscriptionStatus } from './driverSubscription';
-import {
-  MIN_WALLET_BALANCE_CENTAVOS,
-  NON_FOUNDER_FREE_RIDES,
-} from '../constants/pricingConfig';
+import { getSubscriptionEligibility } from './driverSubscription';
+import { MIN_WALLET_BALANCE_CENTAVOS } from '../constants/pricingConfig';
 
 // Rejection reason codes (stable strings — safe to switch on / log).
 export const RIDE_ELIGIBILITY_REASON = {
@@ -24,12 +21,6 @@ export const RIDE_ELIGIBILITY_REASON = {
   SUBSCRIPTION_REQUIRED: 'SUBSCRIPTION_REQUIRED',
   WALLET_BALANCE_TOO_LOW: 'WALLET_BALANCE_TOO_LOW',
 };
-
-// True when the driver is a founder (tolerates both field names in the codebase).
-function isFounderDriver(driver) {
-  const d = driver || {};
-  return d.isFounder === true || d.founderEligible === true;
-}
 
 // True when the driver is blocked/suspended (tolerates both signals).
 function isBlockedDriver(driver) {
@@ -42,20 +33,11 @@ function isBlockedDriver(driver) {
 // canDriverReceiveRide (per-ride) and the cockpit availability gate
 // (deriveEligibility in utils/driverCockpit.js) so both agree on one rule.
 //
-// Business rule:
-//   - Founder: covered during the free window; after it, needs an active sub.
-//   - Non-founder: first NON_FOUNDER_FREE_RIDES completed rides are free; from
-//     the next ride on, an active subscription is required.
+// Delegates to driverSubscription.getSubscriptionEligibility (the single source
+// of truth, governance D6): founder covered during the free window / with a paid
+// sub; non-founder covered for the first 5 finalized rides, then requires a sub.
 export function passesSubscriptionOrTrial(driver, now = Date.now()) {
-  const d = driver || {};
-  const sub = getEffectiveSubscriptionStatus(d, now);
-  const subscriptionCovered = sub.status === 'free' || sub.status === 'active';
-
-  if (isFounderDriver(d)) {
-    return subscriptionCovered;
-  }
-  const usedRides = Number(d.freeRideCountUsed) || 0;
-  return subscriptionCovered || usedRides < NON_FOUNDER_FREE_RIDES;
+  return !getSubscriptionEligibility(driver, now).required;
 }
 
 // Decides whether a driver can receive a specific ride request.

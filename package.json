@@ -37,6 +37,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "jest": "~29.7.0",
+    "jest-expo": "~56.0.5",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -46,7 +48,11 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "start:dev": "expo start --dev-client"
+    "start:dev": "expo start --dev-client",
+    "test": "jest --ci --runInBand"
+  },
+  "jest": {
+    "preset": "jest-expo"
   },
   "private": true
 }

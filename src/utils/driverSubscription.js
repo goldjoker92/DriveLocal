@@ -10,6 +10,7 @@
 import {
   SUBSCRIPTION_MONTHLY_CENTAVOS,
   SUBSCRIPTION_PERIOD_DAYS,
+  NON_FOUNDER_FREE_RIDES,
 } from '../constants/pricingConfig';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -76,4 +77,69 @@ export function computeRenewedExpirationMs(driver, now = Date.now()) {
   const currentMs = toMillis(driver && driver.subscriptionExpiresAt);
   const base = Math.max(nowMs, currentMs);
   return base + SUBSCRIPTION_PERIOD_DAYS * DAY_MS;
+}
+
+// True when the driver holds founder status (tolerates both field names used
+// across the codebase: mocks use isFounder, approveDriver writes founderEligible).
+function isFounderDriver(driver) {
+  const d = driver || {};
+  return d.isFounder === true || d.founderEligible === true;
+}
+
+// SINGLE SOURCE OF TRUTH for the subscription/trial gate (governance D6).
+// Independent from the commission-free period (which is decided separately by
+// ridePricing.isCommissionFree). Answers: is an active subscription REQUIRED
+// before this driver may receive/accept the next ride?
+//
+// Rules:
+//   - Founder: covered while inside the free window (or with a paid subscription);
+//     after it, a paid subscription is required. Founders do NOT use the 5-ride
+//     grace, so freeRidesRemaining is always 0 for them.
+//   - Non-founder: the first NON_FOUNDER_FREE_RIDES (5) finalized rides need no
+//     subscription; from the 6th onward a free/active subscription is required.
+//
+// Returns { required, covered, reason, freeRidesRemaining, subscriptionStatus }.
+export function getSubscriptionEligibility(driver, now = Date.now()) {
+  const d = driver || {};
+  const sub = getEffectiveSubscriptionStatus(d, now);
+  const covered = sub.status === 'free' || sub.status === 'active';
+
+  if (isFounderDriver(d)) {
+    return {
+      required: !covered,
+      covered,
+      reason: covered ? 'FOUNDER_COVERED' : 'FOUNDER_SUBSCRIPTION_REQUIRED',
+      freeRidesRemaining: 0,
+      subscriptionStatus: sub.status,
+    };
+  }
+
+  const used = Number(d.freeRideCountUsed) || 0;
+  const freeRidesRemaining = Math.max(0, NON_FOUNDER_FREE_RIDES - used);
+
+  if (covered) {
+    return {
+      required: false,
+      covered: true,
+      reason: 'SUBSCRIPTION_ACTIVE',
+      freeRidesRemaining,
+      subscriptionStatus: sub.status,
+    };
+  }
+  if (freeRidesRemaining > 0) {
+    return {
+      required: false,
+      covered: false,
+      reason: 'FREE_RIDES_REMAINING',
+      freeRidesRemaining,
+      subscriptionStatus: sub.status,
+    };
+  }
+  return {
+    required: true,
+    covered: false,
+    reason: 'SUBSCRIPTION_REQUIRED',
+    freeRidesRemaining: 0,
+    subscriptionStatus: sub.status,
+  };
 }
