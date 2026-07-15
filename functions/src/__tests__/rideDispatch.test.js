@@ -304,3 +304,67 @@ describe('transactional acceptance & wallet hold', () => {
     expect(db._store.get(`${C.RIDE_REQUESTS}/${view.rideId}`).acceptedDriverId).toBe('S');
   });
 });
+
+describe('exact pickup privacy & coordinate gating', () => {
+  it('E1: the winning driver receives exactPickup only after a successful acceptance', async () => {
+    const db = makeFakeFirestore();
+    seedCity(db);
+    seedDriver(db, 'A');
+    const clock = fixedClock(T0);
+    const view = await createRide(db, clock, fakeRouting());
+
+    // Before acceptance the offer has only a coarsened preview, no exactPickup.
+    expect(db._store.get(`${C.DRIVER_OFFERS}/${view.rideId}_A`).exactPickup).toBeUndefined();
+    expect(db._store.get(`${C.DRIVER_OFFERS}/${view.rideId}_A`).pickupPreview).toBeDefined();
+
+    const won = await acceptDriverOfferSecure({
+      db, request: { auth: { uid: 'A' }, data: { offerId: `${view.rideId}_A`, idempotencyKey: 'acc-A-00000001' } }, context: ctx, clock,
+    });
+    expect(won.pickup).toMatchObject({ lat: PICKUP.lat, lng: PICKUP.lng });
+    const offer = db._store.get(`${C.DRIVER_OFFERS}/${view.rideId}_A`);
+    expect(offer.status).toBe(C.OFFER_STATUS.ACCEPTED);
+    expect(offer.exactPickup).toMatchObject({ lat: PICKUP.lat, lng: PICKUP.lng });
+  });
+
+  it('E2: losing / expired / failed offers never receive exactPickup', async () => {
+    const db = makeFakeFirestore();
+    seedCity(db);
+    seedDriver(db, 'A');
+    seedDriver(db, 'B');
+    const clock = fixedClock(T0);
+    const view = await createRide(db, clock, fakeRouting());
+
+    await acceptDriverOfferSecure({
+      db, request: { auth: { uid: 'A' }, data: { offerId: `${view.rideId}_A`, idempotencyKey: 'acc-A-00000002' } }, context: ctx, clock,
+    });
+    // Loser B (lost the first-wins race) never gets exactPickup.
+    await expect(
+      acceptDriverOfferSecure({ db, request: { auth: { uid: 'B' }, data: { offerId: `${view.rideId}_B`, idempotencyKey: 'acc-B-00000002' } }, context: ctx, clock })
+    ).rejects.toMatchObject({ code: 'RIDE_ALREADY_ACCEPTED' });
+    expect(db._store.get(`${C.DRIVER_OFFERS}/${view.rideId}_B`).exactPickup).toBeUndefined();
+
+    // A failed (expired) acceptance also never exposes exactPickup.
+    const db2 = makeFakeFirestore();
+    seedCity(db2);
+    seedDriver(db2, 'A');
+    const v2 = await createRide(db2, fixedClock(T0), fakeRouting());
+    await expect(
+      acceptDriverOfferSecure({ db: db2, request: { auth: { uid: 'A' }, data: { offerId: `${v2.rideId}_A`, idempotencyKey: 'acc-exp-000001' } }, context: ctx, clock: fixedClock(T0 + 16 * 1000) })
+    ).rejects.toMatchObject({ code: 'OFFER_EXPIRED' });
+    expect(db2._store.get(`${C.DRIVER_OFFERS}/${v2.rideId}_A`).exactPickup).toBeUndefined();
+  });
+
+  it('E3: a free-text address without resolved coordinates cannot request a ride', async () => {
+    const db = makeFakeFirestore();
+    seedCity(db);
+    await expect(
+      createRideRequestSecure({
+        db,
+        request: { auth: { uid: 'pax1' }, data: { vehicleType: 'moto', pickup: { label: 'Centro, Horizonte' }, destination: DEST_IN, idempotencyKey: 'ride-notext-01' } },
+        context: ctx,
+        clock: fixedClock(T0),
+        routingAdapter: fakeRouting(),
+      })
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+});

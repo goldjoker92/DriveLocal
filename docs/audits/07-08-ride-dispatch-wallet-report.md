@@ -135,8 +135,87 @@ stable PT-BR messages; internal causes stay server-side.
 9. Post-promotion driver requires eligibility, wallet > R$3 and enough balance.
 10. Duplicate acceptance → exactly one wallet hold and one assignment.
 
+## Location UX finalization & exact-pickup closure
+
+### Real address-provider status
+- **GPS + geocoding: REAL and used** — `expo-location` provides current position,
+  reverse geocode (`getCurrentLocationWithAddress`), and forward geocode of a full
+  typed address (`resolveAddressToCoords` → `Location.geocodeAsync`). No invented
+  coordinates: a query that resolves to nothing yields "not found" and the ride
+  cannot be requested.
+- **Typeahead autocomplete SUGGESTIONS: NOT configured → feature stopped, not
+  faked.** Live suggestion lists require a Places provider that is not present.
+  **ADDRESS_SEARCH_PROVIDER_CONFIGURATION_REQUIRED** —
+  provider/API to enable: **Google Places Autocomplete (Places API New)**;
+  Secret Manager parameter required: **`PLACES_AUTOCOMPLETE_API_KEY`** (value never
+  requested/printed/committed); runtime files that would use it:
+  `src/services/locationService.js` (a new `searchAddressSuggestions`) and
+  `src/app/(passenger)/select-route.jsx`. No local/fake suggestions were committed.
+- **Interactive map marker: NOT available** — `react-native-maps` is not installed,
+  so drag-to-adjust map selection is not implemented (no placeholder map is shown).
+  Manual map adjustment is deferred until the map library is added.
+
+### Pickup / destination options
+Editable pickup and destination address fields. Pickup: **"Usar minha
+localização"** (real GPS + reverse-geocoded label, or the safe label "Minha
+localização atual") and **"Buscar"** (real forward geocode). Destination:
+**"Buscar"** (real forward geocode). A resolved point continues **without** a
+mandatory map step. Both selected locations are shown on the confirm screen with
+an **"Editar locais"** action.
+
+### GPS permission fallback
+Permission denied / lookup error does not crash and does not re-prompt in a loop;
+address search stays available; PT-BR notice: _"Não foi possível acessar sua
+localização. Busque um endereço ou selecione o ponto de embarque no mapa."_
+
+### Map-confirmation behavior
+Not required for valid GPS/geocoded coordinates — the passenger continues
+directly. It would only be required for explicit manual map selection / ambiguous
+/ missing coordinates (map selection deferred pending `react-native-maps`).
+
+### Idempotency-key reuse
+The passenger confirm screen holds one idempotency key per request **attempt** in
+a ref (`requestRide({ idempotencyKeyRef })`); a timeout/connection retry reuses
+the same key so a retried request never creates a second ride.
+
+### Exact-pickup privacy
+Before acceptance, `driverOffers` carry only a coarsened `pickupPreview` (never
+used for navigation); candidates never receive exact pickup, destination, or the
+passenger rideRequest. Inside the successful first-wins transaction, the winning
+offer alone is updated with `status = accepted`, `acceptedAt`, and `exactPickup`
+(authoritative ride pickup). Losing/expired/failed offers never receive
+`exactPickup`; destination stays withheld (BLOCK 09+10); no passenger PII is
+copied; exact coordinates never appear in logs/audit (event
+`ride.accept.exact_pickup_revealed` carries only rideId/offerId). `exactPickup`
+persists on the winner's secured offer, so it is recovered after an app restart
+via the driver's offer listener.
+
+### Waze / Google Maps
+After acceptance (and after restart recovery), the driver sees **Abrir no Waze**
+and **Abrir no Google Maps**, both using `exactPickup` via encoded deep links
+(`src/utils/maps.js`) — never the coarsened preview, no embedded turn-by-turn, no
+Waze key, `ROUTING_PROVIDER_API_KEY` stays backend-only. If one app fails to open,
+a PT-BR error is shown and the other option remains. Destination navigation is
+BLOCK 09+10.
+
+### Tests (increment)
+`functions/src/__tests__/rideDispatch.test.js` — E1 winner receives `exactPickup`
+only after a successful acceptance; E2 losing/expired/failed offers never receive
+`exactPickup`; E3 a free-text address without resolved coordinates cannot request
+a ride. Test 4 (no map confirmation for valid coordinates) is an **Android
+physical smoke test** — the project has no RN UI-render test tooling, so adding a
+UI framework was avoided per instruction.
+
+### Android smoke-test checklist (post Secret Manager config)
+Request a ride via GPS and via typed-address search (no map step); confirm the
+searching→assigned transition; on the winning driver, open Waze and Google Maps to
+the exact pickup; kill and reopen the driver app and confirm the accepted offer +
+both buttons are recovered.
+
 ## Not done (by instruction)
 
-Ride completion, FCM, payment settlement/capture, multi-wave dispatch, deploy,
-push, merge. No production credentials; a real Google Routes sandbox smoke test
-is pending after `ROUTING_PROVIDER_API_KEY` is configured in Secret Manager.
+Ride completion, FCM, payment settlement/capture, multi-wave dispatch, typeahead
+autocomplete (provider not configured), interactive map marker (`react-native-maps`
+not installed), deploy, push, merge. No production credentials; real Google Routes
+and (future) Places sandbox smoke tests are pending Secret Manager configuration
+and deployment to `drivelocal-dev`.

@@ -15,13 +15,24 @@ function makeIdempotencyKey(prefix) {
 
 // Requests a ride. pickup/destination are { lat, lng, label? }. The server owns
 // the fare, distance, duration and commission — none are sent from here.
-export async function requestRide({ vehicleType, pickup, destination }) {
+//
+// idempotencyKeyRef (optional React ref): one key per request ATTEMPT, REUSED on
+// timeout/connection retry so a retried request never creates a second ride. The
+// caller clears the ref only when starting a genuinely new request.
+export async function requestRide({ vehicleType, pickup, destination, idempotencyKeyRef }) {
+  let idempotencyKey;
+  if (idempotencyKeyRef) {
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = makeIdempotencyKey('ride');
+    idempotencyKey = idempotencyKeyRef.current;
+  } else {
+    idempotencyKey = makeIdempotencyKey('ride');
+  }
   const call = httpsCallable(functions, 'createRideRequestSecure');
   const res = await call({
     vehicleType,
-    pickup,
-    destination,
-    idempotencyKey: makeIdempotencyKey('ride'),
+    pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label },
+    destination: { lat: destination.lat, lng: destination.lng, label: destination.label },
+    idempotencyKey,
   });
   return res.data; // { rideId, status, estimatedFareCentavos, ... }
 }
@@ -43,19 +54,23 @@ export function listenToRide(rideId, onData, onError) {
   );
 }
 
-// Live targeted offer for the signed-in driver (driverId == uid), newest first.
-// Returns an unsubscribe function.
+// Live targeted offer for the signed-in driver (driverId == uid). Surfaces an
+// 'accepted' offer (carrying exactPickup) with priority so the accepted state —
+// and its navigation buttons — is recovered after an app restart; otherwise the
+// current 'offered' offer. Returns an unsubscribe function.
 export function listenToMyOffer(driverUid, onData, onError) {
   const q = query(collection(db, 'driverOffers'), where('driverId', '==', driverUid));
   return onSnapshot(
     q,
     (snap) => {
-      let offer = null;
+      let offered = null;
+      let accepted = null;
       snap.forEach((d) => {
         const data = d.data();
-        if (data.status === 'offered') offer = { offerId: d.id, ...data };
+        if (data.status === 'accepted') accepted = { offerId: d.id, ...data };
+        else if (data.status === 'offered') offered = { offerId: d.id, ...data };
       });
-      onData(offer);
+      onData(accepted || offered);
     },
     (err) => onError && onError(err)
   );

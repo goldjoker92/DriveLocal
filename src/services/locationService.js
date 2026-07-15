@@ -68,3 +68,24 @@ export async function getCurrentLocationWithAddress() {
     return { status: 'error' };
   }
 }
+
+// Resolves a full typed address to real coordinates via expo-location's native
+// geocoder (a REAL provider — not typeahead autocomplete, not invented). Returns
+// a status object the UI branches on; never fabricates coordinates.
+//   { status: 'too_short' } | { status: 'not_found' } | { status: 'error' }
+//   { status: 'ok', lat, lng, addressText }
+export async function resolveAddressToCoords(text) {
+  const query = (text || '').trim();
+  if (query.length < 3) return { status: 'too_short' };
+  try {
+    const results = await Location.geocodeAsync(query);
+    const first = results && results[0];
+    if (!first || typeof first.latitude !== 'number' || typeof first.longitude !== 'number') {
+      return { status: 'not_found' };
+    }
+    return { status: 'ok', lat: first.latitude, lng: first.longitude, addressText: query };
+  } catch (e) {
+    console.log('[LOCATION] geocode failed:', e.message);
+    return { status: 'error' };
+  }
+}

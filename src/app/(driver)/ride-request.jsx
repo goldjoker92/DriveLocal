@@ -32,10 +32,21 @@ export default function RideRequest() {
   const [acceptError, setAcceptError] = useState('');
   const [accepted, setAccepted] = useState(null); // { pickup, ... } after winning
 
+  // The listener surfaces an already-accepted offer (with exactPickup) so the
+  // accepted state and its navigation buttons are recovered after an app restart.
   useEffect(() => {
     const uid = auth.currentUser && auth.currentUser.uid;
     if (!uid) return undefined;
-    const unsubscribe = listenToMyOffer(uid, (o) => setOffer(o), () => setOffer(null));
+    const unsubscribe = listenToMyOffer(
+      uid,
+      (o) => {
+        setOffer(o);
+        if (o && o.status === 'accepted' && o.exactPickup) {
+          setAccepted({ rideId: o.rideId, pickup: o.exactPickup });
+        }
+      },
+      () => setOffer(null)
+    );
     return unsubscribe;
   }, []);
 
@@ -54,6 +65,22 @@ export default function RideRequest() {
     }
   }
 
+  // Deep-link navigation to the EXACT pickup. If one app cannot open, show a
+  // PT-BR error and keep the other option. Never log the URL or coordinates.
+  async function openNav(which) {
+    setAcceptError('');
+    try {
+      if (which === 'waze') await openWazeToPoint(accepted.pickup);
+      else await openGoogleMapsToPoint(accepted.pickup);
+    } catch (_e) {
+      setAcceptError(
+        which === 'waze'
+          ? 'Não foi possível abrir o Waze. Tente o Google Maps.'
+          : 'Não foi possível abrir o Google Maps. Tente o Waze.'
+      );
+    }
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
@@ -66,11 +93,8 @@ export default function RideRequest() {
               Vá até o local de embarque do passageiro.
             </Text>
             <View style={{ gap: spacing.sm }}>
-              <AppButton title="Abrir no Waze" onPress={() => openWazeToPoint(accepted.pickup)} />
-              <AppButton
-                title="Abrir no Google Maps"
-                onPress={() => openGoogleMapsToPoint(accepted.pickup)}
-              />
+              <AppButton title="Abrir no Waze" onPress={() => openNav('waze')} />
+              <AppButton title="Abrir no Google Maps" onPress={() => openNav('gmaps')} />
             </View>
             <AppButton title="Ir para a corrida" variant="ghost" onPress={() => router.replace({ pathname: '/active-ride', params: { rideId: accepted.rideId } })} />
           </AppCard>

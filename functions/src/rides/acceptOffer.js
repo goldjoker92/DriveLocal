@@ -140,7 +140,21 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       // walletBalanceCentavos intentionally unchanged until capture (BLOCK 09+10).
     }
     tx.set(driverRef, driverUpdate, { merge: true });
-    tx.set(offerRef, { status: C.OFFER_STATUS.ACCEPTED, acceptedAtMs: nowMs, updatedAt: ts() }, { merge: true });
+    // exactPickup privacy: the authoritative pickup is written onto the winning
+    // offer ONLY inside this successful transaction. Losing/expired/unrelated
+    // offers are never touched, so they never receive exactPickup. Destination
+    // stays withheld until BLOCK 09+10. No passenger PII is copied.
+    tx.set(
+      offerRef,
+      {
+        status: C.OFFER_STATUS.ACCEPTED,
+        acceptedAtMs: nowMs,
+        acceptedAt: ts(),
+        exactPickup: { lat: ride.pickup.lat, lng: ride.pickup.lng, label: ride.pickup.label || null },
+        updatedAt: ts(),
+      },
+      { merge: true }
+    );
 
     // Deterministic append-only hold — created once (guarded by existence).
     if (holdAmount > 0 && !holdSnap.exists) {
@@ -184,6 +198,8 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     logInfo(context, 'wallet.hold.duplicate_ignored', { operation: 'accept', rideId, offerId });
   }
   logInfo(context, 'ride.accept.won', { operation: 'accept', offerId, rideId, normalizedStatus: 'assigned', amountCentavos: result.holdAmount });
+  // Safe metadata only — exact coordinates are never logged.
+  logInfo(context, 'ride.accept.exact_pickup_revealed', { operation: 'accept', rideId, offerId });
 
   // Best-effort sibling-offer cleanup. Failure must NOT reverse the accepted ride.
   try {
