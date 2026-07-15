@@ -24,3 +24,13 @@ exports.rejectDriverSecure = driverCallables.rejectDriverSecure;
 exports.blockDriverSecure = driverCallables.blockDriverSecure;
 exports.unblockDriverSecure = driverCallables.unblockDriverSecure;
 exports.activateSubscriptionSecure = driverCallables.activateSubscriptionSecure;
+
+// BLOCK 05 + 06 — Mercado Pago Pix payments (driver subscription + wallet
+// top-up). Real provider adapter at runtime; secrets bound per function via
+// Secret Manager. No ride payments (passengers pay drivers directly by Pix).
+const paymentCallables = require('./payments/callables');
+
+exports.createDriverPixPayment = paymentCallables.createDriverPixPayment;
+exports.getDriverPaymentStatus = paymentCallables.getDriverPaymentStatus;
+exports.reprocessDriverPayment = paymentCallables.reprocessDriverPayment;
+exports.mercadoPagoWebhook = paymentCallables.mercadoPagoWebhook;

@@ -12,15 +12,11 @@
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
-const {
-  assertShape,
-  validateIdentifier,
-  validateEnum,
-  validateIdempotencyKey,
-} = require('../validation/validators');
+const { assertShape, validateIdentifier, validateIdempotencyKey } = require('../validation/validators');
 const { writeAuditLog } = require('../audit/auditLog');
 const { requireAdmin } = require('../auth/adminAuth');
 const { acquireOperation, completeOperation, OPERATION_STATES } = require('../idempotency/idempotency');
+const { computeSubscriptionExtension } = require('./subscriptionDomain');
 const C = require('./constants');
 
 const OPERATION_TYPE = 'activate_subscription_manual';
@@ -69,15 +65,8 @@ async function activateSubscription({ db, request, context, clock }) {
       });
     }
     const d = snap.data() || {};
-    const vehicleType = validateEnum(d.vehicleType, C.VEHICLE_TYPES, 'vehicleType');
-    const priceCentavos =
-      vehicleType === 'moto' ? C.MOTO_SUBSCRIPTION_CENTAVOS : C.CAR_SUBSCRIPTION_CENTAVOS;
-
     const nowMs = clock.now();
-    const currentExpiry = Number(d.subscriptionExpiresAt || 0);
-    const isActive = d.subscriptionActive === true && currentExpiry > nowMs;
-    const base = isActive ? currentExpiry : nowMs;
-    const newExpiry = base + C.SUBSCRIPTION_DURATION_DAYS * C.DAY_MS;
+    const { vehicleType, priceCentavos, isActive, newExpiry } = computeSubscriptionExtension(d, nowMs);
 
     tx.set(
       driverRef,

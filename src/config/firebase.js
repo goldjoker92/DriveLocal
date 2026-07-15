@@ -6,6 +6,7 @@ import {
 } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getFunctions } from "firebase/functions";
 import ReactNativeAsyncStorage from "@react-native-async-storage/async-storage";
 
 const firebaseConfig = {
@@ -33,5 +34,7 @@ try {
 
 const db = getFirestore(app);
 const storage = getStorage(app);
+// Cloud Functions live in southamerica-east1 (see functions callables).
+const functions = getFunctions(app, "southamerica-east1");
 
-export { app, auth, db, storage };
+export { app, auth, db, storage, functions };
