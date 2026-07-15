@@ -14,3 +14,13 @@ if (admin.apps.length === 0) {
 const { health } = require('./diagnostics/health');
 
 exports.health = health;
+
+// BLOCK 03 — secure driver domain (admin-only approval, moderation, and manual
+// subscription activation). No Mercado Pago, wallet movement, or ride logic.
+const driverCallables = require('./drivers/callables');
+
+exports.approveDriverSecure = driverCallables.approveDriverSecure;
+exports.rejectDriverSecure = driverCallables.rejectDriverSecure;
+exports.blockDriverSecure = driverCallables.blockDriverSecure;
+exports.unblockDriverSecure = driverCallables.unblockDriverSecure;
+exports.activateSubscriptionSecure = driverCallables.activateSubscriptionSecure;

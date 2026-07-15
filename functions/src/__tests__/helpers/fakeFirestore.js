@@ -14,6 +14,11 @@ function makeFakeFirestore() {
     return {
       id: docId,
       _key: key,
+      // Mirrors the Admin SDK: a document read outside a transaction.
+      async get() {
+        const data = store.get(key);
+        return { exists: data !== undefined, id: docId, data: () => data };
+      },
       async set(data, opts) {
         const prev = store.get(key);
         store.set(key, opts && opts.merge && prev ? { ...prev, ...data } : { ...data });
