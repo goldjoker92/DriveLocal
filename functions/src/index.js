@@ -34,3 +34,11 @@ exports.createDriverPixPayment = paymentCallables.createDriverPixPayment;
 exports.getDriverPaymentStatus = paymentCallables.getDriverPaymentStatus;
 exports.reprocessDriverPayment = paymentCallables.reprocessDriverPayment;
 exports.mercadoPagoWebhook = paymentCallables.mercadoPagoWebhook;
+
+// BLOCK 07 + 08 — ride request, targeted dispatch, and transactional acceptance
+// with commission wallet hold. Reads use secured Firestore listeners (no callable
+// read wrappers). No ride completion, FCM, or payment settlement yet.
+const rideCallables = require('./rides/callables');
+
+exports.createRideRequestSecure = rideCallables.createRideRequestSecure;
+exports.acceptDriverOfferSecure = rideCallables.acceptDriverOfferSecure;
