@@ -27,7 +27,7 @@ import { PRICING_VERSION } from '../../constants/pricingConfig';
 import { getRidePricing } from '../../utils/ridePricing';
 import { checkRideServiceArea } from '../../utils/serviceArea';
 import { auth } from '../../config/firebase';
-import { createRideRequest } from '../../services/rideRequestService';
+import { requestRide } from '../../services/ridesService';
 
 // PT-BR copy shown when the ride is outside the Horizonte service area.
 const OUT_OF_AREA_MSG =
@@ -85,45 +85,37 @@ export default function ConfirmPrice() {
       }
     : null;
 
+  const [requestError, setRequestError] = useState('');
+
   async function handleRequest() {
     if (outOfArea) return;
     const uid = auth.currentUser && auth.currentUser.uid;
 
-    // Persist a REAL priced rideRequest so the driver flow can later settle
-    // commission against a real rideId. Falls back to the mock navigation when
-    // the passenger is not signed in or persistence fails — the Step 1 flow
-    // must never break. Origin/destination text still come from the mock ride;
-    // TODO(ride-flow): replace with the real select-route origin/destination.
-    if (uid && priceSnapshot) {
+    // Create the ride through the SECURE callable: the backend geofences the
+    // points, measures the real route, prices it, and dispatches targeted offers.
+    // The displayed price above is only an estimate; the authoritative fare is the
+    // server quote returned here. The client never writes rideRequests directly.
+    if (uid) {
       try {
         setSubmitting(true);
-        const rideId = await createRideRequest({
-          passengerId: uid,
-          originText: ride.pickup.address,
-          destinationText: ride.destination.address,
+        setRequestError('');
+        const result = await requestRide({
           vehicleType: ride.vehicleType,
-          ridePriceCentavos: priceSnapshot.ridePriceCentavos,
-          driverAmountCentavos: priceSnapshot.driverAmountCentavos,
-          distanceKm: priceSnapshot.distanceKm,
-          paymentMethod: priceSnapshot.paymentMethod,
-          pricingVersion: priceSnapshot.pricingVersion,
-          serviceAreaId: priceSnapshot.serviceAreaId,
+          pickup: { lat: ride.pickup.lat, lng: ride.pickup.lng, label: ride.pickup.address },
+          destination: { lat: ride.destination.lat, lng: ride.destination.lng, label: ride.destination.address },
         });
-        console.log('[PricingV1] persisted rideRequest rideId=', rideId);
-        router.push({ pathname: '/searching', params: { rideId } });
+        router.push({ pathname: '/searching', params: { rideId: result.rideId } });
         return;
       } catch (e) {
-        console.log('[PricingV1] persist failed, using mock nav', e.code || e.message);
+        // Stable PT-BR message from the backend when available.
+        setRequestError((e && e.message) || 'Não foi possível pedir a corrida. Tente novamente.');
+        return;
       } finally {
         setSubmitting(false);
       }
     }
 
-    // Mock fallback: carry the snapshot forward only (no real ride doc).
-    router.push({
-      pathname: '/searching',
-      params: { priceSnapshot: JSON.stringify(priceSnapshot) },
-    });
+    setRequestError('Faça login para pedir uma corrida.');
   }
 
   return (
@@ -150,6 +142,9 @@ export default function ConfirmPrice() {
           onPress={handleRequest}
           disabled={outOfArea || submitting}
         />
+        {requestError ? (
+          <AdminTableRow label={requestError} />
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

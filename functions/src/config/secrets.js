@@ -8,6 +8,9 @@ const SECRET_NAMES = Object.freeze({
   MERCADO_PAGO_WEBHOOK_SECRET_TEST: 'MERCADO_PAGO_WEBHOOK_SECRET_TEST',
   MERCADO_PAGO_ACCESS_TOKEN_PROD: 'MERCADO_PAGO_ACCESS_TOKEN_PROD',
   MERCADO_PAGO_WEBHOOK_SECRET_PROD: 'MERCADO_PAGO_WEBHOOK_SECRET_PROD',
+  // Routing provider (Google Routes API — Compute Routes). One key per project;
+  // the value lives only in Secret Manager and is never read/printed here.
+  ROUTING_PROVIDER_API_KEY: 'ROUTING_PROVIDER_API_KEY',
 });
 
 // Returns the Mercado Pago secret NAMES appropriate for an environment.
