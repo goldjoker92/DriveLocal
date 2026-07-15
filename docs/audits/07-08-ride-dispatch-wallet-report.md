@@ -145,15 +145,19 @@ stable PT-BR messages; internal causes stay server-side.
   cannot be requested.
 - **Typeahead autocomplete SUGGESTIONS: NOT configured → feature stopped, not
   faked.** Live suggestion lists require a Places provider that is not present.
-  **ADDRESS_SEARCH_PROVIDER_CONFIGURATION_REQUIRED** —
-  provider/API to enable: **Google Places Autocomplete (Places API New)**;
-  Secret Manager parameter required: **`PLACES_AUTOCOMPLETE_API_KEY`** (value never
-  requested/printed/committed); runtime files that would use it:
-  `src/services/locationService.js` (a new `searchAddressSuggestions`) and
-  `src/app/(passenger)/select-route.jsx`. No local/fake suggestions were committed.
+  **ADDRESS_SEARCH_PROVIDER_CONFIGURATION_REQUIRED** — provider/API to enable:
+  **Google Places Autocomplete (Places API New)**. **Key handling (important):**
+  a Places key must **not** be read directly from mobile `src/` via Firebase
+  Secret Manager (Secret Manager values are backend-only and must never reach the
+  client). Future autocomplete must use **either** (a) a secured **backend
+  callable** that reads the key from Secret Manager and returns only sanitized
+  suggestions, **or** (b) a dedicated **Android-restricted client key** (package
+  + SHA-restricted) used directly by the app. The value is never
+  requested/printed/committed. No local/fake suggestions were committed.
 - **Interactive map marker: NOT available** — `react-native-maps` is not installed,
-  so drag-to-adjust map selection is not implemented (no placeholder map is shown).
-  Manual map adjustment is deferred until the map library is added.
+  so map selection is **not implemented and not offered** (no map button, no
+  placeholder map, no promise of map adjustment). Manual map adjustment is
+  deferred until the map library is added.
 
 ### Pickup / destination options
 Editable pickup and destination address fields. Pickup: **"Usar minha
@@ -165,13 +169,14 @@ an **"Editar locais"** action.
 
 ### GPS permission fallback
 Permission denied / lookup error does not crash and does not re-prompt in a loop;
-address search stays available; PT-BR notice: _"Não foi possível acessar sua
-localização. Busque um endereço ou selecione o ponto de embarque no mapa."_
+address search stays available; PT-BR notice (no map promise): _"Não foi possível
+acessar sua localização. Busque e selecione um endereço para continuar."_
 
 ### Map-confirmation behavior
 Not required for valid GPS/geocoded coordinates — the passenger continues
-directly. It would only be required for explicit manual map selection / ambiguous
-/ missing coordinates (map selection deferred pending `react-native-maps`).
+directly. No map-selection button is shown and no map adjustment is promised while
+`react-native-maps` is absent; map-based selection is deferred until that real
+feature exists.
 
 ### Idempotency-key reuse
 The passenger confirm screen holds one idempotency key per request **attempt** in

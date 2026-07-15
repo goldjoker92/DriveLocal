@@ -23,8 +23,10 @@ import { typography, fontFamily } from '../../constants/typography';
 import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { getCurrentLocationWithAddress, resolveAddressToCoords } from '../../services/locationService';
 
+// Map selection is not implemented yet (react-native-maps absent), so the
+// fallback must not promise map adjustment.
 const GPS_DENIED_MSG =
-  'Não foi possível acessar sua localização. Busque um endereço ou selecione o ponto de embarque no mapa.';
+  'Não foi possível acessar sua localização. Busque e selecione um endereço para continuar.';
 
 export default function SelectRoute() {
   const router = useRouter();
