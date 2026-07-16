@@ -26,16 +26,22 @@ async function getInstallationId() {
 }
 
 // Android channels MUST exist before token retrieval / delivery.
+// Offers = MAX importance; status = HIGH importance; both with sound + vibration.
 export async function ensureAndroidChannels() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNELS.RIDE_OFFERS, {
     name: 'Corridas disponíveis',
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: Notifications.AndroidImportance.MAX,
     sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
   });
   await Notifications.setNotificationChannelAsync(NOTIFICATION_CHANNELS.RIDE_STATUS, {
     name: 'Status da corrida',
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    enableVibrate: true,
   });
 }
 

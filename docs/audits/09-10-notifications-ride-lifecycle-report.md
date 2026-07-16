@@ -68,7 +68,9 @@ implemented** (packages approved and installed: `expo-notifications`,
 `react-native-svg`, `react-native-qrcode-svg`). `src/services/notificationsService.js`
 gets the real native Android FCM token via `getDevicePushTokenAsync` (never an
 Expo push token — sending is via Admin Messaging), creates the two channels
-before token retrieval, and registers/disables via `syncNotificationTokenSecure`
+before token retrieval (`drivelocal-ride-offers` = MAX importance,
+`drivelocal-ride-status` = HIGH importance; both sound + vibration; no obsolete
+channel remains), and registers/disables via `syncNotificationTokenSecure`
 (disabled on logout). `src/hooks/useRideNotifications.js` (mounted in
 `src/app/_layout.jsx`) configures the foreground handler once (present, no
 auto-navigation, no duplicate fallback), routes background taps and the
@@ -107,6 +109,7 @@ raw FCM responses.
 
 - Functions tests: 88 pass / 13 skipped (6 new critical lifecycle tests).
 - Root tests: 45/45. Expo Doctor: 21/21. `git diff --check` clean.
+- `expo install --check`: dependencies up to date.
 - Firestore Rules emulator: NOT RUN — JDK 21 required.
 - Runtime scan: no mock/fake/simulate in the ride-lifecycle/notification runtime
   path; test doubles are test-only; no secrets in mobile code; no direct client
