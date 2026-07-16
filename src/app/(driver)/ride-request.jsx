@@ -1,13 +1,6 @@
-// Incoming ride offer (route "/ride-request"). BLOCK 08 real flow.
-//
-// The driver reads ONLY their own targeted offer via a secured Firestore
-// listener (driverOffers where driverId == uid). Acceptance goes through the
-// secure callable acceptDriverOfferSecure (first valid acceptance wins,
-// transactional, with the commission wallet hold). The client never writes the
-// ride, offer, wallet, or driver financial fields.
-//
-// After acceptance the driver navigates to the PICKUP with Waze or Google Maps.
-// Destination navigation is connected in BLOCK 09+10.
+// Incoming targeted ride offer (route "/ride-request").
+// Before acceptance only a generic/coarsened pickup region is shown. After the
+// secure first-wins acceptance, exact pickup navigation becomes available.
 
 import { useEffect, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
@@ -30,24 +23,21 @@ export default function RideRequest() {
   const [offer, setOffer] = useState(null);
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState('');
-  const [accepted, setAccepted] = useState(null); // { pickup, ... } after winning
+  const [accepted, setAccepted] = useState(null);
 
-  // The listener surfaces an already-accepted offer (with exactPickup) so the
-  // accepted state and its navigation buttons are recovered after an app restart.
   useEffect(() => {
-    const uid = auth.currentUser && auth.currentUser.uid;
+    const uid = auth.currentUser?.uid;
     if (!uid) return undefined;
-    const unsubscribe = listenToMyOffer(
+    return listenToMyOffer(
       uid,
       (o) => {
         setOffer(o);
-        if (o && o.status === 'accepted' && o.exactPickup) {
-          setAccepted({ rideId: o.rideId, pickup: o.exactPickup });
+        if (o?.status === 'accepted' && o.exactPickup) {
+          setAccepted({ rideId: o.rideId, pickup: o.exactPickup, vehicleType: o.vehicleType });
         }
       },
       () => setOffer(null)
     );
-    return unsubscribe;
   }, []);
 
   async function handleAccept() {
@@ -56,22 +46,20 @@ export default function RideRequest() {
     setAcceptError('');
     try {
       const result = await acceptOffer(offer.offerId);
-      setAccepted(result); // carries the exact pickup for navigation
+      setAccepted(result);
     } catch (e) {
-      // Stable PT-BR message from the backend (e.g. corrida já aceita, oferta expirada).
-      setAcceptError((e && e.message) || 'Não foi possível aceitar a corrida.');
+      setAcceptError(e?.message || 'Não foi possível aceitar a corrida.');
     } finally {
       setAccepting(false);
     }
   }
 
-  // Deep-link navigation to the EXACT pickup. If one app cannot open, show a
-  // PT-BR error and keep the other option. Never log the URL or coordinates.
   async function openNav(which) {
+    if (!accepted?.pickup) return;
     setAcceptError('');
     try {
-      if (which === 'waze') await openWazeToPoint(accepted.pickup);
-      else await openGoogleMapsToPoint(accepted.pickup);
+      if (which === 'waze') await openWazeToPoint(accepted.pickup, accepted.vehicleType);
+      else await openGoogleMapsToPoint(accepted.pickup, accepted.vehicleType);
     } catch (_e) {
       setAcceptError(
         which === 'waze'
@@ -84,26 +72,31 @@ export default function RideRequest() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Nova corrida" subtitle="Aceite para iniciar" onBack={() => router.back()} />
+        <Header title="Nova corrida" subtitle="A oferta expira rapidamente" onBack={() => router.back()} />
 
         {accepted ? (
           <AppCard>
             <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Corrida aceita!</Text>
             <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
-              Vá até o local de embarque do passageiro.
+              O endereço exato do embarque já está liberado.
             </Text>
             <View style={{ gap: spacing.sm }}>
               <AppButton title="Abrir no Waze" onPress={() => openNav('waze')} />
               <AppButton title="Abrir no Google Maps" onPress={() => openNav('gmaps')} />
             </View>
-            <AppButton title="Ir para a corrida" variant="ghost" onPress={() => router.replace({ pathname: '/active-ride', params: { rideId: accepted.rideId } })} />
+            <AppButton
+              title="Ir para a corrida"
+              variant="ghost"
+              onPress={() => router.replace({ pathname: '/active-ride', params: { rideId: accepted.rideId } })}
+            />
           </AppCard>
         ) : offer ? (
           <AppCard>
             <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Corrida disponível</Text>
-            <AdminTableRow label="Embarque" value={offer.pickupPreview ? offer.pickupPreview.label : '—'} />
+            <AdminTableRow label="Embarque" value={offer.pickupPreview?.label || 'Região do embarque'} />
             <AdminTableRow label="Distância até o embarque" value={formatDistanceKm(offer.distanceToPickupMeters)} />
             <AdminTableRow label="Valor estimado" value={formatBRL(offer.estimatedFareCentavos)} />
+            <AdminTableRow label="Destino" value="Liberado após o início da corrida" />
             <AppButton title={accepting ? 'Aceitando…' : 'Aceitar corrida'} onPress={handleAccept} disabled={accepting} />
             <AppButton title="Recusar" variant="ghost" onPress={() => router.replace('/driver-home')} />
           </AppCard>
@@ -115,9 +108,7 @@ export default function RideRequest() {
           </AppCard>
         )}
 
-        {acceptError ? (
-          <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{acceptError}</Text>
-        ) : null}
+        {acceptError ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{acceptError}</Text> : null}
       </ScrollView>
     </SafeAreaView>
   );
