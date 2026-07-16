@@ -76,16 +76,23 @@ service cloud.firestore {
       ];
     }
 
-    // Server-owned driver fields NO client (admin included) may write — founder
-    // allocation, approval order, and wallet balances are backend-authoritative.
-    // Set/changed only by secure callables via the Admin SDK (which bypass Rules).
-    function driverServerOnlyKeys() {
+    // The ONLY driver fields an admin CLIENT may write — document-review
+    // housekeeping (marking submitted documents reviewed + internal notes).
+    // This explicit allowlist CANNOT approve, reject, suspend, reactivate,
+    // allocate founder benefits, or change any financial/ride state. Every
+    // moderation/financial/lifecycle field (verificationStatus, approvedAt,
+    // rejectedAt, rejectionReason, suspendedAt, suspendedReason/suspensionReason,
+    // isFounder/founderEligible, founderNumber, commissionFreeUntil,
+    // subscriptionFreeUntil, wallet balances/holds, activeRideId, dispute
+    // fields) is absent here and is therefore writable ONLY through the secure
+    // Admin SDK callables (which bypass these Rules).
+    function driverAdminReviewSafe() {
       return [
-        'approvalNumber', 'founderEligible', 'founderNumber',
-        'founderGrantedAt', 'founderExpiresAt',
-        'walletBalanceCentavos', 'walletHeldCentavos', 'walletAvailableCentavos',
-        'commissionHoldCentavos', 'completedRideCount', 'freeRideCountUsed',
-        'activeRideId'
+        'documentsStatus', 'selfieStatus',
+        'cnhFrenteStatus', 'cnhVersoStatus', 'crlvStatus',
+        'vehiclePhotoStatus', 'motofreteStatus',
+        'reviewNote', 'adminNote',
+        'updatedAt'
       ];
     }
 
@@ -118,14 +125,15 @@ service cloud.firestore {
       allow create: if isOwner(driverId) &&
         request.resource.data.keys().hasOnly(driverCreateSafe());
 
-      // Self update limited to safe keys (mixed safe+protected fails via hasOnly).
-      // Admin client update allowed for document-review housekeeping ONLY: it may
-      // never touch the founder/approval/wallet server-owned fields (those move
-      // through secure callables). Self update limited to onboarding-safe keys.
+      // Admin client update: STRICT allowlist — document-review housekeeping only
+      // (cannot approve/reject/suspend/reactivate, allocate founder, or change
+      // financial/ride state; those are callable-only). Self update limited to
+      // onboarding-safe keys. A mixed update touching any other field fails via
+      // hasOnly.
       allow update: if
         (isAdmin() &&
-         !request.resource.data.diff(resource.data).affectedKeys()
-           .hasAny(driverServerOnlyKeys())) ||
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(driverAdminReviewSafe())) ||
         (isOwner(driverId) &&
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(driverUpdateSafe()));

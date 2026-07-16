@@ -96,10 +96,16 @@ before/after balances.
 ## Firestore Rules (hardening, BLOCK 04 protections preserved)
 
 `backend/firebase/rules/firestore.rules`:
-- `drivers` update: admin client SDK may do document-review housekeeping but may
-  **never** touch `driverServerOnlyKeys()` (approval number, founder fields,
-  wallet balances, held, hold, completed/free-ride counters, activeRideId). Self
-  update stays limited to onboarding-safe keys.
+- `drivers` update: admin client SDK is restricted to a STRICT allowlist
+  `driverAdminReviewSafe()` (document-review statuses + internal notes only). It
+  **cannot** write any moderation/financial/lifecycle field — `verificationStatus`,
+  `approvedAt`, `rejectedAt`, `rejectionReason`, `suspendedAt`,
+  `suspendedReason`/`suspensionReason`, `isFounder`/`founderEligible`,
+  `founderNumber`, `commissionFreeUntil`, `subscriptionFreeUntil`, wallet
+  balances/holds, `activeRideId`, dispute fields — all of which are callable-only
+  (Admin SDK bypasses Rules). Self update stays limited to onboarding-safe keys.
+  Note: legacy client-side subscription-test / correction writes are consequently
+  denied and must move to callables in a later block.
 - `counters` write → `if false` (founder allocation is callable-only via Admin SDK).
 - Unchanged server-only: `walletTransactions`, `auditLogs`, `notificationEvents`,
   `notificationTokens`, `privateDriverData`, `driverOffers`, `rideRequests`
