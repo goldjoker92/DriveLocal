@@ -29,7 +29,13 @@ function buildServiceAreaConfig(identity, artifact, report, existing = {}) {
     founderCounterId: identity.founderCounterId,
     allowedVehicleTypes: existing.allowedVehicleTypes || ['moto', 'car'],
     // Operational polygon === municipality boundary for V1 (documented decision).
-    boundary: artifact.geometry,
+    // GeoJSON Polygon/MultiPolygon coordinates are nested arrays, and Firestore
+    // rejects an array that directly contains another array, so the geometry is
+    // persisted as a serialized JSON string. This copy is reference/audit only:
+    // the committed local artifact remains the AUTHORITATIVE runtime geofence
+    // source (see rides/serviceArea.js). The runtime NEVER parses this field.
+    boundaryFormat: 'geojson-geometry-json-v1',
+    boundaryGeoJson: JSON.stringify(artifact.geometry),
     boundaryChecksum: report.checksum,
     boundaryBoundingBox: report.bbox,
   };
