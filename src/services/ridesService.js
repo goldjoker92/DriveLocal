@@ -61,9 +61,11 @@ function newer(current, candidate) {
   return Number(candidate.createdAtMs || 0) > Number(current.createdAtMs || 0) ? candidate : current;
 }
 
+const TERMINAL_DRIVER_RIDE_STATUSES = new Set(['completed', 'cancelled', 'disputed']);
+
 // Live targeted offer for the signed-in driver. When rideId is supplied, only
-// that ride can drive the active screen, preventing an old accepted offer from
-// replacing the current ride after an app restart.
+// that ride can drive the active screen. Terminal historical accepted offers are
+// ignored so they never hide a new incoming offer.
 export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
   const q = query(collection(db, 'driverOffers'), where('driverId', '==', driverUid));
   return onSnapshot(
@@ -75,8 +77,13 @@ export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
         const data = d.data();
         if (rideId && data.rideId !== rideId) return;
         const candidate = { offerId: d.id, ...data };
-        if (data.status === 'accepted') accepted = newer(accepted, candidate);
-        else if (data.status === 'offered') offered = newer(offered, candidate);
+        if (data.status === 'accepted') {
+          if (!TERMINAL_DRIVER_RIDE_STATUSES.has(data.driverRideStatus)) {
+            accepted = newer(accepted, candidate);
+          }
+        } else if (data.status === 'offered') {
+          offered = newer(offered, candidate);
+        }
       });
       onData(accepted || offered);
     },
