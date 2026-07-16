@@ -59,9 +59,9 @@ async function approveDriver({ db, request, context, clock }) {
       founderNumber: isFounder ? approvalNumber : null,
       founderGrantedAt: isFounder ? admin.firestore.FieldValue.serverTimestamp() : null,
       founderExpiresAt: isFounder ? freePeriodEnd : null,
-      // Founders only: #101+ pay standard commission from the first ride (§7).
-      commissionFreeUntil: isFounder ? freePeriodEnd : null,
-      // Founders are subscription-covered by date; non-founders by free-ride count.
+      // Launch rule: every newly approved driver receives 60 days at 0%
+      // commission. Founders additionally receive 60 days of subscription cover.
+      commissionFreeUntil: freePeriodEnd,
       subscriptionFreeUntil: isFounder ? freePeriodEnd : null,
       reviewedBy: adminUid,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
