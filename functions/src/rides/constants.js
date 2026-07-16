@@ -45,6 +45,7 @@ module.exports = Object.freeze({
   // notificationEvents.eventType values (also used for deterministic dedupe ids).
   NOTIFICATION_EVENT: Object.freeze({
     OFFER_CREATED: 'offer_created',
+    RIDE_ASSIGNED: 'ride_assigned',
     RIDE_ARRIVED: 'ride_arrived',
     RIDE_STARTED: 'ride_started',
     RIDE_AWAITING_PAYMENT: 'ride_awaiting_payment',
