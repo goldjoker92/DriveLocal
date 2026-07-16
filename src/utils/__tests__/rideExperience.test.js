@@ -91,19 +91,22 @@ describe('active passenger/driver screen contracts', () => {
     const completed = source('src/app/(passenger)/ride-completed.jsx');
     const searching = source('src/app/(passenger)/searching.jsx');
     const activeDriver = source('src/app/(driver)/active-ride.jsx');
+    const notificationHook = source('src/hooks/useRideNotifications.js');
 
     expect(assigned).not.toContain('/mock/');
     expect(completed).not.toContain('/mock/');
     expect(assigned).toContain('listenToRide');
+    expect(assigned).toContain("pathname: '/pix-payment', params: { rideId }");
     expect(completed).toContain('listenToRide');
     expect(searching).toContain('cancelRide');
     expect(activeDriver).toContain('driverRideStatus');
-    expect(activeDriver).toContain("params: { rideId");
+    expect(activeDriver).toContain('listenToMyOffer');
+    expect(notificationHook).toContain('buildNotificationRouteTarget');
   });
 
   it('does not log exact passenger coordinates or addresses', () => {
     const location = source('src/services/locationService.js');
     expect(location).not.toContain('console.log');
-    expect(location).not.toContain("position lat=");
+    expect(location).not.toContain('position lat=');
   });
 });
