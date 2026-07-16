@@ -188,6 +188,8 @@ service cloud.firestore {
     match /walletTransactions/{docId}     { allow read, write: if false; }
     match /paymentRequests/{docId}        { allow read, write: if false; }
     match /subscriptionPayments/{docId}   { allow read, write: if false; }
+    match /notificationEvents/{docId}     { allow read, write: if false; }
+    match /notificationTokens/{docId}     { allow read, write: if false; }
 
     // --- Deny by default -----------------------------------------------------
     match /{document=**} {

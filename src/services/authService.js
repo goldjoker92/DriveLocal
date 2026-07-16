@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
+import { disablePushNotifications } from './notificationsService';
 
 // Creates a Firebase Auth user, then a drivers/{uid} document in "draft" state.
 // Returns the Firebase user.
@@ -93,8 +94,14 @@ export async function loginUser(email, password) {
   return { user, role: 'unknown' };
 }
 
-// Signs the current user out of Firebase Auth.
+// Signs the current user out of Firebase Auth. Disables this device's push token
+// first (best effort) so a signed-out device stops receiving notifications.
 export async function logoutUser() {
+  try {
+    await disablePushNotifications();
+  } catch (_e) {
+    // best effort — never block logout
+  }
   await signOut(auth);
 }
 

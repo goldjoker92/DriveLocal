@@ -20,8 +20,19 @@ const { resolveEnvironment } = require('../config/environment');
 const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
 const { createRideRequestSecure } = require('./createRideRequest');
 const { acceptDriverOfferSecure } = require('./acceptOffer');
+const lifecycle = require('./lifecycle');
 
 const REGION = 'southamerica-east1';
+
+// Binds a lifecycle handler (Firestore + systemClock injected) to a callable.
+function bindLifecycle(name, handler) {
+  return onCall(
+    { region: REGION },
+    withCallableBoundary(name, (request, context) =>
+      handler({ db: admin.firestore(), request, context, clock: systemClock })
+    )
+  );
+}
 
 const ROUTING_PROVIDER_API_KEY = defineSecret('ROUTING_PROVIDER_API_KEY');
 
@@ -48,5 +59,12 @@ const acceptDriverOfferSecureFn = onCall(
 module.exports = {
   createRideRequestSecure: createRideRequestSecureFn,
   acceptDriverOfferSecure: acceptDriverOfferSecureFn,
+  markDriverArrivedSecure: bindLifecycle('markDriverArrivedSecure', lifecycle.markDriverArrived),
+  startRideSecure: bindLifecycle('startRideSecure', lifecycle.startRide),
+  finishRideSecure: bindLifecycle('finishRideSecure', lifecycle.finishRide),
+  markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
+  confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
+  cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide),
+  reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
 };

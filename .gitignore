@@ -66,3 +66,8 @@ pasted-*
 .env
 .env.*
 !.env.example
+.env
+.env.local
+.env.development.local
+.env.preview.local
+.env.production.local

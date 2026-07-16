@@ -1,4 +1,4 @@
-﻿const fs = require("fs");
+const fs = require("fs");
 const path = require("path");
 const appJson = require("./app.json");
 
@@ -54,9 +54,9 @@ module.exports = ({ config }) => ({
       "expo-location",
       {
         locationWhenInUsePermission:
-          "DriveLocal utilise votre position pour afficher les chauffeurs proches, calculer les trajets et rÃ©aliser les courses.",
+          "DriveLocal utilise votre position pour afficher les chauffeurs proches, calculer les trajets et réaliser les courses.",
         locationAlwaysAndWhenInUsePermission:
-          "DriveLocal utilise votre position en arriÃ¨re-plan uniquement lorsque vous Ãªtes chauffeur disponible ou pendant une course.",
+          "DriveLocal utilise votre position en arrière-plan uniquement lorsque vous êtes chauffeur disponible ou pendant une course.",
         isAndroidBackgroundLocationEnabled: true,
         isAndroidForegroundServiceEnabled: true,
         isIosBackgroundLocationEnabled: true,
@@ -78,7 +78,7 @@ module.exports = ({ config }) => ({
       {
         configureAndroidBackup: true,
         faceIDPermission:
-          "DriveLocal utilise Face ID pour sÃ©curiser l'accÃ¨s Ã  votre compte.",
+          "DriveLocal utilise Face ID pour sécuriser l'accès à votre compte.",
       },
     ],
 
