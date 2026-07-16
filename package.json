@@ -57,7 +57,17 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "start:dev": "expo start --dev-client",
-    "test": "jest --ci --runInBand"
+    "test": "jest --ci --runInBand",
+    "validate:service-area": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
+    "validate:env:dev": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
+    "validate:env:prod": "node functions/scripts/validate-config.js --project drivelocal-prod --expect-env production",
+    "geodata:import:horizonte": "node scripts/geodata/import-horizonte-ibge.js",
+    "seed:service-area:dev": "node functions/scripts/seed-service-area.js --project drivelocal-dev",
+    "seed:service-area:prod": "node functions/scripts/seed-service-area.js --project drivelocal-prod",
+    "deploy:firebase:dev": "firebase deploy --only functions,firestore:rules,firestore:indexes --project drivelocal-dev",
+    "deploy:firebase:prod": "node -e \"if(process.env.CONFIRM_PRODUCTION_DEPLOY!=='DRIVELOCAL_PRODUCTION'){console.error('prod deploy requires CONFIRM_PRODUCTION_DEPLOY=DRIVELOCAL_PRODUCTION');process.exit(1)}\" && firebase deploy --only functions,firestore:rules,firestore:indexes --project drivelocal-prod",
+    "verify:firebase:dev": "firebase functions:list --project drivelocal-dev",
+    "verify:firebase:prod": "firebase functions:list --project drivelocal-prod"
   },
   "jest": {
     "preset": "jest-expo",

@@ -33,6 +33,12 @@ async function validateServiceArea({ db, serviceAreaId, vehicleType, pickup, des
     });
   }
 
+  // Geofence authority: the pickup AND destination must both be inside the
+  // operational polygon. Coordinate presence/type/range are validated upstream
+  // (createRideRequest.sanitizeCoord). Edge policy: ray-casting is deterministic
+  // for fixed geometry; a point exactly on an edge resolves consistently and V1
+  // accepts that result. The route POLYLINE is never the authority — only the two
+  // endpoints are — so a route that briefly exits the polygon does not fail.
   const boundary = cfg.boundary;
   if (!pointInServiceArea(pickup, boundary)) {
     throw new AppError(ERROR_CODES.OUT_OF_SERVICE_AREA, {

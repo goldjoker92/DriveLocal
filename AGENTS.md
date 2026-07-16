@@ -4,6 +4,17 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before 
 
 # Phase active
 
+BLOCK 13 en cours (branche feature/dev-deploy-pilot-readiness) :
+- Horizonte zone autoritaire : identité canonique (functions/src/config/serviceAreaIdentity.js), municipalityCode 2305233 vérifié via IBGE
+- frontière IBGE importée UNE fois (scripts/geodata/import-horizonte-ibge.js) → backend/firebase/config/service-areas/HORIZONTE_CE_BR.geojson (Polygon, checksum, boundaryVersion 2024.1) ; jamais appelée au runtime
+- geofence backend local (geo.js + createRideRequest coord validation + les 2 endpoints) ; ride persiste boundaryVersion/operationalPolygonVersion ; polyline non-autoritaire
+- séparation DEV/PROD : .firebaserc (dev), firebase.json (indexes), scripts validate/seed/deploy/verify (dev=--project drivelocal-dev ; prod fail-closed via CONFIRM_PRODUCTION_DEPLOY) ; validate-config.js non-mutant
+- seed idempotent (functions/scripts/seed-service-area.js, merge-only, préserve compteurs/pricing)
+- DEV Firebase : Rules + indexes DÉPLOYÉS sur drivelocal-dev (VERIFIED IN DEV). Functions DEV deploy = MANUEL (présence des secrets non vérifiable sans révéler les valeurs ; gcloud absent). DEV seed = NON EXÉCUTÉ (ADC requis).
+- EAS : build dev distant intact ; eas.json profil preview ajouté ; package com.drivelocal.app inchangé. Aucun build lancé.
+- Prod Firebase + Google Play + Data Safety + suppression compte + rollback + runbook + debugging : préparés, NON déployés/soumis (docs/release/*). Valeurs prod = MANUAL VALUE REQUIRED ; paiements = PLAY PAYMENTS POLICY REVIEW REQUIRED ; vie privée = LEGAL REVIEW REQUIRED.
+- Validations : functions 115 pass / 13 skipped (+12 serviceAreaGeo), root 45/45, expo-doctor 21/21. Tests physiques Android / E2E / smoke admin : NON EXÉCUTÉS. Aucun push/merge/deploy prod.
+
 BLOCK 11+12 complété (branche feature/admin-ops-security-hardening) :
 - callables admin sécurisées : suspendDriverSecure, reactivateDriverSecure (sûr en corrida active), resolveRideDisputeSecure (3 issues : confirm_driver_payment / release_driver_hold / retain_for_manual_review), adjustDriverWalletSecure (credit/debit/correction/reversal, ledger append-only, held jamais touché)
 - approve/reject/suspend/reactivate câblés via src/services/adminService.js (le client n'envoie plus d'adminUid ; fondateur alloué côté serveur)
