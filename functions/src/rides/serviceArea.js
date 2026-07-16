@@ -6,7 +6,23 @@
 
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { pointInServiceArea } = require('../geo/geo');
+const { loadBoundaryArtifact, validateBoundaryArtifact } = require('../geo/boundaryArtifact');
 const C = require('./constants');
+
+// Authoritative operational polygon comes from the committed local artifact —
+// NOT from Firestore. Firestore stores a serialized copy (boundaryGeoJson) for
+// reference/audit only because it rejects nested coordinate arrays; the runtime
+// never parses it. The artifact is loaded and structurally validated once per
+// process, then cached, so ride validation stays fast and deterministic.
+const boundaryCache = new Map();
+function loadOperationalPolygon(serviceAreaId) {
+  if (!boundaryCache.has(serviceAreaId)) {
+    const artifact = loadBoundaryArtifact(serviceAreaId); // throws if missing (fail closed)
+    validateBoundaryArtifact(artifact); // throws on tamper/structure (fail closed)
+    boundaryCache.set(serviceAreaId, artifact.geometry);
+  }
+  return boundaryCache.get(serviceAreaId);
+}
 
 /**
  * Loads and validates the service-area config, then geofences both endpoints.
@@ -39,7 +55,7 @@ async function validateServiceArea({ db, serviceAreaId, vehicleType, pickup, des
   // for fixed geometry; a point exactly on an edge resolves consistently and V1
   // accepts that result. The route POLYLINE is never the authority — only the two
   // endpoints are — so a route that briefly exits the polygon does not fail.
-  const boundary = cfg.boundary;
+  const boundary = loadOperationalPolygon(serviceAreaId);
   if (!pointInServiceArea(pickup, boundary)) {
     throw new AppError(ERROR_CODES.OUT_OF_SERVICE_AREA, {
       internalMessage: 'pickup outside service-area polygon',
