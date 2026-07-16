@@ -1,40 +1,52 @@
 {
-    "cli":  {
-                "version":  "\u003e= 13.2.0",
-                "appVersionSource":  "local"
-            },
-    "build":  {
-                  "development":  {
-                                      "developmentClient":  true,
-                                      "distribution":  "internal",
-                                      "node":  "20.19.4",
-                                      "android":  {
-                                                      "buildType":  "apk",
-                                                      "credentialsSource":  "remote"
-                                                  },
-                                      "env":  {
-                                                  "EXPO_NO_TELEMETRY":  "1",
-                                                  "APP_ENV":  "dev"
-                                              }
-                                  },
-                  "production":  {
-                                     "distribution":  "store",
-                                     "node":  "20.19.4",
-                                     "android":  {
-                                                     "buildType":  "app-bundle",
-                                                     "credentialsSource":  "remote"
-                                                 },
-                                     "env":  {
-                                                 "EXPO_NO_TELEMETRY":  "1",
-                                                 "APP_ENV":  "prod"
-                                             }
-                                 }
-              },
-    "submit":  {
-                   "production":  {
-                                      "android":  {
-                                                      "track":  "production"
-                                                  }
-                                  }
-               }
+  "cli": {
+    "version": ">= 13.2.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "node": "20.19.4",
+      "android": {
+        "buildType": "apk",
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "EXPO_NO_TELEMETRY": "1",
+        "APP_ENV": "dev"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "node": "20.19.4",
+      "android": {
+        "buildType": "apk",
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "EXPO_NO_TELEMETRY": "1",
+        "APP_ENV": "dev"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "node": "20.19.4",
+      "android": {
+        "buildType": "app-bundle",
+        "credentialsSource": "remote"
+      },
+      "env": {
+        "EXPO_NO_TELEMETRY": "1",
+        "APP_ENV": "prod"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "production"
+      }
+    }
+  }
 }

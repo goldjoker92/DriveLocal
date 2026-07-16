@@ -108,6 +108,10 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       rideId,
       passengerId,
       serviceAreaId,
+      // Boundary/operational polygon versions the geofence validated against
+      // (server-owned; from the seeded service-area config). Persisted for audit.
+      boundaryVersion: svc.config.boundaryVersion || null,
+      operationalPolygonVersion: svc.config.operationalPolygonVersion || null,
       vehicleType,
       pickup,
       destination,
