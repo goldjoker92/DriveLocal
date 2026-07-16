@@ -154,7 +154,8 @@ describe('full passenger ride -> driver Pix -> platform commission', () => {
     expect(ride.finalFareCentavos).toBe(1325);
     expect(ride.paymentAmountCentavos).toBe(1325);
     expect(ride.finalCommissionCentavos).toBe(199);
-    expect(ride.paymentPixPayload).toContain('5413.25');
+    // EMV TLV: field 54 (amount), length 05, value 13.25.
+    expect(ride.paymentPixPayload).toContain('540513.25');
 
     await lifecycle.markPassengerPixSent({
       db,
