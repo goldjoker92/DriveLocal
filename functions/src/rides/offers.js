@@ -2,8 +2,8 @@
 // createTargetedOffers — writes one deterministic offer document per eligible
 // driver: driverOffers/{rideId}_{driverId}. Deterministic ids make dispatch
 // idempotent: re-running for the same ride can never create duplicate offers.
-// Documents carry only a SAFE pickup preview (coarsened coordinates) — the exact
-// pickup is delivered to the winning driver at acceptance, not before.
+// Documents carry only a SAFE pickup preview (coarsened coordinates + generic
+// label). The exact address/coordinates are delivered to the winner at acceptance.
 
 const admin = require('firebase-admin');
 const { buildNotificationEvent, enqueueEvent } = require('../notifications/events');
@@ -21,7 +21,8 @@ function offerId(rideId, driverId) {
 
 function pickupPreview(pickup) {
   return {
-    label: pickup && pickup.label ? String(pickup.label) : 'Local de embarque',
+    // Never copy the passenger's street/number before the driver accepts.
+    label: 'Região do embarque',
     approxLat: coarse(pickup.lat),
     approxLng: coarse(pickup.lng),
   };
@@ -38,8 +39,6 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
   const preview = pickupPreview(ride.pickup);
   const offerIds = [];
 
-  // Individual deterministic writes (idempotent by id) — a retry overwrites the
-  // same document rather than creating a second offer for the same driver.
   for (const cand of eligible) {
     const id = offerId(ride.rideId, cand.driverId);
     await db.collection(C.DRIVER_OFFERS).doc(id).set({
@@ -56,7 +55,6 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
       expiresAtMs,
       traceId: traceId || null,
     });
-    // Real targeted-offer notification (one deterministic event per driver).
     await enqueueEvent(
       db,
       buildNotificationEvent({
