@@ -82,7 +82,56 @@ describe('seed config builder (idempotent, preserves runtime fields)', () => {
     expect(cfg.allowedVehicleTypes).toEqual(['moto']);
     expect(cfg.approvedCount).toBeUndefined();
     expect(cfg.pricing).toBeUndefined();
-    expect(cfg.boundary.type).toBe(geom.type);
+  });
+});
+
+// Firestore rejects an array whose element is itself an array. GeoJSON
+// coordinates are nested arrays, so the config must serialize the geometry
+// instead of storing it raw. These tests lock that contract in.
+describe('seed config builder (Firestore-safe boundary serialization)', () => {
+  const identity = getServiceAreaIdentity(ID);
+  // True when no array in `value` directly contains another array (the exact
+  // shape Firestore rejects). Objects/maps may still hold arrays.
+  function noNestedArrays(value) {
+    if (Array.isArray(value)) {
+      return value.every((el) => !Array.isArray(el) && noNestedArrays(el));
+    }
+    if (value && typeof value === 'object') {
+      return Object.values(value).every(noNestedArrays);
+    }
+    return true;
+  }
+
+  it('emits no raw `boundary` nested-array field', () => {
+    const cfg = buildServiceAreaConfig(identity, artifact, report, {});
+    expect(cfg.boundary).toBeUndefined();
+  });
+  it('serializes the geometry as a valid JSON string with a versioned format tag', () => {
+    const cfg = buildServiceAreaConfig(identity, artifact, report, {});
+    expect(cfg.boundaryFormat).toBe('geojson-geometry-json-v1');
+    expect(typeof cfg.boundaryGeoJson).toBe('string');
+    expect(cfg.boundaryGeoJson.length).toBeGreaterThan(0);
+    expect(() => JSON.parse(cfg.boundaryGeoJson)).not.toThrow();
+  });
+  it('round-trips boundaryGeoJson back to the original geometry', () => {
+    const cfg = buildServiceAreaConfig(identity, artifact, report, {});
+    expect(JSON.parse(cfg.boundaryGeoJson)).toEqual(artifact.geometry);
+    expect(JSON.parse(cfg.boundaryGeoJson).type).toBe(geom.type);
+  });
+  it('keeps checksum, bbox and version fields unchanged', () => {
+    const cfg = buildServiceAreaConfig(identity, artifact, report, {});
     expect(cfg.boundaryChecksum).toBe(report.checksum);
+    expect(cfg.boundaryBoundingBox).toEqual(report.bbox);
+    expect(cfg.boundaryVersion).toBe(identity.boundaryVersion);
+    expect(cfg.operationalPolygonVersion).toBe(identity.operationalPolygonVersion);
+    expect(cfg.coverageMode).toBe(identity.coverageMode);
+  });
+  it('contains no unsupported nested Firestore arrays anywhere in the document', () => {
+    const cfg = buildServiceAreaConfig(identity, artifact, report, { allowedVehicleTypes: ['moto', 'car'] });
+    expect(noNestedArrays(cfg)).toBe(true);
+    // allowedVehicleTypes (flat string array) and boundaryBoundingBox (flat
+    // number array) are allowed and must survive.
+    expect(cfg.allowedVehicleTypes).toEqual(['moto', 'car']);
+    expect(Array.isArray(cfg.boundaryBoundingBox)).toBe(true);
   });
 });
