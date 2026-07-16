@@ -23,12 +23,19 @@ import { VEHICLE_LABELS_PT_BR, VEHICLE_MOTO } from '../../constants/vehicleTypes
 import { auth, db } from '../../config/firebase';
 import {
   getDriver,
-  approveDriver,
-  rejectDriver,
   requestDriverCorrection,
   activateDriverSubscription,
   resetDriverSubscription,
 } from '../../services/driverService';
+// Sensitive driver mutations go through secure admin callables (BLOCK 11+12):
+// the server derives the admin identity, allocates founder status atomically,
+// and guards active-ride safety on suspension. The client sends no adminUid.
+import {
+  approveDriver,
+  rejectDriver,
+  suspendDriver,
+  reactivateDriver,
+} from '../../services/adminService';
 import { formatCPF } from '../../utils/validation';
 import {
   VERIFICATION_STATUS,
@@ -208,8 +215,8 @@ export default function DriverDetail() {
         setError('');
         setSubmitting(true);
         try {
-          console.log('[ADMIN_DRIVER_DETAIL] approved driverId=', driverId);
-          await approveDriver(driverId, adminUid());
+          console.log('[ADMIN_DRIVER_DETAIL] approve requested driverId=', driverId);
+          await approveDriver(driverId);
           await loadDriver();
         } catch (e) {
           console.log('[ADMIN_DRIVER_DETAIL] approve error', e.message);
@@ -266,13 +273,66 @@ export default function DriverDetail() {
         setError('');
         setSubmitting(true);
         try {
-          console.log('[ADMIN_DRIVER_DETAIL] rejected driverId=', driverId, 'reason=', text);
-          await rejectDriver(driverId, adminUid(), text);
+          console.log('[ADMIN_DRIVER_DETAIL] reject requested driverId=', driverId);
+          await rejectDriver(driverId, text);
           setReason('');
           await loadDriver();
         } catch (e) {
           console.log('[ADMIN_DRIVER_DETAIL] reject error', e.message);
           setError('Não foi possível recusar o motorista.');
+        } finally {
+          setSubmitting(false);
+        }
+      },
+    });
+  }
+
+  // Suspensão — motivo obrigatório. O backend recusa com segurança se o motorista
+  // tiver uma corrida em andamento (nada é alterado nesse caso).
+  function handleSuspend() {
+    const text = reason.trim();
+    if (!text) {
+      setError('Informe o motivo da suspensão.');
+      return;
+    }
+    showConfirmAlert({
+      title: 'Suspender motorista?',
+      message: 'O motorista deixará de receber corridas. Se houver uma corrida em andamento, a suspensão será recusada até a corrida terminar.',
+      confirmText: 'Suspender',
+      destructive: true,
+      onConfirm: async () => {
+        setError('');
+        setSubmitting(true);
+        try {
+          await suspendDriver(driverId, text);
+          setReason('');
+          await loadDriver();
+        } catch (e) {
+          const conflict = e && (e.code === 'functions/failed-precondition' || /andamento|active ride/i.test(e.message || ''));
+          setError(conflict ? 'Não é possível suspender: o motorista tem uma corrida em andamento.' : 'Não foi possível suspender o motorista.');
+        } finally {
+          setSubmitting(false);
+        }
+      },
+    });
+  }
+
+  // Reativação — restaura o status aprovado. Não coloca o motorista online e não
+  // altera o saldo.
+  function handleReactivate() {
+    showConfirmAlert({
+      title: 'Reativar motorista?',
+      message: 'O motorista volta a ficar aprovado. Ele NÃO fica online automaticamente e o saldo não é alterado.',
+      confirmText: 'Reativar',
+      onConfirm: async () => {
+        setError('');
+        setSubmitting(true);
+        try {
+          await reactivateDriver(driverId, reason.trim() || null);
+          setReason('');
+          await loadDriver();
+        } catch (e) {
+          setError('Não foi possível reativar o motorista.');
         } finally {
           setSubmitting(false);
         }
@@ -421,6 +481,18 @@ export default function DriverDetail() {
               />
             </>
           )}
+          <AppInput
+            label="Motivo da suspensão"
+            value={reason}
+            onChangeText={setReason}
+            placeholder="Descreva o motivo (obrigatório para suspender)"
+          />
+          <AppButton
+            title={submitting ? 'Processando…' : 'Suspender motorista'}
+            variant="ghost"
+            onPress={handleSuspend}
+            disabled={submitting}
+          />
         </>
       );
     }
@@ -434,7 +506,20 @@ export default function DriverDetail() {
       );
     }
     if (status === VERIFICATION_STATUS.SUSPENDED) {
-      return <InfoBanner tone="danger" title="Motorista suspenso" />;
+      return (
+        <>
+          <InfoBanner
+            tone="danger"
+            title="Motorista suspenso"
+            body={driver.suspendedReason ? `Motivo: ${driver.suspendedReason}` : null}
+          />
+          <AppButton
+            title={submitting ? 'Processando…' : 'Reativar motorista'}
+            onPress={handleReactivate}
+            disabled={submitting}
+          />
+        </>
+      );
     }
     // draft (ou statut inconnu) : pas d'action possible.
     return (

@@ -9,7 +9,7 @@ const admin = require('firebase-admin');
 const { withCallableBoundary } = require('../errors/boundary');
 const { systemClock } = require('../time/clock');
 const { approveDriver } = require('./approveDriver');
-const { rejectDriver, blockDriver, unblockDriver } = require('./moderateDriver');
+const { rejectDriver, blockDriver, unblockDriver, suspendDriver, reactivateDriver } = require('./moderateDriver');
 const { activateSubscription } = require('./activateSubscription');
 
 const REGION = 'southamerica-east1';
@@ -28,5 +28,7 @@ module.exports = {
   rejectDriverSecure: bind('rejectDriverSecure', rejectDriver),
   blockDriverSecure: bind('blockDriverSecure', blockDriver),
   unblockDriverSecure: bind('unblockDriverSecure', unblockDriver),
+  suspendDriverSecure: bind('suspendDriverSecure', suspendDriver),
+  reactivateDriverSecure: bind('reactivateDriverSecure', reactivateDriver),
   activateSubscriptionSecure: bind('activateSubscriptionSecure', activateSubscription),
 };

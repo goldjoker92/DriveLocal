@@ -6,8 +6,15 @@
 // entry carries a traceId (via a logger context) and is passed through recursive,
 // deterministic redaction before being written.
 
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 const flogger = require('firebase-functions/logger');
+
+// Short, non-reversible identifier hash for logs. Lets us correlate an actor or
+// target across log lines WITHOUT ever writing the raw uid/token to logs.
+function shortHash(value) {
+  if (value == null) return null;
+  return createHash('sha256').update(String(value)).digest('hex').slice(0, 12);
+}
 
 // Keys whose values must NEVER be logged (case-insensitive substring match).
 const SENSITIVE_KEY_PATTERNS = [
@@ -105,6 +112,7 @@ module.exports = {
   logWarning,
   logError,
   measureDuration,
+  shortHash,
   SENSITIVE_KEY_PATTERNS,
   REDACTED,
 };

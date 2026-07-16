@@ -14,12 +14,14 @@ rules_version = '2';
 //  - Secrets and private data (Pix keys, documents, financial ledgers) never
 //    flow through client-readable documents.
 //
-// Known temporary limitations (client SDK, until BLOCK 03 secure driver domain):
-//  - Driver document CREATE and the "submit for review" transition set the
-//    server-owned verificationStatus/duplicateCheckStatus and are therefore now
-//    denied to the client. They must move to a secure callable Function.
-//  - Admin approve/reject/block still run via the admin client SDK on the driver
-//    document (isAdmin() gate); these move to callables in a later block.
+// BLOCK 11+12 hardening:
+//  - Approve / reject / suspend / reactivate now run through secure admin
+//    callables (Admin SDK bypasses these Rules). The admin CLIENT SDK may still
+//    update a driver document for document-review housekeeping, but NEVER the
+//    founder/approval/wallet server-owned fields (driverServerOnlyKeys) — those
+//    are backend-authoritative and denied to every client, admin included.
+//  - Founder/approval counters are server-only (callable-owned); clients read
+//    for founder-progress display but can no longer write them.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -74,6 +76,19 @@ service cloud.firestore {
       ];
     }
 
+    // Server-owned driver fields NO client (admin included) may write — founder
+    // allocation, approval order, and wallet balances are backend-authoritative.
+    // Set/changed only by secure callables via the Admin SDK (which bypass Rules).
+    function driverServerOnlyKeys() {
+      return [
+        'approvalNumber', 'founderEligible', 'founderNumber',
+        'founderGrantedAt', 'founderExpiresAt',
+        'walletBalanceCentavos', 'walletHeldCentavos', 'walletAvailableCentavos',
+        'commissionHoldCentavos', 'completedRideCount', 'freeRideCountUsed',
+        'activeRideId'
+      ];
+    }
+
     function passengerCreateSafe() {
       return [
         'uid', 'email', 'fullName', 'whatsApp', 'role',
@@ -104,9 +119,13 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly(driverCreateSafe());
 
       // Self update limited to safe keys (mixed safe+protected fails via hasOnly).
-      // Admin update kept for the current approve/reject/block flow (moves to a
-      // callable later).
-      allow update: if isAdmin() ||
+      // Admin client update allowed for document-review housekeeping ONLY: it may
+      // never touch the founder/approval/wallet server-owned fields (those move
+      // through secure callables). Self update limited to onboarding-safe keys.
+      allow update: if
+        (isAdmin() &&
+         !request.resource.data.diff(resource.data).affectedKeys()
+           .hasAny(driverServerOnlyKeys())) ||
         (isOwner(driverId) &&
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(driverUpdateSafe()));
@@ -175,11 +194,12 @@ service cloud.firestore {
     }
 
     // --- Founder / approval counters -----------------------------------------
-    // Read by clients (founder progress display); write only by admin client SDK
-    // (atomic founder assignment); moves fully server-side in a later block.
+    // Read by clients (founder progress display). Writes are server-only: the
+    // atomic founder assignment lives in approveDriverSecure (Admin SDK). No
+    // client — admin included — may write the counter (BLOCK 11+12).
     match /counters/{counterId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if false;
     }
 
     // --- Server-only collections (Admin SDK / callable Functions only) -------

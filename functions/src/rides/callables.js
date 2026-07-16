@@ -21,6 +21,7 @@ const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
 const { createRideRequestSecure } = require('./createRideRequest');
 const { acceptDriverOfferSecure } = require('./acceptOffer');
 const lifecycle = require('./lifecycle');
+const { resolveRideDispute } = require('./disputeResolution');
 
 const REGION = 'southamerica-east1';
 
@@ -66,5 +67,6 @@ module.exports = {
   confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
   cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
+  resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
 };

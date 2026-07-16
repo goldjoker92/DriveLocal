@@ -24,6 +24,9 @@ exports.rejectDriverSecure = driverCallables.rejectDriverSecure;
 exports.blockDriverSecure = driverCallables.blockDriverSecure;
 exports.unblockDriverSecure = driverCallables.unblockDriverSecure;
 exports.activateSubscriptionSecure = driverCallables.activateSubscriptionSecure;
+// BLOCK 11 — active-ride-safe suspension / reactivation.
+exports.suspendDriverSecure = driverCallables.suspendDriverSecure;
+exports.reactivateDriverSecure = driverCallables.reactivateDriverSecure;
 
 // BLOCK 05 + 06 — Mercado Pago Pix payments (driver subscription + wallet
 // top-up). Real provider adapter at runtime; secrets bound per function via
@@ -56,3 +59,12 @@ const notificationCallables = require('./notifications/callables');
 
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
 exports.processRideNotificationEvent = notificationCallables.processRideNotificationEvent;
+
+// BLOCK 11 + 12 — minimal secure admin operations: ride dispute resolution and
+// manual wallet adjustment (credit/debit/correction/reversal). Admin-gated,
+// transactional, idempotent, append-only ledger; client never writes these fields.
+exports.resolveRideDisputeSecure = rideCallables.resolveRideDisputeSecure;
+
+const walletCallables = require('./wallet/callables');
+
+exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
