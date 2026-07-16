@@ -42,3 +42,17 @@ const rideCallables = require('./rides/callables');
 
 exports.createRideRequestSecure = rideCallables.createRideRequestSecure;
 exports.acceptDriverOfferSecure = rideCallables.acceptDriverOfferSecure;
+
+// BLOCK 09 + 10 — ride lifecycle, real FCM notifications, and wallet settlement.
+exports.markDriverArrivedSecure = rideCallables.markDriverArrivedSecure;
+exports.startRideSecure = rideCallables.startRideSecure;
+exports.finishRideSecure = rideCallables.finishRideSecure;
+exports.markPassengerPixSentSecure = rideCallables.markPassengerPixSentSecure;
+exports.confirmDriverPixReceivedSecure = rideCallables.confirmDriverPixReceivedSecure;
+exports.cancelRideSecure = rideCallables.cancelRideSecure;
+exports.reportRidePaymentIssueSecure = rideCallables.reportRidePaymentIssueSecure;
+
+const notificationCallables = require('./notifications/callables');
+
+exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
+exports.processRideNotificationEvent = notificationCallables.processRideNotificationEvent;

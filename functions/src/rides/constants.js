@@ -8,8 +8,12 @@ module.exports = Object.freeze({
   DRIVER_OFFERS: 'driverOffers',
   DRIVERS: 'drivers',
   PASSENGERS: 'passengers',
+  PRIVATE_DRIVER_DATA: 'privateDriverData',
   CITY_PUBLIC_CONFIG: 'cityPublicConfig',
   WALLET_TRANSACTIONS: 'walletTransactions',
+  COUNTERS: 'counters',
+  NOTIFICATION_EVENTS: 'notificationEvents',
+  NOTIFICATION_TOKENS: 'notificationTokens',
 
   DEFAULT_SERVICE_AREA_ID: 'HORIZONTE_CE_BR',
 
@@ -19,9 +23,43 @@ module.exports = Object.freeze({
     ASSIGNED: 'assigned',
     NO_DRIVER_AVAILABLE: 'no_driver_available',
     DISPATCH_FAILED: 'dispatch_failed',
+    DRIVER_ARRIVED: 'driver_arrived',
+    IN_PROGRESS: 'in_progress',
+    AWAITING_PAYMENT: 'awaiting_payment',
+    PAYMENT_MARKED_SENT: 'payment_marked_sent',
+    COMPLETED: 'completed',
+    CANCELLED: 'cancelled',
+    DISPUTED: 'disputed',
   }),
   // A passenger may not open a new ride while one of these is in progress.
-  NON_FINAL_RIDE_STATUSES: Object.freeze(['searching', 'assigned']),
+  NON_FINAL_RIDE_STATUSES: Object.freeze([
+    'searching', 'assigned', 'driver_arrived', 'in_progress', 'awaiting_payment', 'payment_marked_sent',
+  ]),
+
+  // Android notification channels (created client-side before token retrieval).
+  NOTIFICATION_CHANNELS: Object.freeze({
+    RIDE_OFFERS: 'drivelocal-ride-offers',
+    RIDE_STATUS: 'drivelocal-ride-status',
+  }),
+
+  // notificationEvents.eventType values (also used for deterministic dedupe ids).
+  NOTIFICATION_EVENT: Object.freeze({
+    OFFER_CREATED: 'offer_created',
+    RIDE_ARRIVED: 'ride_arrived',
+    RIDE_STARTED: 'ride_started',
+    RIDE_AWAITING_PAYMENT: 'ride_awaiting_payment',
+    RIDE_PAYMENT_MARKED_SENT: 'ride_payment_marked_sent',
+    RIDE_COMPLETED: 'ride_completed',
+    RIDE_CANCELLED: 'ride_cancelled',
+    RIDE_DISPUTED: 'ride_disputed',
+  }),
+
+  NOTIFICATION_STATUS: Object.freeze({
+    PENDING: 'pending',
+    SENT: 'sent',
+    PARTIALLY_FAILED: 'partially_failed',
+    FAILED: 'failed',
+  }),
 
   OFFER_STATUS: Object.freeze({
     OFFERED: 'offered',

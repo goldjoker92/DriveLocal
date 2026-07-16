@@ -7,8 +7,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from '../constants/colors';
+import { useRideNotifications } from '../hooks/useRideNotifications';
 
 export default function RootLayout() {
+  // Real Android FCM handling (foreground/background/killed) + token sync.
+  useRideNotifications();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

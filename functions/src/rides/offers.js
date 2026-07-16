@@ -6,6 +6,7 @@
 // pickup is delivered to the winning driver at acceptance, not before.
 
 const admin = require('firebase-admin');
+const { buildNotificationEvent, enqueueEvent } = require('../notifications/events');
 const C = require('./constants');
 
 // Coarsen a coordinate to ~110 m so a pre-acceptance offer never reveals the
@@ -55,6 +56,21 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
       expiresAtMs,
       traceId: traceId || null,
     });
+    // Real targeted-offer notification (one deterministic event per driver).
+    await enqueueEvent(
+      db,
+      buildNotificationEvent({
+        rideId: ride.rideId,
+        eventType: C.NOTIFICATION_EVENT.OFFER_CREATED,
+        recipientUid: cand.driverId,
+        recipientRole: 'driver',
+        route: '/ride-request',
+        offerId: id,
+        dedupeSuffix: cand.driverId,
+        traceId: traceId || null,
+        nowMs,
+      })
+    );
     offerIds.push(id);
   }
   return { createdCount: offerIds.length, offerIds };

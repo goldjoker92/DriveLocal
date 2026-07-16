@@ -45,6 +45,21 @@ export async function acceptOffer(offerId) {
   return res.data; // { rideId, status, pickup, commissionHoldCentavos, ... }
 }
 
+// Lifecycle mutations. Status guards on the backend make each call idempotent, so
+// a fresh key per tap is safe. The client never writes ride/wallet/payment fields.
+async function callRide(name, rideId, extra) {
+  const call = httpsCallable(functions, name);
+  const res = await call({ rideId, idempotencyKey: makeIdempotencyKey('lc'), ...(extra || {}) });
+  return res.data;
+}
+export const markDriverArrived = (rideId) => callRide('markDriverArrivedSecure', rideId);
+export const startRide = (rideId) => callRide('startRideSecure', rideId);
+export const finishRide = (rideId) => callRide('finishRideSecure', rideId);
+export const markPassengerPixSent = (rideId) => callRide('markPassengerPixSentSecure', rideId);
+export const confirmDriverPixReceived = (rideId) => callRide('confirmDriverPixReceivedSecure', rideId);
+export const cancelRide = (rideId, reasonCode) => callRide('cancelRideSecure', rideId, { reasonCode });
+export const reportPaymentIssue = (rideId, reasonCode) => callRide('reportRidePaymentIssueSecure', rideId, { reasonCode });
+
 // Live status of the passenger's own ride. Returns an unsubscribe function.
 export function listenToRide(rideId, onData, onError) {
   return onSnapshot(
