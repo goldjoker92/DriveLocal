@@ -14,12 +14,14 @@ rules_version = '2';
 //  - Secrets and private data (Pix keys, documents, financial ledgers) never
 //    flow through client-readable documents.
 //
-// Known temporary limitations (client SDK, until BLOCK 03 secure driver domain):
-//  - Driver document CREATE and the "submit for review" transition set the
-//    server-owned verificationStatus/duplicateCheckStatus and are therefore now
-//    denied to the client. They must move to a secure callable Function.
-//  - Admin approve/reject/block still run via the admin client SDK on the driver
-//    document (isAdmin() gate); these move to callables in a later block.
+// BLOCK 11+12 hardening:
+//  - Approve / reject / suspend / reactivate now run through secure admin
+//    callables (Admin SDK bypasses these Rules). The admin CLIENT SDK may still
+//    update a driver document for document-review housekeeping, but NEVER the
+//    founder/approval/wallet server-owned fields (driverServerOnlyKeys) — those
+//    are backend-authoritative and denied to every client, admin included.
+//  - Founder/approval counters are server-only (callable-owned); clients read
+//    for founder-progress display but can no longer write them.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -74,6 +76,26 @@ service cloud.firestore {
       ];
     }
 
+    // The ONLY driver fields an admin CLIENT may write — document-review
+    // housekeeping (marking submitted documents reviewed + internal notes).
+    // This explicit allowlist CANNOT approve, reject, suspend, reactivate,
+    // allocate founder benefits, or change any financial/ride state. Every
+    // moderation/financial/lifecycle field (verificationStatus, approvedAt,
+    // rejectedAt, rejectionReason, suspendedAt, suspendedReason/suspensionReason,
+    // isFounder/founderEligible, founderNumber, commissionFreeUntil,
+    // subscriptionFreeUntil, wallet balances/holds, activeRideId, dispute
+    // fields) is absent here and is therefore writable ONLY through the secure
+    // Admin SDK callables (which bypass these Rules).
+    function driverAdminReviewSafe() {
+      return [
+        'documentsStatus', 'selfieStatus',
+        'cnhFrenteStatus', 'cnhVersoStatus', 'crlvStatus',
+        'vehiclePhotoStatus', 'motofreteStatus',
+        'reviewNote', 'adminNote',
+        'updatedAt'
+      ];
+    }
+
     function passengerCreateSafe() {
       return [
         'uid', 'email', 'fullName', 'whatsApp', 'role',
@@ -103,10 +125,15 @@ service cloud.firestore {
       allow create: if isOwner(driverId) &&
         request.resource.data.keys().hasOnly(driverCreateSafe());
 
-      // Self update limited to safe keys (mixed safe+protected fails via hasOnly).
-      // Admin update kept for the current approve/reject/block flow (moves to a
-      // callable later).
-      allow update: if isAdmin() ||
+      // Admin client update: STRICT allowlist — document-review housekeeping only
+      // (cannot approve/reject/suspend/reactivate, allocate founder, or change
+      // financial/ride state; those are callable-only). Self update limited to
+      // onboarding-safe keys. A mixed update touching any other field fails via
+      // hasOnly.
+      allow update: if
+        (isAdmin() &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(driverAdminReviewSafe())) ||
         (isOwner(driverId) &&
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(driverUpdateSafe()));
@@ -175,11 +202,12 @@ service cloud.firestore {
     }
 
     // --- Founder / approval counters -----------------------------------------
-    // Read by clients (founder progress display); write only by admin client SDK
-    // (atomic founder assignment); moves fully server-side in a later block.
+    // Read by clients (founder progress display). Writes are server-only: the
+    // atomic founder assignment lives in approveDriverSecure (Admin SDK). No
+    // client — admin included — may write the counter (BLOCK 11+12).
     match /counters/{counterId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if false;
     }
 
     // --- Server-only collections (Admin SDK / callable Functions only) -------
