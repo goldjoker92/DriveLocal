@@ -1,15 +1,12 @@
 # BLOCK 09+10 — Android notification physical smoke test
 
-**Status: NOT RUN — DEVELOPMENT BUILD, DEPLOYMENT AND REAL DEVICE REQUIRED.**
-The FCM client (`expo-notifications`) and Pix QR renderer are now installed and
-wired; this checklist still requires a Development/Production build on a real
-Android device and `ROUTING_PROVIDER_API_KEY` configured in Secret Manager on
-`drivelocal-dev`. Unit tests do not simulate Android foreground/background/killed
-states.
+**Status: NOT RUN** — requires the `expo-notifications` client package (not yet
+installed) and a Development/Production build on a real Android device, plus
+`ROUTING_PROVIDER_API_KEY` configured in Secret Manager on `drivelocal-dev`.
+Unit tests do not simulate Android foreground/background/killed states.
 
 ## Preconditions
-- Development build with `expo-notifications` + `react-native-svg` +
-  `react-native-qrcode-svg` (installed) and `google-services.json` (present).
+- Install and configure `expo-notifications` (approval pending).
 - Real Google account + Firebase Auth sign-in on the device.
 - Android channels created before token retrieval: `drivelocal-ride-offers`,
   `drivelocal-ride-status`.
