@@ -51,7 +51,9 @@ describe('secure driver domain — approval / founder', () => {
     expect(first).toMatchObject({ approvalNumber: 1, founderEligible: true, founderNumber: 1 });
     expect(hundredth).toMatchObject({ approvalNumber: 100, founderEligible: true, founderNumber: 100 });
     expect(hundredFirst).toMatchObject({ approvalNumber: 101, founderEligible: false, founderNumber: null });
-    expect(hundredFirst.commissionFreeUntil).toBeNull();
+    // #101+ are not founders and get no free subscription, but still receive the
+    // global 60-day launch window at 0% commission from approval.
+    expect(hundredFirst.commissionFreeUntil).toBe(T0 + C.FREE_PERIOD_DAYS * C.DAY_MS);
     expect(hundredFirst.subscriptionFreeUntil).toBeNull();
   });
 
