@@ -4,9 +4,9 @@
 // Firebase Admin Messaging (real), records a safe result, disables invalid
 // tokens, and is idempotent (a re-run on an already-processed event is ignored).
 //
-// The message carries data STRINGS ONLY; no coordinates/address/Pix/wallet/PII.
+// The message contains a generic, visible notification plus a strict strings-only
+// data payload. No coordinates, address, Pix, wallet or other PII are sent.
 
-const admin = require('firebase-admin');
 const { logInfo, logWarning } = require('../logging/logger');
 const C = require('../rides/constants');
 
@@ -17,6 +17,45 @@ const INVALID_TOKEN_CODES = new Set([
   'messaging/invalid-argument',
 ]);
 
+const PRESENTATION = Object.freeze({
+  [C.NOTIFICATION_EVENT.OFFER_CREATED]: {
+    title: 'Nova corrida disponível',
+    body: 'Abra a DriveLocal para ver e aceitar a oferta.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_ASSIGNED]: {
+    title: 'Motorista encontrado',
+    body: 'Seu motorista está a caminho do embarque.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_ARRIVED]: {
+    title: 'Motorista chegou',
+    body: 'Seu motorista chegou ao local de embarque.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_STARTED]: {
+    title: 'Corrida iniciada',
+    body: 'Sua corrida está em andamento.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_AWAITING_PAYMENT]: {
+    title: 'Pagamento Pix disponível',
+    body: 'Abra a corrida para pagar diretamente ao motorista.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_PAYMENT_MARKED_SENT]: {
+    title: 'Passageiro informou o pagamento',
+    body: 'Confira o recebimento do Pix antes de confirmar.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_COMPLETED]: {
+    title: 'Corrida concluída',
+    body: 'A corrida foi finalizada com sucesso.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_CANCELLED]: {
+    title: 'Corrida cancelada',
+    body: 'A corrida foi cancelada. Abra o app para continuar.',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_DISPUTED]: {
+    title: 'Pagamento em análise',
+    body: 'Foi registrado um problema no pagamento da corrida.',
+  },
+});
+
 function dataPayload(event) {
   return {
     notificationId: String(event.notificationId),
@@ -26,6 +65,30 @@ function dataPayload(event) {
     recipientRole: String(event.recipientRole),
     route: event.route ? String(event.route) : '',
     traceId: event.traceId ? String(event.traceId) : '',
+  };
+}
+
+function buildMulticastMessage(event, tokens) {
+  const presentation = PRESENTATION[event.eventType] || {
+    title: 'Atualização da corrida',
+    body: 'Abra a DriveLocal para ver os detalhes.',
+  };
+  const channelId = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED
+    ? C.NOTIFICATION_CHANNELS.RIDE_OFFERS
+    : C.NOTIFICATION_CHANNELS.RIDE_STATUS;
+
+  return {
+    tokens,
+    notification: presentation,
+    data: dataPayload(event),
+    android: {
+      priority: 'high',
+      notification: {
+        channelId,
+        sound: 'default',
+        defaultVibrateTimings: true,
+      },
+    },
   };
 }
 
@@ -57,11 +120,9 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
     return { status: C.NOTIFICATION_STATUS.FAILED, successCount: 0, failureCount: 0 };
   }
 
-  const resp = await messaging.sendEachForMulticast({
-    tokens: targets.map((t) => t.token),
-    data: dataPayload(event),
-    android: { priority: 'high' },
-  });
+  const resp = await messaging.sendEachForMulticast(
+    buildMulticastMessage(event, targets.map((t) => t.token))
+  );
 
   let successCount = 0;
   let failureCount = 0;
@@ -92,4 +153,4 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
   return { status, successCount, failureCount };
 }
 
-module.exports = { processRideNotificationEvent, INVALID_TOKEN_CODES };
+module.exports = { processRideNotificationEvent, buildMulticastMessage, INVALID_TOKEN_CODES, PRESENTATION };
