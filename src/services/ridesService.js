@@ -1,8 +1,6 @@
 // Rides client service — the ONLY app-side entry point for the secure ride flow.
 // Writes go through Cloud Functions callables; reads use secured Firestore
-// listeners (BLOCK 04 Rules: a passenger reads only their own ride; a driver
-// reads only offers where driverId == their uid). The client never writes
-// rideRequests, driverOffers, wallet, or driver financial fields directly.
+// listeners. The client never writes ride, offer, wallet or financial fields.
 
 import { httpsCallable } from 'firebase/functions';
 import { doc, collection, query, where, onSnapshot } from 'firebase/firestore';
@@ -13,12 +11,6 @@ function makeIdempotencyKey(prefix) {
   return `${prefix}-${rand}${rand}`.slice(0, 40);
 }
 
-// Requests a ride. pickup/destination are { lat, lng, label? }. The server owns
-// the fare, distance, duration and commission — none are sent from here.
-//
-// idempotencyKeyRef (optional React ref): one key per request ATTEMPT, REUSED on
-// timeout/connection retry so a retried request never creates a second ride. The
-// caller clears the ref only when starting a genuinely new request.
 export async function requestRide({ vehicleType, pickup, destination, idempotencyKeyRef }) {
   let idempotencyKey;
   if (idempotencyKeyRef) {
@@ -34,19 +26,15 @@ export async function requestRide({ vehicleType, pickup, destination, idempotenc
     destination: { lat: destination.lat, lng: destination.lng, label: destination.label },
     idempotencyKey,
   });
-  return res.data; // { rideId, status, estimatedFareCentavos, ... }
+  return res.data;
 }
 
-// Accepts a targeted offer. Returns the winning-driver view including the exact
-// pickup for navigation.
 export async function acceptOffer(offerId) {
   const call = httpsCallable(functions, 'acceptDriverOfferSecure');
   const res = await call({ offerId, idempotencyKey: makeIdempotencyKey('acc') });
-  return res.data; // { rideId, status, pickup, commissionHoldCentavos, ... }
+  return res.data;
 }
 
-// Lifecycle mutations. Status guards on the backend make each call idempotent, so
-// a fresh key per tap is safe. The client never writes ride/wallet/payment fields.
 async function callRide(name, rideId, extra) {
   const call = httpsCallable(functions, name);
   const res = await call({ rideId, idempotencyKey: makeIdempotencyKey('lc'), ...(extra || {}) });
@@ -60,7 +48,6 @@ export const confirmDriverPixReceived = (rideId) => callRide('confirmDriverPixRe
 export const cancelRide = (rideId, reasonCode) => callRide('cancelRideSecure', rideId, { reasonCode });
 export const reportPaymentIssue = (rideId, reasonCode) => callRide('reportRidePaymentIssueSecure', rideId, { reasonCode });
 
-// Live status of the passenger's own ride. Returns an unsubscribe function.
 export function listenToRide(rideId, onData, onError) {
   return onSnapshot(
     doc(db, 'rideRequests', rideId),
@@ -69,11 +56,15 @@ export function listenToRide(rideId, onData, onError) {
   );
 }
 
-// Live targeted offer for the signed-in driver (driverId == uid). Surfaces an
-// 'accepted' offer (carrying exactPickup) with priority so the accepted state —
-// and its navigation buttons — is recovered after an app restart; otherwise the
-// current 'offered' offer. Returns an unsubscribe function.
-export function listenToMyOffer(driverUid, onData, onError) {
+function newer(current, candidate) {
+  if (!current) return candidate;
+  return Number(candidate.createdAtMs || 0) > Number(current.createdAtMs || 0) ? candidate : current;
+}
+
+// Live targeted offer for the signed-in driver. When rideId is supplied, only
+// that ride can drive the active screen, preventing an old accepted offer from
+// replacing the current ride after an app restart.
+export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
   const q = query(collection(db, 'driverOffers'), where('driverId', '==', driverUid));
   return onSnapshot(
     q,
@@ -82,8 +73,10 @@ export function listenToMyOffer(driverUid, onData, onError) {
       let accepted = null;
       snap.forEach((d) => {
         const data = d.data();
-        if (data.status === 'accepted') accepted = { offerId: d.id, ...data };
-        else if (data.status === 'offered') offered = { offerId: d.id, ...data };
+        if (rideId && data.rideId !== rideId) return;
+        const candidate = { offerId: d.id, ...data };
+        if (data.status === 'accepted') accepted = newer(accepted, candidate);
+        else if (data.status === 'offered') offered = newer(offered, candidate);
       });
       onData(accepted || offered);
     },
