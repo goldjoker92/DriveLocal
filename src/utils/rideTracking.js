@@ -40,18 +40,26 @@ export function shouldPublishRideLocation(status) {
   return ACTIVE_TRACKING_RIDE_STATUSES.has(status);
 }
 
+function optionalNonNegativeNumber(value) {
+  // Native GPS fields may be null when Android has no accuracy, heading or
+  // speed estimate. Number(null) is 0, which would invent telemetry.
+  if (value == null) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
+
 export function safeTrackingPayload(locationObject) {
   const point = normalizeTrackingPoint(locationObject?.coords);
   if (!point) return null;
 
-  const accuracy = Number(locationObject?.coords?.accuracy);
-  const heading = Number(locationObject?.coords?.heading);
-  const speed = Number(locationObject?.coords?.speed);
+  const accuracy = optionalNonNegativeNumber(locationObject?.coords?.accuracy);
+  const heading = optionalNonNegativeNumber(locationObject?.coords?.heading);
+  const speed = optionalNonNegativeNumber(locationObject?.coords?.speed);
 
   return {
     location: point,
-    accuracyMeters: Number.isFinite(accuracy) && accuracy >= 0 ? Math.round(accuracy) : null,
-    headingDegrees: Number.isFinite(heading) && heading >= 0 ? Math.round(heading) : null,
-    speedMps: Number.isFinite(speed) && speed >= 0 ? Number(speed.toFixed(2)) : null,
+    accuracyMeters: accuracy == null ? null : Math.round(accuracy),
+    headingDegrees: heading == null ? null : Math.round(heading),
+    speedMps: speed == null ? null : Number(speed.toFixed(2)),
   };
 }
