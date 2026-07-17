@@ -4,7 +4,7 @@
 // secured ride document in real time. Assignment, payment and completion route
 // changes are driven only by backend status — never by timers or mock data.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, ActivityIndicator, View, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -38,7 +38,9 @@ function firstParam(value) {
 }
 
 function numberParam(value) {
-  const number = Number(firstParam(value));
+  const raw = firstParam(value);
+  if (raw == null || raw === '') return null;
+  const number = Number(raw);
   return Number.isFinite(number) ? number : null;
 }
 
@@ -47,24 +49,22 @@ export default function Searching() {
   const params = useLocalSearchParams();
   const rideId = typeof firstParam(params.rideId) === 'string' ? firstParam(params.rideId) : null;
 
-  const initialRide = useMemo(() => ({
-    rideId,
-    status: typeof firstParam(params.status) === 'string' ? firstParam(params.status) : 'searching',
-    vehicleType:
-      typeof firstParam(params.vehicleType) === 'string' ? firstParam(params.vehicleType) : null,
-    estimatedFareCentavos: numberParam(params.estimatedFareCentavos),
-    routeDistanceMeters: numberParam(params.routeDistanceMeters),
-    routeDurationSeconds: numberParam(params.routeDurationSeconds),
-  }), [
-    params.estimatedFareCentavos,
-    params.routeDistanceMeters,
-    params.routeDurationSeconds,
-    params.status,
-    params.vehicleType,
-    rideId,
-  ]);
+  // Route params provide an instant quote while the first Firestore snapshot is
+  // loading. The ref keeps this seed stable and avoids listener churn on renders.
+  const initialRideRef = useRef(null);
+  if (!initialRideRef.current) {
+    initialRideRef.current = {
+      rideId,
+      status: typeof firstParam(params.status) === 'string' ? firstParam(params.status) : 'searching',
+      vehicleType:
+        typeof firstParam(params.vehicleType) === 'string' ? firstParam(params.vehicleType) : null,
+      estimatedFareCentavos: numberParam(params.estimatedFareCentavos),
+      routeDistanceMeters: numberParam(params.routeDistanceMeters),
+      routeDurationSeconds: numberParam(params.routeDurationSeconds),
+    };
+  }
 
-  const [ride, setRide] = useState(initialRide);
+  const [ride, setRide] = useState(initialRideRef.current);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -73,8 +73,8 @@ export default function Searching() {
 
     logRideClientEvent('ride.searching.screen_opened', {
       rideId,
-      status: initialRide.status,
-      ride: initialRide,
+      status: initialRideRef.current?.status,
+      ride: initialRideRef.current,
     });
 
     return listenToRide(
@@ -104,7 +104,7 @@ export default function Searching() {
         setError('Não foi possível acompanhar a busca. Verifique sua conexão.');
       }
     );
-  }, [initialRide, rideId, router]);
+  }, [rideId, router]);
 
   async function handleCancel() {
     if (!rideId || busy) return;
@@ -115,7 +115,11 @@ export default function Searching() {
       await cancelRide(rideId, 'passageiro_cancelou_busca');
       router.replace('/passenger-home');
     } catch (cancelError) {
-      setError(cancelError?.details?.message || cancelError?.message || 'Não foi possível cancelar a corrida.');
+      setError(
+        cancelError?.details?.message ||
+        cancelError?.message ||
+        'Não foi possível cancelar a corrida.'
+      );
     } finally {
       setBusy(false);
     }
