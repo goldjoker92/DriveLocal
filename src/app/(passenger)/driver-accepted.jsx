@@ -1,5 +1,5 @@
 // Passenger assigned-ride screen (route "/driver-accepted"). Uses the
-// passenger's secured ride listener only; no mock driver, route or fare data.
+// passenger's secured ride and active-location listeners; no runtime mocks.
 
 import { useEffect, useState } from 'react';
 import { ScrollView, Text } from 'react-native';
@@ -9,12 +9,13 @@ import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import AdminTableRow from '../../components/AdminTableRow';
+import RideTrackingMap from '../../components/RideTrackingMap';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { formatBRL } from '../../utils/format';
-import { listenToRide, cancelRide } from '../../services/ridesService';
+import { listenToRide, listenToRideLocation, cancelRide } from '../../services/ridesService';
 
 const STATUS_LABELS = {
   assigned: 'Motorista a caminho do embarque',
@@ -25,11 +26,14 @@ const STATUS_LABELS = {
   disputed: 'Pagamento em análise',
 };
 
+const MAP_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
+
 export default function DriverAccepted() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const rideId = typeof params.rideId === 'string' ? params.rideId : null;
   const [ride, setRide] = useState(null);
+  const [driverLocation, setDriverLocation] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -50,6 +54,15 @@ export default function DriverAccepted() {
     );
   }, [rideId, router]);
 
+  useEffect(() => {
+    if (!rideId) return undefined;
+    return listenToRideLocation(
+      rideId,
+      setDriverLocation,
+      () => setDriverLocation(null)
+    );
+  }, [rideId]);
+
   async function handleCancel() {
     if (!rideId || busy) return;
     setBusy(true);
@@ -67,6 +80,7 @@ export default function DriverAccepted() {
   const driver = ride?.acceptedDriverPublic || {};
   const canCancel = ride && ['assigned', 'driver_arrived'].includes(ride.status);
   const canPay = ride && ['awaiting_payment', 'payment_marked_sent'].includes(ride.status);
+  const showMap = ride && MAP_STATUSES.has(ride.status);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -82,9 +96,22 @@ export default function DriverAccepted() {
             <AppCard>
               <AdminTableRow label="Status" value={STATUS_LABELS[ride.status] || 'Atualizando corrida…'} />
               <Text style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>
-                O MVP não exibe rastreamento ao vivo. O status é atualizado pelo backend.
+                A posição é compartilhada somente durante a corrida ativa.
               </Text>
             </AppCard>
+
+            {showMap ? (
+              <AppCard>
+                <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
+                  Acompanhe seu motorista
+                </Text>
+                <RideTrackingMap
+                  pickup={ride.pickup}
+                  driverLocation={driverLocation}
+                  vehicleType={driver.vehicleType || ride.vehicleType}
+                />
+              </AppCard>
+            ) : null}
 
             <AppCard>
               <AdminTableRow label="Motorista" value={driver.name || 'Motorista DriveLocal'} />
