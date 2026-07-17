@@ -12,6 +12,13 @@ function makeIdempotencyKey(prefix) {
   return `${prefix}-${rand}${rand}`.slice(0, 40);
 }
 
+function hasCoordinatePair(point) {
+  if (!point || point.lat == null || point.lng == null || point.lat === '' || point.lng === '') {
+    return false;
+  }
+  return Number.isFinite(Number(point.lat)) && Number.isFinite(Number(point.lng));
+}
+
 export async function requestRide({ vehicleType, pickup, destination, idempotencyKeyRef }) {
   let idempotencyKey;
   if (idempotencyKeyRef) {
@@ -25,9 +32,8 @@ export async function requestRide({ vehicleType, pickup, destination, idempotenc
   logRideClientEvent('ride.request.callable_started', {
     action: 'createRideRequestSecure',
     vehicleType,
-    hasPickupCoordinates: Number.isFinite(Number(pickup?.lat)) && Number.isFinite(Number(pickup?.lng)),
-    hasDestinationCoordinates:
-      Number.isFinite(Number(destination?.lat)) && Number.isFinite(Number(destination?.lng)),
+    hasPickupCoordinates: hasCoordinatePair(pickup),
+    hasDestinationCoordinates: hasCoordinatePair(destination),
   });
 
   try {
