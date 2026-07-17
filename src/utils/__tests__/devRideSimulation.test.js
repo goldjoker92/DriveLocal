@@ -2,6 +2,7 @@ import {
   buildDevSimulationRoute,
   createFallbackSimulationStart,
   devSimulationProgress,
+  shouldUseLiveSimulationStart,
   DEV_SIMULATION_MAX_STEPS,
   DEV_SIMULATION_MIN_STEPS,
 } from '../devRideSimulation';
@@ -37,6 +38,18 @@ describe('DEV ride simulation helpers', () => {
     expect(fallback).not.toEqual({ lat: -4.1, lng: -38.5 });
     expect(Number.isFinite(fallback.lat)).toBe(true);
     expect(Number.isFinite(fallback.lng)).toBe(true);
+  });
+
+  it('uses a fallback when both testers are together or the live point is too far away', () => {
+    const target = { lat: -4.1, lng: -38.5 };
+    const sameRoom = { lat: -4.1001, lng: -38.5001 };
+    const farAway = { lat: -3.0, lng: -38.0 };
+
+    expect(shouldUseLiveSimulationStart(sameRoom, target)).toBe(false);
+    expect(shouldUseLiveSimulationStart(farAway, target)).toBe(false);
+    expect(buildDevSimulationRoute(sameRoom, target, 6)[0]).toEqual(
+      createFallbackSimulationStart(target)
+    );
   });
 
   it('reports stable rounded progress', () => {
