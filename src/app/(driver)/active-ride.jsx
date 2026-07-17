@@ -1,8 +1,8 @@
 // Active driver ride screen (route "/active-ride"). Uses the driver's secured
-// winning offer for exact pickup/destination and persisted driverRideStatus.
+// winning offer and attaches the background location service to this ride.
 
 import { useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Alert, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import Header from '../../components/Header';
@@ -14,6 +14,10 @@ import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 import {
+  attachActiveRideTracking,
+  detachActiveRideTracking,
+} from '../../services/driverLocationTracking';
+import {
   listenToMyOffer,
   markDriverArrived,
   startRide,
@@ -23,6 +27,8 @@ import {
   reportPaymentIssue,
 } from '../../services/ridesService';
 
+const TRACKED_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
+
 function statusFromEvent(eventType) {
   const map = {
     ride_payment_marked_sent: 'payment_marked_sent',
@@ -31,6 +37,31 @@ function statusFromEvent(eventType) {
     ride_disputed: 'disputed',
   };
   return map[eventType] || 'assigned';
+}
+
+function trackingErrorLabel(status) {
+  const labels = {
+    services_disabled: 'Ative o GPS do telefone para compartilhar sua posição.',
+    foreground_required: 'Autorize a localização precisa para continuar.',
+    background_required: 'Autorize “Permitir o tempo todo” para manter a posição durante a corrida.',
+    foreground_denied: 'A localização precisa foi recusada.',
+    background_denied: 'A localização em segundo plano foi recusada.',
+  };
+  return labels[status] || 'Não foi possível iniciar a localização ao vivo.';
+}
+
+function confirmRideTrackingDisclosure() {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Localização da corrida',
+      'Durante esta corrida, sua posição será mostrada somente ao passageiro desta viagem, inclusive quando Waze ou Google Maps estiver aberto. O compartilhamento termina quando a corrida é finalizada ou cancelada.',
+      [
+        { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Ativar', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) }
+    );
+  });
 }
 
 export default function ActiveRide() {
@@ -43,6 +74,7 @@ export default function ActiveRide() {
   const [status, setStatus] = useState(() => statusFromEvent(eventType));
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [trackingStatus, setTrackingStatus] = useState('checking');
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -60,6 +92,54 @@ export default function ActiveRide() {
     );
   }, [rideId]);
 
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !rideId || !offer?.vehicleType) return undefined;
+    let active = true;
+
+    if (TRACKED_STATUSES.has(status)) {
+      attachActiveRideTracking({
+        driverId: uid,
+        vehicleType: offer.vehicleType,
+        rideId,
+        requestPermissions: false,
+      }).then((result) => {
+        if (!active) return;
+        setTrackingStatus(result.status === 'active' ? 'active' : result.status);
+      }).catch(() => {
+        if (active) setTrackingStatus('error');
+      });
+    } else {
+      detachActiveRideTracking(rideId).finally(() => {
+        if (active) setTrackingStatus('stopped');
+      });
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [rideId, offer?.vehicleType, status]);
+
+  async function enableRideTracking() {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !rideId || !offer?.vehicleType) return;
+    const consented = await confirmRideTrackingDisclosure();
+    if (!consented) return;
+
+    setTrackingStatus('checking');
+    try {
+      const result = await attachActiveRideTracking({
+        driverId: uid,
+        vehicleType: offer.vehicleType,
+        rideId,
+        requestPermissions: true,
+      });
+      setTrackingStatus(result.status === 'active' ? 'active' : result.status);
+    } catch (_error) {
+      setTrackingStatus('error');
+    }
+  }
+
   async function act(key, fn) {
     if (!rideId || busy) return;
     setBusy(key);
@@ -67,7 +147,12 @@ export default function ActiveRide() {
     try {
       const res = await fn(rideId);
       if (res?.status) setStatus(res.status);
-      if (res && ['completed', 'cancelled', 'disputed'].includes(res.status)) router.replace('/driver-home');
+      if (res && ['awaiting_payment', 'completed', 'cancelled', 'disputed'].includes(res.status)) {
+        await detachActiveRideTracking(rideId);
+      }
+      if (res && ['completed', 'cancelled', 'disputed'].includes(res.status)) {
+        router.replace('/driver-home');
+      }
     } catch (e) {
       setError(e?.message || 'Não foi possível concluir. Tente novamente.');
     } finally {
@@ -90,6 +175,7 @@ export default function ActiveRide() {
 
   const pickup = offer?.exactPickup;
   const destination = offer?.exactDestination;
+  const trackingActive = trackingStatus === 'active';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -97,6 +183,22 @@ export default function ActiveRide() {
         <Header title="Corrida ativa" onBack={() => router.back()} />
 
         {!rideId ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>Corrida inválida.</Text> : null}
+
+        {TRACKED_STATUSES.has(status) ? (
+          <AppCard>
+            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Localização ao vivo</Text>
+            <Text style={[{ fontFamily, color: trackingActive ? colors.success : colors.warning }, typography.small]}>
+              {trackingActive
+                ? 'Ativa — o passageiro pode acompanhar seu deslocamento.'
+                : trackingStatus === 'checking'
+                  ? 'Verificando o GPS…'
+                  : trackingErrorLabel(trackingStatus)}
+            </Text>
+            {!trackingActive && trackingStatus !== 'checking' ? (
+              <AppButton title="Ativar localização da corrida" onPress={enableRideTracking} />
+            ) : null}
+          </AppCard>
+        ) : null}
 
         {(status === 'assigned' || status === 'driver_arrived') && pickup ? (
           <AppCard>
