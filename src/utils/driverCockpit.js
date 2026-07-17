@@ -3,14 +3,19 @@
 // Pure functions over an already-loaded drivers/{uid} object, plus PT-BR copy.
 // No Firestore access here — reads only. Business rule: the admin decision on
 // drivers/{uid} is the source of truth; the driver app only interprets it.
+//
+// Field tolerance: the admin/approval flow has evolved, so the same concept can
+// live under more than one field name. These helpers accept both the current
+// fields written by approveDriver (founderEligible, founderExpiresAt,
+// approvalNumber) and the friendlier names used elsewhere (founderBadgeActive,
+// commissionFreeUntil, founderNumber). Missing fields never crash the UI.
 
 import { passesSubscriptionOrTrial } from './driverEligibility';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Availability values written to drivers/{uid}.availabilityStatus. The backend
-// dispatch query accepts only "online"; AVAILABLE is kept as a compatibility
-// alias so older screen code cannot accidentally write the obsolete "available".
+// The backend dispatch query accepts only "online". AVAILABLE remains a
+// compatibility alias so existing UI code cannot write the obsolete value.
 export const AVAILABILITY = {
   ONLINE: 'online',
   AVAILABLE: 'online',
@@ -67,47 +72,63 @@ export function benefitWarning(label, targetMs, nowMs) {
   return null;
 }
 
-export function isFounderDriverDoc(driver) {
-  return isFounderDriver(driver);
+export const RIDE_BLOCK_REASON_LABELS = {
+  subscription_required: 'Ative sua assinatura para receber corridas.',
+  correction_required: 'Corrija seu cadastro para continuar.',
+  correction_requested: 'Corrija seu cadastro para continuar.',
+  rejected: 'Seu cadastro não foi aprovado.',
+  suspended: 'Sua conta está temporariamente bloqueada.',
+  blocked: 'Sua conta está temporariamente bloqueada.',
+  wallet_low: 'Recarregue seu saldo para receber corridas.',
+  wallet_required: 'Recarregue seu saldo para receber corridas.',
+  not_approved: 'Seu cadastro ainda está em análise.',
+  driver_missing: 'Cadastro de motorista não encontrado.',
+};
+
+export function rideBlockReasonLabel(code) {
+  return RIDE_BLOCK_REASON_LABELS[code] || 'Você ainda não pode ficar disponível.';
+}
+
+export function isSubscriptionActive(driver, nowMs) {
+  const s = subscriptionDisplay(driver, nowMs);
+  return s.mode === 'free' || s.mode === 'active';
 }
 
 export function deriveEligibility(driver) {
-  if (!driver) return { eligible: false, reasonCode: 'driver_missing' };
-  if (driver.verificationStatus !== 'approved') {
-    return { eligible: false, reasonCode: 'not_approved' };
+  const d = driver || {};
+  const nowMs = Date.now();
+
+  if (d.verificationStatus !== 'approved') {
+    return { eligible: false, reasonCode: d.verificationStatus || 'not_approved' };
   }
-  if (driver.isBlocked === true || driver.isSuspended === true) {
-    return { eligible: false, reasonCode: 'blocked' };
+
+  if (d.isBlocked === true || d.verificationStatus === 'suspended' || d.isSuspended === true) {
+    return { eligible: false, reasonCode: 'suspended' };
   }
-  if (!passesSubscriptionOrTrial(driver)) {
-    return { eligible: false, reasonCode: 'subscription_required' };
+
+  if (passesSubscriptionOrTrial(d, nowMs)) {
+    return { eligible: true, reasonCode: null };
   }
-  return { eligible: true, reasonCode: 'eligible' };
+
+  return { eligible: false, reasonCode: 'subscription_required' };
 }
 
 export function subscriptionDisplay(driver, nowMs) {
-  const freeUntil = subscriptionFreeUntilMs(driver);
-  if (freeUntil > nowMs) return { mode: 'free', dateMs: freeUntil };
-  const expiresAt = toMillis(driver && driver.subscriptionExpiresAt);
-  if (driver && driver.subscriptionActive === true && expiresAt > nowMs) {
-    return { mode: 'active', dateMs: expiresAt };
+  const d = driver || {};
+  const freeMs = subscriptionFreeUntilMs(d);
+  if (freeMs && nowMs < freeMs) {
+    return { mode: 'free', dateMs: freeMs };
   }
-  return { mode: 'required', dateMs: expiresAt || null };
+  if (d.subscriptionActive === true || d.subscriptionStatus === 'active') {
+    return { mode: 'active', dateMs: toMillis(d.subscriptionExpiresAt) };
+  }
+  return { mode: 'required', dateMs: 0 };
 }
 
 export function commissionDisplay(driver, nowMs) {
-  const freeUntil = commissionFreeUntilMs(driver);
-  if (freeUntil > nowMs) return { mode: 'free', dateMs: freeUntil };
-  return { mode: 'standard', rateBps: Number(driver && driver.commissionRateBps) || 0 };
-}
-
-export function rideBlockReasonLabel(reasonCode) {
-  const labels = {
-    driver_missing: 'Cadastro de motorista não encontrado.',
-    not_approved: 'Seu cadastro ainda não foi aprovado.',
-    blocked: 'Sua conta está bloqueada ou suspensa.',
-    subscription_required: 'Ative sua assinatura ou use suas corridas gratuitas disponíveis.',
-    wallet_required: 'Recarregue seu Saldo DriveLocal para receber corridas.',
-  };
-  return labels[reasonCode] || 'Você não pode receber corridas no momento.';
+  const freeMs = commissionFreeUntilMs(driver);
+  if (freeMs && nowMs < freeMs) {
+    return { mode: 'free', dateMs: freeMs };
+  }
+  return { mode: 'standard', dateMs: 0 };
 }
