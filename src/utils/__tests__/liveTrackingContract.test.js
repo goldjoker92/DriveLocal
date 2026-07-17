@@ -73,7 +73,7 @@ describe('Android live driver tracking contracts', () => {
     expect(eas).toContain('"environment": "development"');
   });
 
-  it('restricts live location reads and writes to the active ride parties', () => {
+  it('restricts live location to validated current points and active ride parties', () => {
     const rules = source('backend/firebase/rules/firestore.rules');
     const lifecycle = source('functions/src/rides/lifecycle.js');
 
@@ -81,6 +81,9 @@ describe('Android live driver tracking contracts', () => {
     expect(rules).toContain('isAcceptedRideDriver(rideId)');
     expect(rules).toContain('isRidePassenger(rideId)');
     expect(rules).toContain("ride.status in ['assigned', 'driver_arrived', 'in_progress']");
+    expect(rules).toContain('driverOperationalUpdateValid');
+    expect(rules).toContain("request.resource.data.availabilityStatus in ['online', 'offline']");
+    expect(rules).toContain('request.resource.data.locationUpdatedAt == request.time');
     expect(lifecycle).toContain('clearActiveRideLocationTx');
     expect(lifecycle).toContain('tx.delete');
   });
