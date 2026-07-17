@@ -1,39 +1,13 @@
 rules_version = '2';
 
-// DriveLocal Firestore security — BLOCK 04 (server-authoritative boundaries).
-//
-// Principles:
-//  - The backend (Admin SDK / secure callable Functions) is authoritative for
-//    approvals, blocking, founder assignment, subscriptions, wallet, commission,
-//    ride assignment, ride completion, payment settlement, and completed-ride
-//    counters. The Admin SDK bypasses these Rules; these Rules only constrain the
-//    mobile/web CLIENT SDK.
-//  - Least privilege for clients. Fail closed: any collection/path/field not
-//    explicitly allowed is denied. A mixed update touching one safe and one
-//    protected field fails as a whole.
-//  - Secrets and private data (Pix keys, documents, financial ledgers) never
-//    flow through client-readable documents.
-//
-// BLOCK 11+12 hardening:
-//  - Approve / reject / suspend / reactivate now run through secure admin
-//    callables (Admin SDK bypasses these Rules). The admin CLIENT SDK may still
-//    update a driver document for document-review housekeeping, but NEVER the
-//    founder/approval/wallet server-owned fields (driverServerOnlyKeys) — those
-//    are backend-authoritative and denied to every client, admin included.
-//  - Founder/approval counters are server-only (callable-owned); clients read
-//    for founder-progress display but can no longer write them.
+// DriveLocal Firestore security — server-authoritative ride and financial state.
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // --- Helpers -------------------------------------------------------------
 
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // True when the caller is a registered admin. Trust is server-backed: it
-    // relies ONLY on membership in admins/{uid} (which is write:false to clients),
-    // never on a client-supplied role/isAdmin field or UI state.
     function isAdmin() {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
@@ -43,9 +17,6 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Keys a driver may set when CREATING their own document (onboarding-safe).
-    // Excludes every verification/approval/founder/subscription/commission/
-    // wallet/blocking/admin/financial/lifecycle field (all server-owned).
     function driverCreateSafe() {
       return [
         'uid', 'email', 'serviceAreaId', 'displayName',
@@ -57,10 +28,6 @@ service cloud.firestore {
       ];
     }
 
-    // Keys a driver may CHANGE on their own document. availabilityStatus and the
-    // onboarding/document presentation fields only. verificationStatus is NOT
-    // here: the ride-eligibility gate stays server-owned, so even if a document
-    // sub-status were tampered with, it cannot grant approval.
     function driverUpdateSafe() {
       return [
         'displayName', 'fullName', 'whatsApp', 'cpf', 'pixKeyType', 'pixKey',
@@ -72,20 +39,15 @@ service cloud.firestore {
         'crlvUrl', 'crlvStatus', 'vehiclePhotoUrl', 'vehiclePhotoStatus',
         'motofreteUrl', 'motofreteStatus',
         'availabilityStatus', 'availabilityUpdatedAt',
+        // Current presence used only by the bounded backend dispatch query. The
+        // passenger cannot read drivers/{uid}; active-ride sharing uses the
+        // separate activeRideLocations document below.
+        'location', 'locationAccuracyMeters', 'locationHeadingDegrees',
+        'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt',
         'updatedAt'
       ];
     }
 
-    // The ONLY driver fields an admin CLIENT may write — document-review
-    // housekeeping (marking submitted documents reviewed + internal notes).
-    // This explicit allowlist CANNOT approve, reject, suspend, reactivate,
-    // allocate founder benefits, or change any financial/ride state. Every
-    // moderation/financial/lifecycle field (verificationStatus, approvedAt,
-    // rejectedAt, rejectionReason, suspendedAt, suspendedReason/suspensionReason,
-    // isFounder/founderEligible, founderNumber, commissionFreeUntil,
-    // subscriptionFreeUntil, wallet balances/holds, activeRideId, dispute
-    // fields) is absent here and is therefore writable ONLY through the secure
-    // Admin SDK callables (which bypass these Rules).
     function driverAdminReviewSafe() {
       return [
         'documentsStatus', 'selfieStatus',
@@ -107,29 +69,53 @@ service cloud.firestore {
       return ['fullName', 'whatsApp', 'displayName', 'updatedAt'];
     }
 
-    // --- Admin authorization source of truth ---------------------------------
+    function liveLocationKeys() {
+      return [
+        'rideId', 'driverId', 'vehicleType', 'location',
+        'accuracyMeters', 'headingDegrees', 'speedMps',
+        'updatedAtMs', 'updatedAt'
+      ];
+    }
+
+    function livePointValid(data) {
+      return data.location.lat is number &&
+        data.location.lng is number &&
+        data.location.lat >= -90 && data.location.lat <= 90 &&
+        data.location.lng >= -180 && data.location.lng <= 180;
+    }
+
+    function liveOptionalNumbersValid(data) {
+      return (data.accuracyMeters == null || data.accuracyMeters is number) &&
+        (data.headingDegrees == null || data.headingDegrees is number) &&
+        (data.speedMps == null || data.speedMps is number);
+    }
+
+    function rideIsLocationActive(rideId) {
+      let ride = get(/databases/$(database)/documents/rideRequests/$(rideId)).data;
+      return ride.status in ['assigned', 'driver_arrived', 'in_progress'];
+    }
+
+    function isAcceptedRideDriver(rideId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/rideRequests/$(rideId)).data.acceptedDriverId == request.auth.uid;
+    }
+
+    function isRidePassenger(rideId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/rideRequests/$(rideId)).data.passengerId == request.auth.uid;
+    }
 
     match /admins/{adminId} {
       allow read: if isSignedIn();
-      allow write: if false; // admin membership is provisioned server-side only.
+      allow write: if false;
     }
 
-    // --- Drivers -------------------------------------------------------------
-
     match /drivers/{driverId} {
-      // Driver reads own document; admin reads any driver document.
       allow read: if isOwner(driverId) || isAdmin();
 
-      // Self create limited to onboarding-safe keys; no server-owned/financial
-      // field may be initialized by the client.
       allow create: if isOwner(driverId) &&
         request.resource.data.keys().hasOnly(driverCreateSafe());
 
-      // Admin client update: STRICT allowlist — document-review housekeeping only
-      // (cannot approve/reject/suspend/reactivate, allocate founder, or change
-      // financial/ride state; those are callable-only). Self update limited to
-      // onboarding-safe keys. A mixed update touching any other field fails via
-      // hasOnly.
       allow update: if
         (isAdmin() &&
          request.resource.data.diff(resource.data).affectedKeys()
@@ -141,13 +127,9 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Private driver data (Pix owner details, raw document metadata). Client has
-    // NO access — Admin SDK / secure Functions only.
     match /privateDriverData/{driverId} {
       allow read, write: if false;
     }
-
-    // --- Passengers ----------------------------------------------------------
 
     match /passengers/{uid} {
       allow read: if isOwner(uid) || isAdmin();
@@ -159,13 +141,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // --- Ride requests (containment, pre-BLOCK 08) ---------------------------
-    // A passenger creates/reads ONLY their own ride request; admins may read.
-    // Drivers have NO access: no listing/reading of pending rides, no client
-    // claim/assignment/status/pricing/commission/settlement/completion writes.
-    // Assignment + settlement fields must be neutral at create so a passenger
-    // cannot pre-assign a driver or pre-settle a ride. All ride mutation and
-    // transactional acceptance move to secure Cloud Functions (BLOCK 08).
     match /rideRequests/{rideId} {
       allow create: if isSignedIn() &&
         request.resource.data.passengerId == request.auth.uid &&
@@ -180,37 +155,48 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // --- Targeted driver offers (reserved for BLOCK 08 dispatch) -------------
-    // A driver may read ONLY offers targeted at them; a constrained query for
-    // driverId == uid succeeds, an unconstrained/other-driver query fails.
-    // Offers are created/mutated by the Admin SDK / Cloud Functions only.
     match /driverOffers/{offerId} {
       allow read: if isAdmin() ||
         (isSignedIn() && resource.data.driverId == request.auth.uid);
       allow create, update, delete: if false;
     }
 
-    // --- Public city configuration (client-readable, safe fields only) -------
+    // One current point per ride, never a route history. The accepted driver may
+    // publish only while the ride is moving. Only that driver, that passenger and
+    // admins may read it. The backend deletes it at payment/cancellation/terminal
+    // transitions; the driver may also perform best-effort cleanup.
+    match /activeRideLocations/{rideId} {
+      allow read: if isAdmin() || isAcceptedRideDriver(rideId) || isRidePassenger(rideId);
+
+      allow create, update: if isAcceptedRideDriver(rideId) &&
+        rideIsLocationActive(rideId) &&
+        request.resource.data.keys().hasAll(liveLocationKeys()) &&
+        request.resource.data.keys().hasOnly(liveLocationKeys()) &&
+        request.resource.data.rideId == rideId &&
+        request.resource.data.driverId == request.auth.uid &&
+        request.resource.data.vehicleType in ['moto', 'car'] &&
+        request.resource.data.updatedAtMs is int &&
+        request.resource.data.updatedAt == request.time &&
+        livePointValid(request.resource.data) &&
+        liveOptionalNumbersValid(request.resource.data);
+
+      allow delete: if isAdmin() || isAcceptedRideDriver(rideId);
+    }
+
     match /cityPublicConfig/{serviceAreaId} {
       allow read: if isSignedIn();
       allow write: if false;
     }
 
-    // --- Private city configuration (server-only) ----------------------------
     match /cityPrivateConfig/{serviceAreaId} {
       allow read, write: if false;
     }
 
-    // --- Founder / approval counters -----------------------------------------
-    // Read by clients (founder progress display). Writes are server-only: the
-    // atomic founder assignment lives in approveDriverSecure (Admin SDK). No
-    // client — admin included — may write the counter (BLOCK 11+12).
     match /counters/{counterId} {
       allow read: if isSignedIn();
       allow write: if false;
     }
 
-    // --- Server-only collections (Admin SDK / callable Functions only) -------
     match /idempotencyOperations/{docId}  { allow read, write: if false; }
     match /auditLogs/{docId}              { allow read, write: if false; }
     match /walletTransactions/{docId}     { allow read, write: if false; }
@@ -219,7 +205,6 @@ service cloud.firestore {
     match /notificationEvents/{docId}     { allow read, write: if false; }
     match /notificationTokens/{docId}     { allow read, write: if false; }
 
-    // --- Deny by default -----------------------------------------------------
     match /{document=**} {
       allow read, write: if false;
     }
