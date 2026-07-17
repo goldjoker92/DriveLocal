@@ -13,3 +13,9 @@ export function formatDistanceKm(meters) {
   const km = (Number(meters) || 0) / 1000;
   return km.toFixed(1).replace('.', ',') + ' km';
 }
+
+// Format route seconds as a passenger-friendly whole-minute estimate.
+export function formatDurationMinutes(seconds) {
+  const minutes = Math.max(1, Math.ceil((Number(seconds) || 0) / 60));
+  return `${minutes} min`;
+}
