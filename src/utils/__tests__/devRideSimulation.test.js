@@ -51,9 +51,14 @@ describe('DEV simulator native-build gate', () => {
   const originalAppEnv = process.env.APP_ENV;
   const originalSimulatorFlag = process.env.ENABLE_DEV_RIDE_SIMULATOR;
 
+  function restoreEnv(name, value) {
+    if (value == null) delete process.env[name];
+    else process.env[name] = value;
+  }
+
   afterEach(() => {
-    process.env.APP_ENV = originalAppEnv;
-    process.env.ENABLE_DEV_RIDE_SIMULATOR = originalSimulatorFlag;
+    restoreEnv('APP_ENV', originalAppEnv);
+    restoreEnv('ENABLE_DEV_RIDE_SIMULATOR', originalSimulatorFlag);
     jest.resetModules();
   });
 
@@ -72,8 +77,8 @@ describe('DEV simulator native-build gate', () => {
     }));
   });
 
-  it('fails closed in production even if the simulator variable is forced on', () => {
-    expect(readExtra('prod', '1')).toEqual(expect.objectContaining({
+  it.each(['prod', 'production'])('fails closed for APP_ENV=%s even if forced on', (appEnv) => {
+    expect(readExtra(appEnv, '1')).toEqual(expect.objectContaining({
       appEnvironment: 'production',
       devRideSimulatorEnabled: false,
     }));
