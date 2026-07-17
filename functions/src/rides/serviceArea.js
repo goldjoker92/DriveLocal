@@ -4,6 +4,7 @@
 // that pickup and destination are inside the configured polygon. There is no
 // hardcoded rectangular geofence and no minimum-driver / operating-hours gate.
 
+const crypto = require('crypto');
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { pointInServiceArea } = require('../geo/geo');
 const { validateBoundaryArtifact } = require('../geo/boundaryArtifact');
@@ -14,9 +15,9 @@ const C = require('./constants');
 // callable must never try to read that repository path at runtime.
 //
 // The seed stores the validated geometry as JSON in cityPublicConfig. Runtime
-// reparses it, revalidates its checksum/shape, then caches it by version+checksum.
-// This keeps the deployed function self-contained and fails closed on missing or
-// tampered configuration.
+// reparses it, revalidates its checksum/shape, then caches it by version,
+// declared checksum and serialized-content fingerprint. Missing or tampered
+// configuration therefore fails closed even when another config was cached.
 const boundaryCache = new Map();
 
 function configurationError(serviceAreaId, internalMessage, cause) {
@@ -28,14 +29,9 @@ function configurationError(serviceAreaId, internalMessage, cause) {
 }
 
 function loadOperationalPolygon(serviceAreaId, cfg) {
-  const cacheKey = [
-    serviceAreaId,
-    cfg.boundaryVersion || 'no-version',
-    cfg.boundaryChecksum || 'no-checksum',
-  ].join(':');
-
-  if (boundaryCache.has(cacheKey)) return boundaryCache.get(cacheKey);
-
+  // Validate the deployed representation BEFORE consulting the cache. This is
+  // important when a config is removed/corrupted after a previous valid call:
+  // a stale cached polygon must never make an invalid document appear healthy.
   if (cfg.boundaryFormat !== 'geojson-geometry-json-v1') {
     throw configurationError(serviceAreaId, 'unsupported boundary format');
   }
@@ -43,9 +39,23 @@ function loadOperationalPolygon(serviceAreaId, cfg) {
     throw configurationError(serviceAreaId, 'boundary geometry missing');
   }
 
+  const serializedGeometry = cfg.boundaryGeoJson.trim();
+  const serializedFingerprint = crypto
+    .createHash('sha256')
+    .update(serializedGeometry)
+    .digest('hex');
+  const cacheKey = [
+    serviceAreaId,
+    cfg.boundaryVersion || 'no-version',
+    cfg.boundaryChecksum || 'no-checksum',
+    serializedFingerprint,
+  ].join(':');
+
+  if (boundaryCache.has(cacheKey)) return boundaryCache.get(cacheKey);
+
   let geometry;
   try {
-    geometry = JSON.parse(cfg.boundaryGeoJson);
+    geometry = JSON.parse(serializedGeometry);
   } catch (cause) {
     throw configurationError(serviceAreaId, 'boundary geometry is not valid JSON', cause);
   }
