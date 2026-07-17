@@ -12,11 +12,21 @@ import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
+import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 import {
   attachActiveRideTracking,
   detachActiveRideTracking,
+  restoreRealDriverTrackingAfterSimulation,
 } from '../../services/driverLocationTracking';
+import {
+  getDevRideSimulationState,
+  pauseDevRideSimulation,
+  resumeDevRideSimulation,
+  startDevRideSimulation,
+  stopDevRideSimulation,
+  subscribeDevRideSimulation,
+} from '../../services/devRideSimulation';
 import {
   listenToMyOffer,
   markDriverArrived,
@@ -50,6 +60,29 @@ function trackingErrorLabel(status) {
   return labels[status] || 'Não foi possível iniciar a localização ao vivo.';
 }
 
+function simulationStatusLabel(simulation) {
+  const labels = {
+    idle: 'GPS real ativo. Nenhuma simulação iniciada.',
+    running: 'Trajeto simulado em andamento.',
+    paused: 'Trajeto simulado pausado.',
+    completed: 'Trajeto simulado concluído. Continue usando os botões normais da corrida.',
+    interrupted: 'A simulação foi interrompida por uma reinicialização do aplicativo.',
+    stopped: 'Simulação encerrada e GPS real restaurado.',
+    error: 'A simulação encontrou um erro. Use o código abaixo para depurar.',
+  };
+  return labels[simulation?.status] || labels.idle;
+}
+
+function simulationErrorLabel(errorCode) {
+  const labels = {
+    DEV_SIMULATION_SESSION_MISMATCH: 'Abra a corrida ativa e confirme que o GPS está ativo antes de simular.',
+    DEV_SIMULATION_OVERRIDE_MISSING: 'A sessão de simulação expirou. Inicie o trajeto novamente.',
+    DEV_SIMULATION_LOCATION_REJECTED: 'A posição simulada foi recusada. Verifique autenticação e regras Firestore.',
+    DEV_SIMULATION_PROCESS_RESTARTED: 'O processo foi reiniciado. Inicie novamente o trajeto desejado.',
+  };
+  return labels[errorCode] || 'Não foi possível executar a simulação DEV.';
+}
+
 function confirmRideTrackingDisclosure() {
   return new Promise((resolve) => {
     Alert.alert(
@@ -75,6 +108,7 @@ export default function ActiveRide() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [trackingStatus, setTrackingStatus] = useState('checking');
+  const [devSimulation, setDevSimulation] = useState({ status: 'idle' });
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -90,6 +124,24 @@ export default function ActiveRide() {
       () => setError('Não foi possível carregar a corrida.'),
       rideId
     );
+  }, [rideId]);
+
+  useEffect(() => {
+    if (!DEV_RIDE_SIMULATOR_ENABLED || !rideId) return undefined;
+    let active = true;
+
+    getDevRideSimulationState().then((next) => {
+      if (!active) return;
+      if (!next?.rideId || next.rideId === rideId) setDevSimulation(next || { status: 'idle' });
+    });
+    const unsubscribe = subscribeDevRideSimulation((next) => {
+      if (!next?.rideId || next.rideId === rideId) setDevSimulation(next || { status: 'idle' });
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [rideId]);
 
   useEffect(() => {
@@ -110,7 +162,16 @@ export default function ActiveRide() {
         if (active) setTrackingStatus('error');
       });
     } else {
-      detachActiveRideTracking(rideId).finally(() => {
+      const stopTracking = async () => {
+        if (DEV_RIDE_SIMULATOR_ENABLED) {
+          await stopDevRideSimulation({ restoreRealTracking: false });
+        }
+        await detachActiveRideTracking(rideId);
+        if (DEV_RIDE_SIMULATOR_ENABLED) {
+          await restoreRealDriverTrackingAfterSimulation();
+        }
+      };
+      stopTracking().finally(() => {
         if (active) setTrackingStatus('stopped');
       });
     }
@@ -140,6 +201,17 @@ export default function ActiveRide() {
     }
   }
 
+  async function cleanupTrackingAfterRide() {
+    if (!rideId) return;
+    if (DEV_RIDE_SIMULATOR_ENABLED) {
+      await stopDevRideSimulation({ restoreRealTracking: false });
+    }
+    await detachActiveRideTracking(rideId);
+    if (DEV_RIDE_SIMULATOR_ENABLED) {
+      await restoreRealDriverTrackingAfterSimulation();
+    }
+  }
+
   async function act(key, fn) {
     if (!rideId || busy) return;
     setBusy(key);
@@ -148,13 +220,52 @@ export default function ActiveRide() {
       const res = await fn(rideId);
       if (res?.status) setStatus(res.status);
       if (res && ['awaiting_payment', 'completed', 'cancelled', 'disputed'].includes(res.status)) {
-        await detachActiveRideTracking(rideId);
+        await cleanupTrackingAfterRide();
       }
       if (res && ['completed', 'cancelled', 'disputed'].includes(res.status)) {
         router.replace('/driver-home');
       }
     } catch (e) {
       setError(e?.message || 'Não foi possível concluir. Tente novamente.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function startSimulation(target, mode) {
+    const uid = auth.currentUser?.uid;
+    if (!DEV_RIDE_SIMULATOR_ENABLED || !uid || !rideId || !offer?.vehicleType || busy) return;
+    setBusy('simulation');
+    setError('');
+    try {
+      const result = await startDevRideSimulation({
+        driverId: uid,
+        vehicleType: offer.vehicleType,
+        rideId,
+        target,
+        mode,
+      });
+      setDevSimulation(result);
+      if (result?.status === 'error') setError(simulationErrorLabel(result.errorCode));
+    } catch (_error) {
+      setError('Não foi possível iniciar o trajeto simulado.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function restoreRealGps() {
+    if (!DEV_RIDE_SIMULATOR_ENABLED || busy) return;
+    setBusy('restore-gps');
+    setError('');
+    try {
+      const result = await stopDevRideSimulation({ restoreRealTracking: true });
+      setDevSimulation(result);
+      if (result?.status && result.status !== 'stopped' && result.status !== 'active') {
+        setError(trackingErrorLabel(result.status));
+      }
+    } catch (_error) {
+      setError('Não foi possível restaurar o GPS real.');
     } finally {
       setBusy('');
     }
@@ -176,6 +287,8 @@ export default function ActiveRide() {
   const pickup = offer?.exactPickup;
   const destination = offer?.exactDestination;
   const trackingActive = trackingStatus === 'active';
+  const simulationRunning = devSimulation?.status === 'running';
+  const simulationPaused = devSimulation?.status === 'paused';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -196,6 +309,62 @@ export default function ActiveRide() {
             </Text>
             {!trackingActive && trackingStatus !== 'checking' ? (
               <AppButton title="Ativar localização da corrida" onPress={enableRideTracking} />
+            ) : null}
+          </AppCard>
+        ) : null}
+
+        {DEV_RIDE_SIMULATOR_ENABLED && TRACKED_STATUSES.has(status) ? (
+          <AppCard>
+            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>🧪 Simulação DEV — dois telefones</Text>
+            <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+              Somente o deslocamento é simulado. Aceitar, chegar, iniciar, finalizar e confirmar o Pix continuam manuais e usam o fluxo real.
+            </Text>
+            <Text style={[{ fontFamily, color: simulationRunning ? colors.warning : colors.textMuted }, typography.small]}>
+              {simulationStatusLabel(devSimulation)}
+            </Text>
+            {Number.isFinite(devSimulation?.stepCount) && devSimulation.stepCount > 0 ? (
+              <Text style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>
+                Passo {devSimulation.stepIndex || 0}/{devSimulation.stepCount}
+              </Text>
+            ) : null}
+            {devSimulation?.traceId ? (
+              <Text selectable style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>
+                Trace: {devSimulation.traceId}
+              </Text>
+            ) : null}
+            {devSimulation?.errorCode ? (
+              <Text selectable style={[{ fontFamily, color: colors.danger }, typography.caption]}>
+                Código: {devSimulation.errorCode}
+              </Text>
+            ) : null}
+
+            {(status === 'assigned' || status === 'driver_arrived') && pickup ? (
+              <AppButton
+                title={busy === 'simulation' ? 'Iniciando…' : 'Simular trajeto até o passageiro'}
+                onPress={() => startSimulation(pickup, 'to_pickup')}
+                disabled={!!busy}
+              />
+            ) : null}
+            {status === 'in_progress' && destination ? (
+              <AppButton
+                title={busy === 'simulation' ? 'Iniciando…' : 'Simular trajeto até o destino'}
+                onPress={() => startSimulation(destination, 'to_destination')}
+                disabled={!!busy}
+              />
+            ) : null}
+            {simulationRunning ? (
+              <AppButton title="Pausar deslocamento" variant="ghost" onPress={pauseDevRideSimulation} disabled={!!busy} />
+            ) : null}
+            {simulationPaused ? (
+              <AppButton title="Continuar deslocamento" variant="ghost" onPress={resumeDevRideSimulation} disabled={!!busy} />
+            ) : null}
+            {devSimulation?.status && devSimulation.status !== 'idle' ? (
+              <AppButton
+                title={busy === 'restore-gps' ? 'Restaurando…' : 'Encerrar simulação e restaurar GPS real'}
+                variant="ghost"
+                onPress={restoreRealGps}
+                disabled={!!busy}
+              />
             ) : null}
           </AppCard>
         ) : null}
