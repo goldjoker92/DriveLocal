@@ -56,14 +56,29 @@ function emit(next) {
   listeners.forEach((listener) => listener(publicState(currentState)));
 }
 
-function clearTimer() {
-  if (runtime?.timer) clearInterval(runtime.timer);
-  if (runtime) runtime.timer = null;
+function clearTimer(targetRuntime = runtime) {
+  if (targetRuntime?.timer) clearInterval(targetRuntime.timer);
+  if (targetRuntime) targetRuntime.timer = null;
 }
 
-function failState(errorCode) {
-  clearTimer();
-  if (!currentState) return;
+async function waitForPendingWrite(targetRuntime) {
+  try {
+    if (targetRuntime?.pendingPromise) await targetRuntime.pendingPromise;
+  } catch (_error) {
+    // The publishing function already turns failures into a traceable state.
+  }
+}
+
+async function retireRuntime() {
+  const previous = runtime;
+  clearTimer(previous);
+  await waitForPendingWrite(previous);
+  if (runtime === previous) runtime = null;
+}
+
+function failState(errorCode, expectedRuntime, expectedTraceId) {
+  if (runtime !== expectedRuntime || currentState?.traceId !== expectedTraceId) return;
+  clearTimer(expectedRuntime);
   emit({ ...currentState, status: 'error', errorCode });
   logDevTrace('simulation_failed', {
     traceId: currentState.traceId,
@@ -88,23 +103,35 @@ async function resolveStartPoint(rideId, target, fallbackDirection) {
 }
 
 async function publishStep(index) {
-  if (!runtime || currentState?.status !== 'running' || runtime.inFlight) return;
-  const point = runtime.route[index];
+  const targetRuntime = runtime;
+  const stateAtStart = currentState;
+  if (!targetRuntime || stateAtStart?.status !== 'running' || targetRuntime.inFlight) return;
+
+  const point = targetRuntime.route[index];
   if (!point) return;
 
-  runtime.inFlight = true;
+  targetRuntime.inFlight = true;
   const startedAt = Date.now();
-  try {
+  const operation = (async () => {
     const result = await publishDevSimulatedLocation({
-      driverId: runtime.driverId,
-      vehicleType: runtime.vehicleType,
-      rideId: runtime.rideId,
+      driverId: targetRuntime.driverId,
+      vehicleType: targetRuntime.vehicleType,
+      rideId: targetRuntime.rideId,
       point,
     });
+
+    // A stop, pause or replacement may happen while Firestore is responding.
+    // Never let an obsolete write mutate the new simulation state.
+    if (runtime !== targetRuntime || currentState?.traceId !== stateAtStart.traceId) return;
     if (result.status !== 'published') {
-      failState(result.errorCode || 'DEV_LOCATION_PUBLISH_FAILED');
+      failState(
+        result.errorCode || 'DEV_LOCATION_PUBLISH_FAILED',
+        targetRuntime,
+        stateAtStart.traceId
+      );
       return;
     }
+    if (currentState?.status !== 'running') return;
 
     const finished = index >= currentState.stepCount;
     emit({
@@ -122,18 +149,24 @@ async function publishStep(index) {
       durationMs: Date.now() - startedAt,
     });
 
-    if (finished) clearTimer();
+    if (finished) clearTimer(targetRuntime);
+  })();
+
+  targetRuntime.pendingPromise = operation;
+  try {
+    await operation;
   } catch (_error) {
-    failState('DEV_LOCATION_PUBLISH_EXCEPTION');
+    failState('DEV_LOCATION_PUBLISH_EXCEPTION', targetRuntime, stateAtStart.traceId);
   } finally {
-    if (runtime) runtime.inFlight = false;
+    targetRuntime.inFlight = false;
+    if (targetRuntime.pendingPromise === operation) targetRuntime.pendingPromise = null;
   }
 }
 
-function scheduleRemainingSteps() {
-  clearTimer();
-  if (!runtime || currentState?.status !== 'running') return;
-  runtime.timer = setInterval(() => {
+function scheduleRemainingSteps(targetRuntime = runtime) {
+  clearTimer(targetRuntime);
+  if (!targetRuntime || runtime !== targetRuntime || currentState?.status !== 'running') return;
+  targetRuntime.timer = setInterval(() => {
     const nextIndex = Number(currentState?.stepIndex || 0) + 1;
     void publishStep(nextIndex);
   }, DEV_SIMULATION_INTERVAL_MS);
@@ -177,8 +210,7 @@ export async function startDevRideSimulation({
     return { status: 'error', errorCode: 'DEV_SIMULATION_INVALID_INPUT' };
   }
 
-  clearTimer();
-  runtime = null;
+  await retireRuntime();
 
   const nativeOverride = await beginDevLocationSimulation({ driverId, vehicleType, rideId });
   if (nativeOverride.status !== 'active') {
@@ -205,6 +237,7 @@ export async function startDevRideSimulation({
     route,
     timer: null,
     inFlight: false,
+    pendingPromise: null,
   };
   emit({
     rideId,
@@ -224,14 +257,14 @@ export async function startDevRideSimulation({
   });
 
   await publishStep(0);
-  if (currentState?.status === 'running') scheduleRemainingSteps();
+  if (currentState?.status === 'running') scheduleRemainingSteps(runtime);
   return publicState(currentState);
 }
 
 export function pauseDevRideSimulation() {
   if (!DEV_RIDE_SIMULATOR_ENABLED) return disabledResult();
   if (!runtime || currentState?.status !== 'running') return publicState(currentState) || { status: 'idle' };
-  clearTimer();
+  clearTimer(runtime);
   emit({ ...currentState, status: 'paused' });
   logDevTrace('simulation_paused', {
     traceId: currentState.traceId,
@@ -254,15 +287,15 @@ export function resumeDevRideSimulation() {
     stepIndex: currentState.stepIndex,
     stepCount: currentState.stepCount,
   });
-  scheduleRemainingSteps();
+  scheduleRemainingSteps(runtime);
   return publicState(currentState);
 }
 
 export async function stopDevRideSimulation({ restoreRealTracking = true } = {}) {
   if (!DEV_RIDE_SIMULATOR_ENABLED) return disabledResult();
-  clearTimer();
-  runtime = null;
 
+  const previous = runtime;
+  clearTimer(previous);
   if (currentState) {
     emit({ ...currentState, status: 'stopped' });
     logDevTrace('simulation_stopped', {
@@ -273,6 +306,12 @@ export async function stopDevRideSimulation({ restoreRealTracking = true } = {})
       stepCount: currentState.stepCount,
     });
   }
+
+  // Wait until an already-sent synthetic write settles, then restore real GPS.
+  // This prevents the stale simulated point from racing and overwriting the
+  // first native point after the user presses "restaurar GPS real".
+  await waitForPendingWrite(previous);
+  if (runtime === previous) runtime = null;
 
   if (restoreRealTracking) {
     const restored = await restoreRealDriverTrackingAfterSimulation();
