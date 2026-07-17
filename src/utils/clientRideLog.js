@@ -76,12 +76,19 @@ export function sanitizeRideErrorForClientLog(error) {
 /**
  * Emits one stable JSON line. Search Metro with "[DriveLocal][RIDE_CLIENT]" or a
  * rideId/traceId to follow a complete client-side ride lifecycle.
+ *
+ * Operational failures use console.warn instead of console.error. React Native's
+ * development console turns console.error into a red overlay with a stack pointing
+ * at this logger, which hides the useful JSON and makes the logger look like the
+ * cause. Severity remains explicit inside the structured entry.
  */
 export function logRideClientEvent(eventName, fields = {}, level = 'info') {
   if (!CLIENT_RIDE_LOGS_ENABLED) return;
 
+  const severity = level === 'error' ? 'error' : level === 'warning' ? 'warning' : 'info';
   const entry = compact({
     scope: 'ride_client',
+    severity,
     eventName: safeString(eventName, 96),
     at: new Date().toISOString(),
     action: safeString(fields.action, 64),
@@ -103,7 +110,6 @@ export function logRideClientEvent(eventName, fields = {}, level = 'info') {
   });
 
   const message = `[DriveLocal][RIDE_CLIENT] ${JSON.stringify(entry)}`;
-  if (level === 'error') console.error(message);
-  else if (level === 'warning') console.warn(message);
-  else console.info(message);
+  if (severity === 'info') console.info(message);
+  else console.warn(message);
 }
