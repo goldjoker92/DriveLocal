@@ -1,7 +1,5 @@
-// Searching for a driver (route "/searching"). Listens to the passenger's own
-// ride document (secured by BLOCK 04 Rules) and reflects the real backend status.
-// No fake "driver accepted" simulation — the transition is driven by the ride's
-// server-owned status.
+// Searching for a driver (route "/searching"). Reflects the passenger's real
+// server-owned ride status. Cancellation calls the secure backend before leaving.
 
 import { useEffect, useState } from 'react';
 import { ScrollView, ActivityIndicator, View, Text } from 'react-native';
@@ -14,14 +12,14 @@ import AdminTableRow from '../../components/AdminTableRow';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
-import { listenToRide } from '../../services/ridesService';
+import { listenToRide, cancelRide } from '../../services/ridesService';
 
-// PT-BR status labels for the passenger.
 const STATUS_LABEL = {
   searching: 'Procurando motorista…',
   assigned: 'Motorista a caminho!',
   no_driver_available: 'Nenhum motorista disponível no momento.',
   dispatch_failed: 'Não foi possível procurar motoristas. Tente novamente.',
+  cancelled: 'Corrida cancelada.',
 };
 
 export default function Searching() {
@@ -29,10 +27,12 @@ export default function Searching() {
   const params = useLocalSearchParams();
   const rideId = typeof params.rideId === 'string' ? params.rideId : null;
   const [status, setStatus] = useState('searching');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!rideId) return undefined;
-    const unsubscribe = listenToRide(
+    return listenToRide(
       rideId,
       (ride) => {
         if (!ride) return;
@@ -43,8 +43,21 @@ export default function Searching() {
       },
       () => setStatus('dispatch_failed')
     );
-    return unsubscribe;
   }, [rideId, router]);
+
+  async function handleCancel() {
+    if (!rideId || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await cancelRide(rideId, 'passageiro_cancelou_busca');
+      router.replace('/passenger-home');
+    } catch (e) {
+      setError(e?.message || 'Não foi possível cancelar a corrida.');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const searching = status === 'searching';
   const label = STATUS_LABEL[status] || STATUS_LABEL.searching;
@@ -62,7 +75,12 @@ export default function Searching() {
           </View>
         </AppCard>
         {!rideId ? <AdminTableRow label="Nenhuma corrida ativa." /> : null}
-        <AppButton title="Cancelar" variant="ghost" onPress={() => router.replace('/passenger-home')} />
+        {searching ? (
+          <AppButton title={busy ? 'Cancelando…' : 'Cancelar corrida'} variant="ghost" onPress={handleCancel} disabled={busy} />
+        ) : (
+          <AppButton title="Voltar ao início" variant="ghost" onPress={() => router.replace('/passenger-home')} />
+        )}
+        {error ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text> : null}
       </ScrollView>
     </SafeAreaView>
   );

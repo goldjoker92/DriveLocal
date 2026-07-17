@@ -1,27 +1,15 @@
 // @ts-check
 // acceptDriverOfferSecure — a driver accepts a targeted offer. One Firestore
 // transaction validates the offer/ride/driver/eligibility/wallet and atomically
-// assigns the ride, marks the offer, and places the commission hold.
-//
-// Concurrency (first-wins): the transaction only commits when ride.status is
-// still 'searching'. A second driver committing against an already-assigned ride
-// re-reads 'assigned' and fails with RIDE_ALREADY_ACCEPTED — exactly one winner.
-//
-// Idempotency: a repeat by the SAME winning driver returns success without a
-// second hold (the offer is already 'accepted' and the deterministic
-// walletTransactions/{rideId}_hold document already exists).
-//
-// Wallet hold: during commissionFreeUntil the hold is 0 and no wallet minimum
-// applies. Afterwards the driver must be subscription-eligible AND keep
-// walletAvailableCentavos > R$3,00 AND cover the estimated commission. The hold
-// moves available -> held; walletBalanceCentavos is NOT reduced (capture is
-// BLOCK 09+10).
+// assigns the ride, marks the offer, places the commission hold and starts the
+// single-current-point live-location document consumed by the passenger map.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateIdentifier, validateIdempotencyKey } = require('../validation/validators');
 const { logInfo, logWarning } = require('../logging/logger');
 const { writeAuditLog } = require('../audit/auditLog');
+const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const { evaluateRideEligibility } = require('../drivers/eligibility');
 const { safeAcceptanceView } = require('./safeViews');
 const C = require('./constants');
@@ -30,11 +18,34 @@ function ts() {
   return admin.firestore.FieldValue.serverTimestamp();
 }
 
-// Determines the required commission hold for THIS driver on THIS ride.
+function safeText(value, fallback, max = 80) {
+  const text = value == null ? '' : String(value).trim();
+  return (text || fallback).slice(0, max);
+}
+
+function publicDriverSummary(driver, vehicleType) {
+  return {
+    name: safeText(driver.fullName, 'Motorista DriveLocal'),
+    vehicleType: safeText(driver.vehicleType || vehicleType, vehicleType || 'car', 10),
+    vehicleMake: safeText(driver.vehicleMake, '', 40),
+    vehicleModel: safeText(driver.vehicleModel, '', 40),
+    vehicleColor: safeText(driver.vehicleColor, '', 30),
+    vehiclePlate: safeText(driver.vehiclePlate || driver.plate, '—', 12).toUpperCase(),
+  };
+}
+
 function resolveHold(driver, ride, nowMs) {
   const commissionFree = driver.commissionFreeUntil != null && Number(driver.commissionFreeUntil) > nowMs;
   if (commissionFree) return { holdAmount: 0, commissionFree: true };
   return { holdAmount: Number(ride.estimatedCommissionCentavos || 0), commissionFree: false };
+}
+
+function trackingLocationFromDriver(driver) {
+  const lat = Number(driver?.location?.lat);
+  const lng = Number(driver?.location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 /**
@@ -48,20 +59,18 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
   }
   const payload = assertShape(request && request.data, { required: ['offerId', 'idempotencyKey'] });
   const offerId = validateIdentifier(payload.offerId, 'offerId');
-  validateIdempotencyKey(payload.idempotencyKey); // required; tx guards enforce idempotency
+  validateIdempotencyKey(payload.idempotencyKey);
 
   logInfo(context, 'ride.accept.started', { operation: 'accept', offerId });
 
   const offerRef = db.collection(C.DRIVER_OFFERS).doc(offerId);
 
   const result = await db.runTransaction(async (tx) => {
-    // --- reads first (Firestore requires all reads before writes) ---
     const offerSnap = await tx.get(offerRef);
     if (!offerSnap.exists) {
       throw new AppError(ERROR_CODES.INVALID_ARGUMENT, { internalMessage: `offer not found: ${offerId}`, safeMetadata: { field: 'offerId' } });
     }
     const offer = offerSnap.data() || {};
-    // Foreign offer (belongs to another driver).
     if (offer.driverId !== driverId) {
       throw new AppError(ERROR_CODES.FORBIDDEN, { internalMessage: `driver ${driverId} attempted offer of ${offer.driverId}` });
     }
@@ -69,6 +78,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     const rideRef = db.collection(C.RIDE_REQUESTS).doc(offer.rideId);
     const driverRef = db.collection(C.DRIVERS).doc(driverId);
     const holdRef = db.collection(C.WALLET_TRANSACTIONS).doc(`${offer.rideId}_hold`);
+    const trackingRef = db.collection(C.ACTIVE_RIDE_LOCATIONS).doc(offer.rideId);
     const rideSnap = await tx.get(rideRef);
     const driverSnap = await tx.get(driverRef);
     const holdSnap = await tx.get(holdRef);
@@ -79,15 +89,12 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     const driver = driverSnap.exists ? driverSnap.data() || {} : {};
     const nowMs = clock.now();
 
-    // Idempotent replay by the winning driver -> return without a second hold.
     if (ride.status === C.RIDE_STATUS.ASSIGNED && ride.acceptedDriverId === driverId) {
       return { replay: true, ride, holdAmount: Number(ride.commissionHoldCentavos || 0) };
     }
-    // First-wins: only a still-searching ride can be accepted.
     if (ride.status !== C.RIDE_STATUS.SEARCHING) {
       throw new AppError(ERROR_CODES.RIDE_ALREADY_ACCEPTED, { internalMessage: `ride ${offer.rideId} status is ${ride.status}` });
     }
-    // Offer must be live.
     if (offer.status !== C.OFFER_STATUS.OFFERED) {
       throw new AppError(ERROR_CODES.OFFER_EXPIRED, { internalMessage: `offer ${offerId} status is ${offer.status}` });
     }
@@ -95,7 +102,6 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       throw new AppError(ERROR_CODES.OFFER_EXPIRED, { internalMessage: `offer ${offerId} expired` });
     }
 
-    // Driver must be online, not busy, and pass the authoritative evaluator.
     if (driver.availabilityStatus !== 'online') {
       throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, { internalMessage: `driver ${driverId} not online` });
     }
@@ -107,7 +113,6 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, { internalMessage: `driver ${driverId} not ride-eligible` });
     }
 
-    // Wallet gate + hold amount.
     const { holdAmount, commissionFree } = resolveHold(driver, ride, nowMs);
     if (!commissionFree) {
       const available = Number(driver.walletAvailableCentavos || 0);
@@ -119,12 +124,13 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       }
     }
 
-    // --- atomic writes ---
+    const acceptedDriverPublic = publicDriverSummary(driver, ride.vehicleType);
     tx.set(
       rideRef,
       {
         status: C.RIDE_STATUS.ASSIGNED,
         acceptedDriverId: driverId,
+        acceptedDriverPublic,
         acceptedAtMs: nowMs,
         acceptedAt: ts(),
         commissionHoldCentavos: holdAmount,
@@ -137,13 +143,8 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     if (holdAmount > 0) {
       driverUpdate.walletAvailableCentavos = Number(driver.walletAvailableCentavos || 0) - holdAmount;
       driverUpdate.walletHeldCentavos = Number(driver.walletHeldCentavos || 0) + holdAmount;
-      // walletBalanceCentavos intentionally unchanged until capture (BLOCK 09+10).
     }
     tx.set(driverRef, driverUpdate, { merge: true });
-    // exactPickup privacy: the authoritative pickup is written onto the winning
-    // offer ONLY inside this successful transaction. Losing/expired/unrelated
-    // offers are never touched, so they never receive exactPickup. Destination
-    // stays withheld until BLOCK 09+10. No passenger PII is copied.
     tx.set(
       offerRef,
       {
@@ -156,7 +157,25 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       { merge: true }
     );
 
-    // Deterministic append-only hold — created once (guarded by existence).
+    const initialLocation = trackingLocationFromDriver(driver);
+    if (initialLocation) {
+      tx.set(
+        trackingRef,
+        {
+          rideId: offer.rideId,
+          driverId,
+          vehicleType: driver.vehicleType === 'moto' ? 'moto' : 'car',
+          location: initialLocation,
+          accuracyMeters: Number.isFinite(Number(driver.locationAccuracyMeters)) ? Number(driver.locationAccuracyMeters) : null,
+          headingDegrees: Number.isFinite(Number(driver.locationHeadingDegrees)) ? Number(driver.locationHeadingDegrees) : null,
+          speedMps: Number.isFinite(Number(driver.locationSpeedMps)) ? Number(driver.locationSpeedMps) : null,
+          updatedAtMs: nowMs,
+          updatedAt: ts(),
+        },
+        { merge: true }
+      );
+    }
+
     if (holdAmount > 0 && !holdSnap.exists) {
       tx.set(holdRef, {
         driverId,
@@ -170,7 +189,25 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       });
     }
 
-    return { replay: false, ride: { ...ride, status: C.RIDE_STATUS.ASSIGNED, acceptedDriverId: driverId }, holdAmount, holdAlreadyExisted: holdSnap.exists };
+    if (ride.passengerId) {
+      enqueueEventTx(tx, db, buildNotificationEvent({
+        rideId: offer.rideId,
+        eventType: C.NOTIFICATION_EVENT.RIDE_ASSIGNED,
+        recipientUid: ride.passengerId,
+        recipientRole: 'passenger',
+        route: '/driver-accepted',
+        offerId,
+        traceId: traceId || null,
+        nowMs,
+      }));
+    }
+
+    return {
+      replay: false,
+      ride: { ...ride, status: C.RIDE_STATUS.ASSIGNED, acceptedDriverId: driverId, acceptedDriverPublic },
+      holdAmount,
+      holdAlreadyExisted: holdSnap.exists,
+    };
   });
 
   if (result.replay) {
@@ -198,10 +235,8 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     logInfo(context, 'wallet.hold.duplicate_ignored', { operation: 'accept', rideId, offerId });
   }
   logInfo(context, 'ride.accept.won', { operation: 'accept', offerId, rideId, normalizedStatus: 'assigned', amountCentavos: result.holdAmount });
-  // Safe metadata only — exact coordinates are never logged.
   logInfo(context, 'ride.accept.exact_pickup_revealed', { operation: 'accept', rideId, offerId });
 
-  // Best-effort sibling-offer cleanup. Failure must NOT reverse the accepted ride.
   try {
     const siblings = await db.collection(C.DRIVER_OFFERS).where('rideId', '==', rideId).get();
     const closes = [];
@@ -218,4 +253,4 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
   return safeAcceptanceView(rideId, result.ride, result.holdAmount);
 }
 
-module.exports = { acceptDriverOfferSecure, resolveHold };
+module.exports = { acceptDriverOfferSecure, resolveHold, publicDriverSummary, trackingLocationFromDriver };

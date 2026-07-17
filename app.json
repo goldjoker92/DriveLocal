@@ -14,7 +14,7 @@
       "package": "com.drivelocal.app",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -31,17 +31,17 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#FFFFFF",
           "android": {
             "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+            "imageWidth": 160
           }
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "O DriveLocal usa sua localização para preencher o endereço de origem da sua corrida."
+          "locationWhenInUsePermission": "O DriveLocal usa sua localizaÃ§Ã£o para preencher o endereÃ§o de origem da sua corrida."
         }
       ]
     ],

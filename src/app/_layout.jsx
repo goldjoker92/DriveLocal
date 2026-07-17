@@ -1,7 +1,8 @@
 // Root navigation layout.
-// Step 1: a single headerless Stack. Each route group has its own _layout,
-// and each screen renders its own Header, so there are no nested headers.
+// A single headerless Stack. Each route group has its own _layout, and each
+// screen renders its own Header, so there are no nested headers.
 
+import '../services/driverLocationTracking';
 import { Stack } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
