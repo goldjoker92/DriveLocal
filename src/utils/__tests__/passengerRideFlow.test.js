@@ -16,6 +16,7 @@ describe('passenger quoted ride flow contracts', () => {
     expect(requestScreen).toContain('routeDistanceMeters');
     expect(requestScreen).toContain('routeDurationSeconds');
     expect(requestScreen).not.toContain("from '../../services/rideRequestService'");
+    expect(requestScreen).not.toContain("from '../../utils/serviceArea'");
     expect(requestScreen).not.toContain("router.replace('/(passenger)/passenger-home')");
   });
 
@@ -31,6 +32,15 @@ describe('passenger quoted ride flow contracts', () => {
     expect(searching).toContain('listenToRide');
     expect(passengerHome).not.toContain('MapPlaceholder');
     expect(passengerHome).not.toContain('Sua localização (placeholder)');
+  });
+
+  it('requests Android foreground permission before native geocoding', () => {
+    const locationService = source('src/services/locationService.js');
+
+    expect(locationService).toContain('ensureForegroundPermission');
+    expect(locationService).toContain('Location.getForegroundPermissionsAsync');
+    expect(locationService).toContain('Location.requestForegroundPermissionsAsync');
+    expect(locationService).toContain('if (!granted) return { status: \'denied\' }');
   });
 
   it('emits structured client logs without logging exact ride coordinates', () => {
