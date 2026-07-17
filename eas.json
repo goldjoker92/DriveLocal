@@ -16,7 +16,8 @@
       },
       "env": {
         "EXPO_NO_TELEMETRY": "1",
-        "APP_ENV": "dev"
+        "APP_ENV": "dev",
+        "ENABLE_DEV_RIDE_SIMULATOR": "1"
       }
     },
     "preview": {
@@ -30,7 +31,8 @@
       },
       "env": {
         "EXPO_NO_TELEMETRY": "1",
-        "APP_ENV": "dev"
+        "APP_ENV": "dev",
+        "ENABLE_DEV_RIDE_SIMULATOR": "0"
       }
     },
     "production": {
@@ -44,7 +46,8 @@
       },
       "env": {
         "EXPO_NO_TELEMETRY": "1",
-        "APP_ENV": "prod"
+        "APP_ENV": "prod",
+        "ENABLE_DEV_RIDE_SIMULATOR": "0"
       }
     }
   },

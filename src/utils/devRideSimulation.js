@@ -1,0 +1,71 @@
+import { normalizeTrackingPoint } from './rideTracking';
+
+export const DEV_SIMULATION_MIN_STEPS = 6;
+export const DEV_SIMULATION_MAX_STEPS = 80;
+export const DEV_SIMULATION_DEFAULT_STEPS = 24;
+export const DEV_SIMULATION_INTERVAL_MS = 1_500;
+
+function clampSteps(value) {
+  const numeric = Number.isFinite(Number(value)) ? Math.round(Number(value)) : DEV_SIMULATION_DEFAULT_STEPS;
+  return Math.max(DEV_SIMULATION_MIN_STEPS, Math.min(DEV_SIMULATION_MAX_STEPS, numeric));
+}
+
+// Use a real current point only when it creates a visible but still local test.
+// A passenger and driver testing from the same room would otherwise see a
+// stationary marker; a far-away tester would see unrealistic cross-city jumps.
+export function shouldUseLiveSimulationStart(startValue, targetValue) {
+  const start = normalizeTrackingPoint(startValue);
+  const target = normalizeTrackingPoint(targetValue);
+  if (!start || !target) return false;
+
+  const deltaLat = target.lat - start.lat;
+  const deltaLng = target.lng - start.lng;
+  const distanceDegrees = Math.sqrt((deltaLat ** 2) + (deltaLng ** 2));
+  return distanceDegrees >= 0.001 && distanceDegrees <= 0.05;
+}
+
+// When no suitable live point exists, start roughly 900 m from the target. This
+// keeps the visual test inside the same local area without a real vehicle.
+export function createFallbackSimulationStart(targetValue, direction = 1) {
+  const target = normalizeTrackingPoint(targetValue);
+  if (!target) return null;
+  const sign = direction < 0 ? -1 : 1;
+  return {
+    lat: target.lat - (0.0065 * sign),
+    lng: target.lng - (0.0055 * sign),
+  };
+}
+
+// Generates an in-memory curved interpolation. It is intentionally NOT persisted
+// as route history: Firestore still receives one current point only.
+export function buildDevSimulationRoute(startValue, targetValue, requestedSteps = DEV_SIMULATION_DEFAULT_STEPS) {
+  const providedStart = normalizeTrackingPoint(startValue);
+  const target = normalizeTrackingPoint(targetValue);
+  if (!providedStart || !target) return [];
+
+  const start = shouldUseLiveSimulationStart(providedStart, target)
+    ? providedStart
+    : createFallbackSimulationStart(target);
+  const steps = clampSteps(requestedSteps);
+  const deltaLat = target.lat - start.lat;
+  const deltaLng = target.lng - start.lng;
+  const distance = Math.sqrt((deltaLat ** 2) + (deltaLng ** 2));
+  const curveAmplitude = Math.min(distance * 0.08, 0.00035);
+  const perpendicularLat = distance > 0 ? deltaLng / distance : 0;
+  const perpendicularLng = distance > 0 ? -deltaLat / distance : 0;
+
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const progress = index / steps;
+    const curve = Math.sin(Math.PI * progress) * curveAmplitude;
+    return {
+      lat: start.lat + (deltaLat * progress) + (perpendicularLat * curve),
+      lng: start.lng + (deltaLng * progress) + (perpendicularLng * curve),
+    };
+  });
+}
+
+export function devSimulationProgress(stepIndex, stepCount) {
+  const total = Math.max(1, Number(stepCount) || 1);
+  const current = Math.max(0, Math.min(total, Number(stepIndex) || 0));
+  return Math.round((current / total) * 100);
+}

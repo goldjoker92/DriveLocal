@@ -4,11 +4,13 @@ import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 import { deleteDoc, doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { DEV_RIDE_SIMULATOR_ENABLED } from '../config/runtimeEnvironment';
 import { safeTrackingPayload } from '../utils/rideTracking';
 
 export const DRIVER_LOCATION_TASK = 'drivelocal-driver-live-location-v1';
 const SESSION_KEY = '@drivelocal/driver-location-session-v1';
 const LAST_STATUS_KEY = '@drivelocal/driver-location-last-status-v1';
+const DEV_OVERRIDE_KEY = '@drivelocal/driver-location-dev-override-v1';
 
 function validIdentifier(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -29,6 +31,27 @@ async function readSession() {
 
 async function writeSession(session) {
   await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+async function readDevOverride() {
+  if (!DEV_RIDE_SIMULATOR_ENABLED) return null;
+  try {
+    const raw = await AsyncStorage.getItem(DEV_OVERRIDE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!validIdentifier(parsed?.driverId) || !validIdentifier(parsed?.rideId)) return null;
+    return parsed;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function writeDevOverride({ driverId, rideId }) {
+  await AsyncStorage.setItem(DEV_OVERRIDE_KEY, JSON.stringify({ driverId, rideId, atMs: Date.now() }));
+}
+
+async function clearDevOverride() {
+  await AsyncStorage.removeItem(DEV_OVERRIDE_KEY);
 }
 
 async function writeSafeStatus(status) {
@@ -183,9 +206,19 @@ async function startSession({ driverId, vehicleType, rideId = null, requestPermi
     updatedAtMs: Date.now(),
   };
   await writeSession(session);
+
+  // While the explicit DEV override is active, lifecycle re-renders must not
+  // restart native GPS and overwrite the synthetic point. Production can never
+  // reach this branch because the build flag fails closed.
+  const override = await readDevOverride();
+  if (override && override.driverId === driverId && override.rideId === rideId) {
+    await writeSafeStatus('dev_simulation_override_preserved');
+    return { status: 'active', rideId, source: 'dev_simulation' };
+  }
+
   await ensureNativeTaskStarted();
   await publishImmediate(session);
-  return { status: 'active', rideId };
+  return { status: 'active', rideId, source: 'native' };
 }
 
 export function startDriverOnlineTracking({ driverId, vehicleType, requestPermissions = false }) {
@@ -194,6 +227,85 @@ export function startDriverOnlineTracking({ driverId, vehicleType, requestPermis
 
 export async function attachActiveRideTracking({ driverId, vehicleType, rideId, requestPermissions = false }) {
   return startSession({ driverId, vehicleType, rideId, requestPermissions });
+}
+
+// DEV-only override used by the two-phone manual test lab. It stops the native
+// task but preserves the authenticated tracking session and Firestore rules.
+export async function beginDevLocationSimulation({ driverId, vehicleType, rideId }) {
+  if (!DEV_RIDE_SIMULATOR_ENABLED) {
+    return { status: 'disabled', errorCode: 'DEV_SIMULATOR_DISABLED' };
+  }
+  if (!validIdentifier(driverId) || !validIdentifier(rideId)) {
+    return { status: 'error', errorCode: 'DEV_SIMULATION_INVALID_SESSION' };
+  }
+
+  const currentUid = await authenticatedUid();
+  const session = await readSession();
+  if (!currentUid || currentUid !== driverId || session?.driverId !== driverId || session?.rideId !== rideId) {
+    return { status: 'error', errorCode: 'DEV_SIMULATION_SESSION_MISMATCH' };
+  }
+
+  const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+  if (started) await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+  await writeSession({
+    ...session,
+    vehicleType: vehicleType === 'moto' ? 'moto' : 'car',
+    updatedAtMs: Date.now(),
+  });
+  await writeDevOverride({ driverId, rideId });
+  await writeSafeStatus('dev_simulation_override_active');
+  return { status: 'active', source: 'dev_simulation' };
+}
+
+export async function publishDevSimulatedLocation({ driverId, vehicleType, rideId, point }) {
+  if (!DEV_RIDE_SIMULATOR_ENABLED) {
+    return { status: 'disabled', errorCode: 'DEV_SIMULATOR_DISABLED' };
+  }
+
+  const override = await readDevOverride();
+  const session = await readSession();
+  if (
+    !override
+    || override.driverId !== driverId
+    || override.rideId !== rideId
+    || session?.driverId !== driverId
+    || session?.rideId !== rideId
+  ) {
+    return { status: 'error', errorCode: 'DEV_SIMULATION_OVERRIDE_MISSING' };
+  }
+
+  const published = await publishLocation(
+    { ...session, vehicleType: vehicleType === 'moto' ? 'moto' : 'car' },
+    {
+      coords: {
+        latitude: point?.lat,
+        longitude: point?.lng,
+        accuracy: 5,
+        heading: null,
+        speed: 6,
+      },
+    }
+  );
+  return published
+    ? { status: 'published' }
+    : { status: 'error', errorCode: 'DEV_SIMULATION_LOCATION_REJECTED' };
+}
+
+export async function restoreRealDriverTrackingAfterSimulation() {
+  if (!DEV_RIDE_SIMULATOR_ENABLED) {
+    return { status: 'disabled', errorCode: 'DEV_SIMULATOR_DISABLED' };
+  }
+
+  const session = await readSession();
+  await clearDevOverride();
+  if (!session) return { status: 'no_session' };
+
+  const permission = await getDriverTrackingPermissionState();
+  if (permission.status !== 'granted') return permission;
+  await ensureNativeTaskStarted();
+  await publishImmediate(session);
+  await writeSafeStatus('dev_simulation_native_tracking_restored');
+  return { status: 'active', rideId: session.rideId || null, source: 'native' };
 }
 
 export async function detachActiveRideTracking(rideId) {
@@ -206,6 +318,8 @@ export async function detachActiveRideTracking(rideId) {
     }
   }
 
+  const override = await readDevOverride();
+  if (override?.rideId === rideId) await clearDevOverride();
   if (!session || session.rideId !== rideId) return;
   await writeSession({ ...session, rideId: null, updatedAtMs: Date.now() });
   await writeSafeStatus('active_ride_detached');
@@ -224,6 +338,7 @@ export async function stopDriverOnlineTracking() {
   const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   if (started) await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   await AsyncStorage.removeItem(SESSION_KEY);
+  await clearDevOverride();
   await writeSafeStatus('stopped');
 }
 
