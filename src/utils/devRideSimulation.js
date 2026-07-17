@@ -10,6 +10,20 @@ function clampSteps(value) {
   return Math.max(DEV_SIMULATION_MIN_STEPS, Math.min(DEV_SIMULATION_MAX_STEPS, numeric));
 }
 
+// Use a real current point only when it creates a visible but still local test.
+// A passenger and driver testing from the same room would otherwise see a
+// stationary marker; a far-away tester would see unrealistic cross-city jumps.
+export function shouldUseLiveSimulationStart(startValue, targetValue) {
+  const start = normalizeTrackingPoint(startValue);
+  const target = normalizeTrackingPoint(targetValue);
+  if (!start || !target) return false;
+
+  const deltaLat = target.lat - start.lat;
+  const deltaLng = target.lng - start.lng;
+  const distanceDegrees = Math.sqrt((deltaLat ** 2) + (deltaLng ** 2));
+  return distanceDegrees >= 0.001 && distanceDegrees <= 0.05;
+}
+
 // Generates an in-memory curved interpolation. It is intentionally NOT persisted
 // as route history: Firestore still receives one current point only.
 export function buildDevSimulationRoute(startValue, targetValue, requestedSteps = DEV_SIMULATION_DEFAULT_STEPS) {
@@ -35,8 +49,8 @@ export function buildDevSimulationRoute(startValue, targetValue, requestedSteps 
   });
 }
 
-// When no live point exists yet, start roughly 900 m from the target. This keeps
-// the visual test inside the same local area without depending on a real vehicle.
+// When no suitable live point exists, start roughly 900 m from the target. This
+// keeps the visual test inside the same local area without a real vehicle.
 export function createFallbackSimulationStart(targetValue, direction = 1) {
   const target = normalizeTrackingPoint(targetValue);
   if (!target) return null;
