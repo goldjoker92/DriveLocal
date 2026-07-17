@@ -1,15 +1,9 @@
-// Driver home / cockpit (route "/driver-home"). Iteration 2A.
-//
-// Reads the signed-in approved driver from Firestore (drivers/{uid}) and shows a
-// clean operational cockpit: status, benefits, availability, subscription,
-// commission, Saldo DriveLocal and an "em breve" rides section.
-//
-// Business principle: the admin decision on drivers/{uid} is the source of
-// truth. This screen only reads and interprets it. No real rides, dispatch,
-// wallet recharge, Pix, IAP or subscription payment happen here (Iteration 2A).
+// Driver home / operational cockpit.
+// The admin decision remains the source of truth. Going online now also starts
+// the Android foreground/background location service used by dispatch and rides.
 
 import { useEffect, useState } from 'react';
-import { View, Text, ScrollView, useWindowDimensions } from 'react-native';
+import { Alert, View, Text, ScrollView, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
@@ -28,6 +22,12 @@ import { auth } from '../../config/firebase';
 import { getDriver, setDriverAvailability } from '../../services/driverService';
 import { isFounderCommissionFreeActive } from '../../services/founderService';
 import {
+  getDriverTrackingPermissionState,
+  restoreDriverOnlineTracking,
+  startDriverOnlineTracking,
+  stopDriverOnlineTracking,
+} from '../../services/driverLocationTracking';
+import {
   AVAILABILITY,
   formatDateBR,
   isFounderDriver,
@@ -41,14 +41,12 @@ import {
   commissionDisplay,
 } from '../../utils/driverCockpit';
 
-// Section title inside a card (matches the admin console wording style).
 function SectionTitle({ children }) {
   return (
     <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>{children}</Text>
   );
 }
 
-// Plain body line, muted by default.
 function Line({ children, tone = 'muted' }) {
   const color =
     tone === 'text' ? colors.text
@@ -56,6 +54,32 @@ function Line({ children, tone = 'muted' }) {
     : tone === 'warning' ? colors.warning
     : colors.textMuted;
   return <Text style={[{ fontFamily, color }, typography.small]}>{children}</Text>;
+}
+
+function confirmTrackingDisclosure() {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Localização durante o trabalho',
+      'Enquanto você estiver disponível, o DriveLocal usará sua localização para encontrar corridas próximas. Durante uma corrida, sua posição será mostrada somente ao passageiro dessa corrida, inclusive quando o app estiver em segundo plano. O rastreamento para quando você ficar indisponível.',
+      [
+        { text: 'Agora não', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Continuar', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) }
+    );
+  });
+}
+
+function trackingErrorLabel(status) {
+  const labels = {
+    services_disabled: 'Ative o GPS do telefone para ficar disponível.',
+    foreground_required: 'Autorize a localização precisa para ficar disponível.',
+    background_required: 'Autorize “Permitir o tempo todo” para receber corridas com o app em segundo plano.',
+    foreground_denied: 'A localização precisa foi recusada. Ative-a nas configurações do Android.',
+    background_denied: 'A localização em segundo plano foi recusada. Ative “Permitir o tempo todo” nas configurações do Android.',
+    unsupported: 'O rastreamento do motorista está disponível somente no aplicativo Android.',
+  };
+  return labels[status] || 'Não foi possível iniciar a localização do motorista.';
 }
 
 export default function DriverHome() {
@@ -66,39 +90,39 @@ export default function DriverHome() {
   const [availability, setAvailability] = useState(AVAILABILITY.OFFLINE);
   const [availabilityError, setAvailabilityError] = useState('');
   const [savingAvailability, setSavingAvailability] = useState(false);
+  const [trackingActive, setTrackingActive] = useState(false);
 
   useEffect(() => {
     let active = true;
-    const uid = auth.currentUser && auth.currentUser.uid;
+    const uid = auth.currentUser?.uid;
     if (!uid) {
       setLoading(false);
       return undefined;
     }
+
     getDriver(uid)
-      .then((data) => {
+      .then(async (data) => {
         if (!active) return;
         setDriver(data);
-        setAvailability(
-          data && data.availabilityStatus === AVAILABILITY.AVAILABLE
-            ? AVAILABILITY.AVAILABLE
-            : AVAILABILITY.OFFLINE
-        );
-        console.log(
-          '[DRIVER_HOME] loaded status=',
-          data && data.verificationStatus,
-          'founder=',
-          isFounderDriver(data),
-          'availability=',
-          data && data.availabilityStatus
-        );
+        const online = data?.availabilityStatus === AVAILABILITY.ONLINE
+          || data?.availabilityStatus === 'available';
+        setAvailability(online ? AVAILABILITY.ONLINE : AVAILABILITY.OFFLINE);
+
+        if (online) {
+          const restored = await restoreDriverOnlineTracking({
+            driverId: uid,
+            vehicleType: data?.vehicleType,
+          });
+          if (active) setTrackingActive(restored.status === 'active');
+        }
       })
-      .catch((e) => {
-        console.log('[DRIVER_HOME] load error', e.message);
+      .catch(() => {
         if (active) setError('Não foi possível carregar seu cadastro.');
       })
       .finally(() => {
         if (active) setLoading(false);
       });
+
     return () => {
       active = false;
     };
@@ -106,36 +130,52 @@ export default function DriverHome() {
 
   const nowMs = Date.now();
   const { width } = useWindowDimensions();
-  // Stack the availability buttons vertically on narrow phones so the labels
-  // ("Disponível" / "Indisponível") never wrap awkwardly side by side.
   const stackAvailabilityButtons = width < 360;
-  const uid = auth.currentUser && auth.currentUser.uid;
+  const uid = auth.currentUser?.uid;
   const displayName = driver && (driver.displayName || driver.fullName || driver.email);
   const founderActive = isFounderCommissionFreeActive(driver);
   const eligibility = deriveEligibility(driver);
   const subscription = subscriptionDisplay(driver, nowMs);
   const commission = commissionDisplay(driver, nowMs);
-  const isAvailable = availability === AVAILABILITY.AVAILABLE;
+  const isAvailable = availability === AVAILABILITY.ONLINE;
 
-  // Toggle to available — only allowed when the admin decision makes the driver
-  // eligible. Never fails silently: an ineligible driver sees the reason.
   async function goAvailable() {
     setAvailabilityError('');
     if (!eligibility.eligible) {
-      console.log('[AVAILABILITY] blocked reason=', eligibility.reasonCode);
       setAvailabilityError(rideBlockReasonLabel(eligibility.reasonCode));
       return;
     }
-    if (!uid) return;
+    if (!uid || savingAvailability) return;
+
     setSavingAvailability(true);
-    setAvailability(AVAILABILITY.AVAILABLE); // optimistic
     try {
-      await setDriverAvailability(uid, AVAILABILITY.AVAILABLE);
-      console.log('[AVAILABILITY] driver is now available');
-    } catch (e) {
-      console.log('[AVAILABILITY] update error', e.message);
-      setAvailability(AVAILABILITY.OFFLINE); // revert
-      setAvailabilityError('Não foi possível atualizar sua disponibilidade.');
+      let permission = await getDriverTrackingPermissionState();
+      if (permission.status !== 'granted') {
+        const consented = await confirmTrackingDisclosure();
+        if (!consented) {
+          setAvailabilityError('A localização em segundo plano é necessária para receber corridas.');
+          return;
+        }
+      }
+
+      const tracking = await startDriverOnlineTracking({
+        driverId: uid,
+        vehicleType: driver?.vehicleType,
+        requestPermissions: permission.status !== 'granted',
+      });
+      if (tracking.status !== 'active') {
+        setAvailabilityError(trackingErrorLabel(tracking.status));
+        return;
+      }
+
+      await setDriverAvailability(uid, AVAILABILITY.ONLINE);
+      setAvailability(AVAILABILITY.ONLINE);
+      setTrackingActive(true);
+    } catch (_error) {
+      await stopDriverOnlineTracking().catch(() => undefined);
+      setTrackingActive(false);
+      setAvailability(AVAILABILITY.OFFLINE);
+      setAvailabilityError('Não foi possível ativar sua disponibilidade e localização.');
     } finally {
       setSavingAvailability(false);
     }
@@ -143,22 +183,20 @@ export default function DriverHome() {
 
   async function goOffline() {
     setAvailabilityError('');
-    if (!uid) return;
+    if (!uid || savingAvailability) return;
     setSavingAvailability(true);
-    setAvailability(AVAILABILITY.OFFLINE); // optimistic
     try {
       await setDriverAvailability(uid, AVAILABILITY.OFFLINE);
-      console.log('[AVAILABILITY] driver is now offline');
-    } catch (e) {
-      console.log('[AVAILABILITY] update error', e.message);
-      setAvailability(AVAILABILITY.AVAILABLE); // revert
-      setAvailabilityError('Não foi possível atualizar sua disponibilidade.');
+      await stopDriverOnlineTracking();
+      setAvailability(AVAILABILITY.OFFLINE);
+      setTrackingActive(false);
+    } catch (_error) {
+      setAvailabilityError('Não foi possível ficar indisponível. Tente novamente.');
     } finally {
       setSavingAvailability(false);
     }
   }
 
-  // Benefit expiry warnings (only speak up near/after expiry).
   const commissionWarn = benefitWarning('Sua comissão gratuita', commissionFreeUntilMs(driver), nowMs);
   const subscriptionWarn = benefitWarning('Sua assinatura gratuita', subscriptionFreeUntilMs(driver), nowMs);
 
@@ -170,8 +208,7 @@ export default function DriverHome() {
   const balanceCents = (driver && driver.balanceCents) || 0;
   const walletBlocked =
     balanceCents <= WALLET_FALLBACK_LOW_THRESHOLD_CENTS &&
-    (driver &&
-      (driver.walletStatus === 'required' || driver.walletStatus === 'blocked'));
+    (driver && (driver.walletStatus === 'required' || driver.walletStatus === 'blocked'));
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -184,20 +221,13 @@ export default function DriverHome() {
         />
 
         {loading ? (
-          <AppCard>
-            <AdminTableRow label="Carregando…" />
-          </AppCard>
+          <AppCard><AdminTableRow label="Carregando…" /></AppCard>
         ) : error ? (
-          <AppCard>
-            <Line tone="warning">{error}</Line>
-          </AppCard>
+          <AppCard><Line tone="warning">{error}</Line></AppCard>
         ) : !driver ? (
-          <AppCard>
-            <AdminTableRow label="Cadastro não encontrado" />
-          </AppCard>
+          <AppCard><AdminTableRow label="Cadastro não encontrado" /></AppCard>
         ) : (
           <>
-            {/* STATUS */}
             <AppCard>
               <SectionTitle>STATUS</SectionTitle>
               <AppBadge label="Motorista aprovado" tone="success" />
@@ -206,7 +236,6 @@ export default function DriverHome() {
               ) : null}
             </AppCard>
 
-            {/* BENEFÍCIOS */}
             <AppCard>
               <SectionTitle>BENEFÍCIOS</SectionTitle>
               {isFounderDriver(driver) ? <AppBadge label={founderLabel} tone="success" /> : null}
@@ -218,22 +247,18 @@ export default function DriverHome() {
               ) : null}
               {commissionWarn ? <Line tone="warning">{commissionWarn}</Line> : null}
               {subscriptionWarn ? <Line tone="warning">{subscriptionWarn}</Line> : null}
-              {!isFounderDriver(driver) &&
-              commission.mode !== 'free' &&
-              subscription.mode !== 'free' ? (
+              {!isFounderDriver(driver) && commission.mode !== 'free' && subscription.mode !== 'free' ? (
                 <Line>Nenhum benefício ativo no momento.</Line>
               ) : null}
             </AppCard>
 
-            {/* DISPONIBILIDADE */}
             <AppCard>
-              <SectionTitle>DISPONIBILIDADE</SectionTitle>
-              <View
-                style={{
-                  flexDirection: stackAvailabilityButtons ? 'column' : 'row',
-                  gap: spacing.sm,
-                }}
-              >
+              <SectionTitle>DISPONIBILIDADE E GPS</SectionTitle>
+              <Line>
+                Quando disponível, sua posição é usada para encontrar corridas. Durante a corrida,
+                somente o passageiro daquela corrida vê seu deslocamento ao vivo.
+              </Line>
+              <View style={{ flexDirection: stackAvailabilityButtons ? 'column' : 'row', gap: spacing.sm }}>
                 <AppButton
                   title="Disponível"
                   variant={isAvailable ? 'primary' : 'secondary'}
@@ -249,15 +274,13 @@ export default function DriverHome() {
                   style={stackAvailabilityButtons ? undefined : { flex: 1 }}
                 />
               </View>
+              {isAvailable ? (
+                <Line tone={trackingActive ? 'success' : 'warning'}>
+                  {trackingActive ? 'Localização de trabalho ativa.' : 'Verificando localização de trabalho…'}
+                </Line>
+              ) : null}
               {!eligibility.eligible ? (
-                <View
-                  style={{
-                    backgroundColor: colors.warningBg,
-                    borderRadius: radius.md,
-                    padding: spacing.md,
-                    gap: spacing.xs,
-                  }}
-                >
+                <View style={{ backgroundColor: colors.warningBg, borderRadius: radius.md, padding: spacing.md, gap: spacing.xs }}>
                   <Text style={[{ fontFamily, color: colors.warning }, typography.bodyBold]}>
                     Você ainda não pode ficar disponível.
                   </Text>
@@ -269,7 +292,6 @@ export default function DriverHome() {
               {availabilityError ? <Line tone="warning">{availabilityError}</Line> : null}
             </AppCard>
 
-            {/* ASSINATURA */}
             <AppCard>
               <SectionTitle>ASSINATURA</SectionTitle>
               {subscription.mode === 'free' ? (
@@ -277,9 +299,7 @@ export default function DriverHome() {
               ) : subscription.mode === 'active' ? (
                 <>
                   <Line tone="text">Assinatura ativa.</Line>
-                  {subscription.dateMs ? (
-                    <Line>{`Válida até ${formatDateBR(subscription.dateMs)}`}</Line>
-                  ) : null}
+                  {subscription.dateMs ? <Line>{`Válida até ${formatDateBR(subscription.dateMs)}`}</Line> : null}
                 </>
               ) : (
                 <>
@@ -290,7 +310,6 @@ export default function DriverHome() {
               )}
             </AppCard>
 
-            {/* COMISSÃO */}
             <AppCard>
               <SectionTitle>COMISSÃO</SectionTitle>
               {commission.mode === 'free' ? (
@@ -306,21 +325,17 @@ export default function DriverHome() {
               )}
             </AppCard>
 
-            {/* SALDO DRIVELOCAL */}
             <AppCard>
               <SectionTitle>SALDO DRIVELOCAL</SectionTitle>
               <WalletCard balanceCents={balanceCents} isFounderActive={founderActive} />
               <Line>Será usado para pagar taxas da plataforma quando as comissões forem ativadas.</Line>
-              {walletBlocked ? (
-                <Line tone="warning">Recarregue seu saldo para receber corridas.</Line>
-              ) : null}
+              {walletBlocked ? <Line tone="warning">Recarregue seu saldo para receber corridas.</Line> : null}
               <AppButton title="Ver carteira" variant="ghost" onPress={() => router.push('/wallet')} />
             </AppCard>
 
-            {/* PRÓXIMAS CORRIDAS / EM BREVE */}
             <AppCard>
-              <SectionTitle>PRÓXIMAS CORRIDAS</SectionTitle>
-              <Line>Em breve. As corridas serão ativadas em uma próxima etapa.</Line>
+              <SectionTitle>CORRIDAS</SectionTitle>
+              <Line>Quando você estiver disponível, novas ofertas aparecerão automaticamente.</Line>
             </AppCard>
           </>
         )}
