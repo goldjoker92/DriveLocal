@@ -1,6 +1,6 @@
 // Driver home / operational cockpit.
-// The admin decision remains the source of truth. Going online now also starts
-// the Android foreground/background location service used by dispatch and rides.
+// The admin decision remains the source of truth. Going online also starts the
+// Android foreground/background location service used by dispatch and rides.
 
 import { useEffect, useState } from 'react';
 import { Alert, View, Text, ScrollView, useWindowDimensions } from 'react-native';
@@ -104,8 +104,20 @@ export default function DriverHome() {
       .then(async (data) => {
         if (!active) return;
         setDriver(data);
-        const online = data?.availabilityStatus === AVAILABILITY.ONLINE
-          || data?.availabilityStatus === 'available';
+
+        // Old builds wrote "available", but the secure dispatch accepts only
+        // "online". Fail closed and require a fresh explicit GPS activation.
+        if (data?.availabilityStatus === 'available') {
+          await setDriverAvailability(uid, AVAILABILITY.OFFLINE).catch(() => undefined);
+          if (active) {
+            setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.OFFLINE } : current);
+            setAvailability(AVAILABILITY.OFFLINE);
+            setTrackingActive(false);
+          }
+          return;
+        }
+
+        const online = data?.availabilityStatus === AVAILABILITY.ONLINE;
         setAvailability(online ? AVAILABILITY.ONLINE : AVAILABILITY.OFFLINE);
 
         if (online) {
@@ -141,6 +153,10 @@ export default function DriverHome() {
 
   async function goAvailable() {
     setAvailabilityError('');
+    if (driver?.activeRideId) {
+      router.push({ pathname: '/active-ride', params: { rideId: driver.activeRideId } });
+      return;
+    }
     if (!eligibility.eligible) {
       setAvailabilityError(rideBlockReasonLabel(eligibility.reasonCode));
       return;
@@ -149,7 +165,7 @@ export default function DriverHome() {
 
     setSavingAvailability(true);
     try {
-      let permission = await getDriverTrackingPermissionState();
+      const permission = await getDriverTrackingPermissionState();
       if (permission.status !== 'granted') {
         const consented = await confirmTrackingDisclosure();
         if (!consented) {
@@ -171,6 +187,7 @@ export default function DriverHome() {
       await setDriverAvailability(uid, AVAILABILITY.ONLINE);
       setAvailability(AVAILABILITY.ONLINE);
       setTrackingActive(true);
+      setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.ONLINE } : current);
     } catch (_error) {
       await stopDriverOnlineTracking().catch(() => undefined);
       setTrackingActive(false);
@@ -183,6 +200,10 @@ export default function DriverHome() {
 
   async function goOffline() {
     setAvailabilityError('');
+    if (driver?.activeRideId) {
+      setAvailabilityError('Finalize ou cancele a corrida ativa antes de ficar indisponível.');
+      return;
+    }
     if (!uid || savingAvailability) return;
     setSavingAvailability(true);
     try {
@@ -190,6 +211,7 @@ export default function DriverHome() {
       await stopDriverOnlineTracking();
       setAvailability(AVAILABILITY.OFFLINE);
       setTrackingActive(false);
+      setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.OFFLINE } : current);
     } catch (_error) {
       setAvailabilityError('Não foi possível ficar indisponível. Tente novamente.');
     } finally {
@@ -205,7 +227,7 @@ export default function DriverHome() {
     return num ? `${FOUNDER_LABEL_PT_BR} ${num}` : FOUNDER_LABEL_PT_BR;
   })();
 
-  const balanceCents = (driver && driver.balanceCents) || 0;
+  const balanceCents = Number(driver?.walletBalanceCentavos ?? driver?.balanceCents ?? 0);
   const walletBlocked =
     balanceCents <= WALLET_FALLBACK_LOW_THRESHOLD_CENTS &&
     (driver && (driver.walletStatus === 'required' || driver.walletStatus === 'blocked'));
