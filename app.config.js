@@ -3,9 +3,11 @@ const appJson = require('./app.json');
 const expoConfig = appJson.expo ?? {};
 const googleMapsAndroidApiKey = process.env.GOOGLE_MAPS_ANDROID_API_KEY || '';
 const normalizedAppEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
-const appEnvironment = ['prod', 'production'].includes(normalizedAppEnv)
-  ? 'production'
-  : 'development';
+// Only an explicit development value may enable development behavior. Missing,
+// misspelled or unknown environments are treated as production (fail closed).
+const appEnvironment = ['dev', 'development'].includes(normalizedAppEnv)
+  ? 'development'
+  : 'production';
 const devRideSimulatorEnabled = appEnvironment === 'development'
   && process.env.ENABLE_DEV_RIDE_SIMULATOR === '1';
 
