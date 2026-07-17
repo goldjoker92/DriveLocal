@@ -1,9 +1,9 @@
 // In-memory fake Firestore for deterministic UNIT tests (no emulator, no cloud).
 // Supports the minimal surface used by the domain helpers:
-//   db.collection(name).doc(id?) -> { id, ref, set(data,{merge}), get() }
+//   db.collection(name).doc(id?) -> { id, ref, set(data,{merge}), get(), delete() }
 //   db.collection(name).where(field,'==',value).where(...).limit(n).get()
 //        -> snapshot { size, docs:[{id,data(),ref}], forEach(cb) }
-//   db.runTransaction(fn) -> fn({ get(ref), set(ref,data,{merge}) })
+//   db.runTransaction(fn) -> fn({ get(ref), set(ref,data,{merge}), delete(ref) })
 // Integration/concurrency behavior is covered separately against the emulator.
 
 function makeFakeFirestore() {
@@ -24,11 +24,13 @@ function makeFakeFirestore() {
         const prev = store.get(key);
         store.set(key, opts && opts.merge && prev ? { ...prev, ...data } : { ...data });
       },
+      async delete() {
+        store.delete(key);
+      },
     };
     return ref;
   }
 
-  // Minimal chainable query over one collection (equality filters + limit).
   function makeQuery(collectionName, filters, limit) {
     return {
       where(field, op, value) {
@@ -75,6 +77,9 @@ function makeFakeFirestore() {
         set(ref, data, opts) {
           const prev = store.get(ref._key);
           store.set(ref._key, opts && opts.merge && prev ? { ...prev, ...data } : { ...data });
+        },
+        delete(ref) {
+          store.delete(ref._key);
         },
       };
       return fn(tx);
