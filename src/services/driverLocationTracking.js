@@ -39,9 +39,18 @@ async function writeSafeStatus(status) {
   }
 }
 
+async function authenticatedUid() {
+  // Android may launch this module headlessly. Wait for persisted Firebase Auth
+  // to restore before deciding that the driver is signed out.
+  if (typeof auth.authStateReady === 'function') {
+    await auth.authStateReady();
+  }
+  return auth.currentUser?.uid || null;
+}
+
 async function publishLocation(session, locationObject) {
   const payload = safeTrackingPayload(locationObject);
-  const currentUid = auth.currentUser?.uid;
+  const currentUid = await authenticatedUid();
   if (!payload || !currentUid || currentUid !== session?.driverId) return false;
 
   const nowMs = Date.now();
