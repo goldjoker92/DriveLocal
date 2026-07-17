@@ -56,6 +56,17 @@ export function listenToRide(rideId, onData, onError) {
   );
 }
 
+// The active location document contains one current point only — never a route
+// history. Firestore Rules restrict it to the ride passenger, accepted driver and
+// admins. The backend deletes it at payment/cancellation/terminal transitions.
+export function listenToRideLocation(rideId, onData, onError) {
+  return onSnapshot(
+    doc(db, 'activeRideLocations', rideId),
+    (snap) => onData(snap.exists() ? { rideId: snap.id, ...snap.data() } : null),
+    (err) => onError && onError(err)
+  );
+}
+
 function newer(current, candidate) {
   if (!current) return candidate;
   return Number(candidate.createdAtMs || 0) > Number(current.createdAtMs || 0) ? candidate : current;
@@ -63,9 +74,6 @@ function newer(current, candidate) {
 
 const TERMINAL_DRIVER_RIDE_STATUSES = new Set(['completed', 'cancelled', 'disputed']);
 
-// Live targeted offer for the signed-in driver. When rideId is supplied, only
-// that ride can drive the active screen. Terminal historical accepted offers are
-// ignored so they never hide a new incoming offer.
 export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
   const q = query(collection(db, 'driverOffers'), where('driverId', '==', driverUid));
   return onSnapshot(
