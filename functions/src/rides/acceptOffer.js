@@ -1,14 +1,8 @@
 // @ts-check
 // acceptDriverOfferSecure — a driver accepts a targeted offer. One Firestore
 // transaction validates the offer/ride/driver/eligibility/wallet and atomically
-// assigns the ride, marks the offer, and places the commission hold.
-//
-// Concurrency (first-wins): the transaction only commits when ride.status is
-// still 'searching'. A second driver committing against an already-assigned ride
-// re-reads 'assigned' and fails with RIDE_ALREADY_ACCEPTED — exactly one winner.
-//
-// Idempotency: a repeat by the SAME winning driver returns success without a
-// second hold or notification event.
+// assigns the ride, marks the offer, places the commission hold and starts the
+// single-current-point live-location document consumed by the passenger map.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -29,8 +23,6 @@ function safeText(value, fallback, max = 80) {
   return (text || fallback).slice(0, max);
 }
 
-// Only the fields a passenger needs to recognize the assigned vehicle. No phone,
-// CPF, Pix key, documents, wallet or internal moderation fields are copied.
 function publicDriverSummary(driver, vehicleType) {
   return {
     name: safeText(driver.fullName, 'Motorista DriveLocal'),
@@ -42,11 +34,18 @@ function publicDriverSummary(driver, vehicleType) {
   };
 }
 
-// Determines the required commission hold for THIS driver on THIS ride.
 function resolveHold(driver, ride, nowMs) {
   const commissionFree = driver.commissionFreeUntil != null && Number(driver.commissionFreeUntil) > nowMs;
   if (commissionFree) return { holdAmount: 0, commissionFree: true };
   return { holdAmount: Number(ride.estimatedCommissionCentavos || 0), commissionFree: false };
+}
+
+function trackingLocationFromDriver(driver) {
+  const lat = Number(driver?.location?.lat);
+  const lng = Number(driver?.location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 /**
@@ -79,6 +78,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     const rideRef = db.collection(C.RIDE_REQUESTS).doc(offer.rideId);
     const driverRef = db.collection(C.DRIVERS).doc(driverId);
     const holdRef = db.collection(C.WALLET_TRANSACTIONS).doc(`${offer.rideId}_hold`);
+    const trackingRef = db.collection(C.ACTIVE_RIDE_LOCATIONS).doc(offer.rideId);
     const rideSnap = await tx.get(rideRef);
     const driverSnap = await tx.get(driverRef);
     const holdSnap = await tx.get(holdRef);
@@ -157,6 +157,25 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       { merge: true }
     );
 
+    const initialLocation = trackingLocationFromDriver(driver);
+    if (initialLocation) {
+      tx.set(
+        trackingRef,
+        {
+          rideId: offer.rideId,
+          driverId,
+          vehicleType: driver.vehicleType === 'moto' ? 'moto' : 'car',
+          location: initialLocation,
+          accuracyMeters: Number.isFinite(Number(driver.locationAccuracyMeters)) ? Number(driver.locationAccuracyMeters) : null,
+          headingDegrees: Number.isFinite(Number(driver.locationHeadingDegrees)) ? Number(driver.locationHeadingDegrees) : null,
+          speedMps: Number.isFinite(Number(driver.locationSpeedMps)) ? Number(driver.locationSpeedMps) : null,
+          updatedAtMs: nowMs,
+          updatedAt: ts(),
+        },
+        { merge: true }
+      );
+    }
+
     if (holdAmount > 0 && !holdSnap.exists) {
       tx.set(holdRef, {
         driverId,
@@ -234,4 +253,4 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
   return safeAcceptanceView(rideId, result.ride, result.holdAmount);
 }
 
-module.exports = { acceptDriverOfferSecure, resolveHold, publicDriverSummary };
+module.exports = { acceptDriverOfferSecure, resolveHold, publicDriverSummary, trackingLocationFromDriver };
