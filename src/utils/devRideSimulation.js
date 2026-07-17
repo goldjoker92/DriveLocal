@@ -24,13 +24,28 @@ export function shouldUseLiveSimulationStart(startValue, targetValue) {
   return distanceDegrees >= 0.001 && distanceDegrees <= 0.05;
 }
 
+// When no suitable live point exists, start roughly 900 m from the target. This
+// keeps the visual test inside the same local area without a real vehicle.
+export function createFallbackSimulationStart(targetValue, direction = 1) {
+  const target = normalizeTrackingPoint(targetValue);
+  if (!target) return null;
+  const sign = direction < 0 ? -1 : 1;
+  return {
+    lat: target.lat - (0.0065 * sign),
+    lng: target.lng - (0.0055 * sign),
+  };
+}
+
 // Generates an in-memory curved interpolation. It is intentionally NOT persisted
 // as route history: Firestore still receives one current point only.
 export function buildDevSimulationRoute(startValue, targetValue, requestedSteps = DEV_SIMULATION_DEFAULT_STEPS) {
-  const start = normalizeTrackingPoint(startValue);
+  const providedStart = normalizeTrackingPoint(startValue);
   const target = normalizeTrackingPoint(targetValue);
-  if (!start || !target) return [];
+  if (!providedStart || !target) return [];
 
+  const start = shouldUseLiveSimulationStart(providedStart, target)
+    ? providedStart
+    : createFallbackSimulationStart(target);
   const steps = clampSteps(requestedSteps);
   const deltaLat = target.lat - start.lat;
   const deltaLng = target.lng - start.lng;
@@ -47,18 +62,6 @@ export function buildDevSimulationRoute(startValue, targetValue, requestedSteps 
       lng: start.lng + (deltaLng * progress) + (perpendicularLng * curve),
     };
   });
-}
-
-// When no suitable live point exists, start roughly 900 m from the target. This
-// keeps the visual test inside the same local area without a real vehicle.
-export function createFallbackSimulationStart(targetValue, direction = 1) {
-  const target = normalizeTrackingPoint(targetValue);
-  if (!target) return null;
-  const sign = direction < 0 ? -1 : 1;
-  return {
-    lat: target.lat - (0.0065 * sign),
-    lng: target.lng - (0.0055 * sign),
-  };
 }
 
 export function devSimulationProgress(stepIndex, stepCount) {
