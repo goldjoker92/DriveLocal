@@ -44,6 +44,10 @@ function numberParam(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function hasNumericValue(value) {
+  return value != null && value !== '' && Number.isFinite(Number(value));
+}
+
 export default function Searching() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -139,9 +143,9 @@ export default function Searching() {
   const canRetry = ['no_driver_available', 'dispatch_failed'].includes(status);
   const label = STATUS_LABEL[status] || 'Atualizando sua corrida…';
   const vehicleLabel = VEHICLE_LABELS_PT_BR[ride?.vehicleType] || '—';
-  const fareAvailable = Number.isFinite(Number(ride?.estimatedFareCentavos));
-  const distanceAvailable = Number.isFinite(Number(ride?.routeDistanceMeters));
-  const durationAvailable = Number.isFinite(Number(ride?.routeDurationSeconds));
+  const fareAvailable = hasNumericValue(ride?.estimatedFareCentavos);
+  const distanceAvailable = hasNumericValue(ride?.routeDistanceMeters);
+  const durationAvailable = hasNumericValue(ride?.routeDurationSeconds);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
