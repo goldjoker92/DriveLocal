@@ -3,12 +3,13 @@
 // Real secure flow:
 //   1. collect/confirm pickup + destination labels;
 //   2. resolve both points to real coordinates (GPS or native geocoder);
-//   3. call createRideRequestSecure, where routing, geofence, pricing and dispatch
-//      remain server-authoritative;
+//   3. call createRideRequestSecure, where routing, the official Horizonte
+//      geofence, pricing and dispatch remain server-authoritative;
 //   4. continue to /searching with the returned quote summary.
 //
 // The client never writes rideRequests directly and never supplies fare,
-// distance, duration, commission or service-area values.
+// distance, duration, commission or service-area values. No runtime service-area
+// mock participates in the request decision.
 
 import { useEffect, useRef, useState } from 'react';
 import { ScrollView, View, Text, Pressable } from 'react-native';
@@ -28,8 +29,7 @@ import {
   resolveAddressToCoords,
 } from '../../services/locationService';
 import { requestRide } from '../../services/ridesService';
-import { checkOriginServiceArea } from '../../utils/serviceArea';
-import { showAppAlert, showConfirmAlert } from '../../utils/alertUtils';
+import { showAppAlert } from '../../utils/alertUtils';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { VEHICLE_TYPES, VEHICLE_LABELS_PT_BR, VEHICLE_MOTO } from '../../constants/vehicleTypes';
 
@@ -104,8 +104,6 @@ export default function RequestRide() {
   const [originReferenceText, setOriginReferenceText] = useState('');
   const [originLat, setOriginLat] = useState(null);
   const [originLng, setOriginLng] = useState(null);
-  const [originCity, setOriginCity] = useState('');
-  const [originState, setOriginState] = useState('');
   const [originSource, setOriginSource] = useState('manual');
   const [gpsFound, setGpsFound] = useState(false);
 
@@ -184,8 +182,6 @@ export default function RequestRide() {
 
     setOriginLat(result.lat);
     setOriginLng(result.lng);
-    setOriginCity(result.city || '');
-    setOriginState(result.state || '');
     setOriginSource('gps');
     if (result.addressText) setOriginText(result.addressText);
     setGpsFound(true);
@@ -345,28 +341,8 @@ export default function RequestRide() {
       return;
     }
 
-    // Early UX check for a GPS-derived pickup. The secure backend still validates
-    // pickup and destination against the official Horizonte polygon.
-    const area = checkOriginServiceArea({
-      city: originCity,
-      state: originState,
-      source: originSource,
-    });
-    if (area.status === 'blocked') {
-      showAppAlert('Fora da área', OUT_OF_AREA_MSG);
-      return;
-    }
-    if (area.status === 'undetermined' && originSource === 'gps') {
-      showConfirmAlert({
-        title: 'Confirme sua origem',
-        message: 'Não conseguimos confirmar sua cidade. Confirme que o endereço de origem está em Horizonte.',
-        confirmText: 'Está em Horizonte',
-        cancelText: 'Corrigir',
-        onConfirm: createSecureRide,
-      });
-      return;
-    }
-
+    // The secure backend validates BOTH points against the official Horizonte
+    // polygon before routing or writing the ride.
     createSecureRide();
   }
 
@@ -406,8 +382,6 @@ export default function RequestRide() {
               setOriginSource('manual');
               setOriginLat(null);
               setOriginLng(null);
-              setOriginCity('');
-              setOriginState('');
               setGpsFound(false);
               resetRequestAttempt();
             }}
