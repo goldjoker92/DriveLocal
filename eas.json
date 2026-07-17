@@ -7,7 +7,9 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "node": "20.19.4",
+      "environment": "development",
+      "image": "sdk-56",
+      "node": "22.22.2",
       "android": {
         "buildType": "apk",
         "credentialsSource": "remote"
@@ -19,7 +21,9 @@
     },
     "preview": {
       "distribution": "internal",
-      "node": "20.19.4",
+      "environment": "preview",
+      "image": "sdk-56",
+      "node": "22.22.2",
       "android": {
         "buildType": "apk",
         "credentialsSource": "remote"
@@ -31,7 +35,9 @@
     },
     "production": {
       "distribution": "store",
-      "node": "20.19.4",
+      "environment": "production",
+      "image": "sdk-56",
+      "node": "22.22.2",
       "android": {
         "buildType": "app-bundle",
         "credentialsSource": "remote"
