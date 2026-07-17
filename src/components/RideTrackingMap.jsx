@@ -37,16 +37,21 @@ function regionAround(points) {
   };
 }
 
-export default function RideTrackingMap({ pickup, driverLocation, vehicleType = 'car' }) {
+export default function RideTrackingMap({
+  target,
+  targetTitle = 'Local de embarque',
+  driverLocation,
+  vehicleType = 'car',
+}) {
   const mapRef = useRef(null);
   const [nowMs, setNowMs] = useState(Date.now());
-  const pickupPoint = normalizeTrackingPoint(pickup);
+  const targetPoint = normalizeTrackingPoint(target);
   const driverPoint = normalizeTrackingPoint(driverLocation?.location);
   const fresh = isTrackingLocationFresh(driverLocation, nowMs, DEFAULT_TRACKING_STALE_MS);
 
   const initialRegion = useMemo(
-    () => regionAround([pickupPoint, driverPoint]),
-    [pickupPoint?.lat, pickupPoint?.lng, driverPoint?.lat, driverPoint?.lng]
+    () => regionAround([targetPoint, driverPoint]),
+    [targetPoint?.lat, targetPoint?.lng, driverPoint?.lat, driverPoint?.lng]
   );
 
   useEffect(() => {
@@ -55,10 +60,10 @@ export default function RideTrackingMap({ pickup, driverLocation, vehicleType = 
   }, []);
 
   useEffect(() => {
-    if (!mapRef.current || !pickupPoint || !driverPoint) return;
+    if (!mapRef.current || !targetPoint || !driverPoint) return;
     mapRef.current.fitToCoordinates(
       [
-        { latitude: pickupPoint.lat, longitude: pickupPoint.lng },
+        { latitude: targetPoint.lat, longitude: targetPoint.lng },
         { latitude: driverPoint.lat, longitude: driverPoint.lng },
       ],
       {
@@ -66,11 +71,11 @@ export default function RideTrackingMap({ pickup, driverLocation, vehicleType = 
         edgePadding: { top: 54, right: 54, bottom: 54, left: 54 },
       }
     );
-  }, [driverPoint?.lat, driverPoint?.lng, pickupPoint?.lat, pickupPoint?.lng]);
+  }, [driverPoint?.lat, driverPoint?.lng, targetPoint?.lat, targetPoint?.lng]);
 
   function recenter() {
     if (!mapRef.current) return;
-    mapRef.current.animateToRegion(regionAround([pickupPoint, driverPoint]), 350);
+    mapRef.current.animateToRegion(regionAround([targetPoint, driverPoint]), 350);
   }
 
   return (
@@ -96,10 +101,10 @@ export default function RideTrackingMap({ pickup, driverLocation, vehicleType = 
           toolbarEnabled={false}
           moveOnMarkerPress={false}
         >
-          {pickupPoint ? (
+          {targetPoint ? (
             <Marker
-              coordinate={{ latitude: pickupPoint.lat, longitude: pickupPoint.lng }}
-              title="Local de embarque"
+              coordinate={{ latitude: targetPoint.lat, longitude: targetPoint.lng }}
+              title={targetTitle}
               pinColor={colors.accent}
             />
           ) : null}
@@ -107,7 +112,7 @@ export default function RideTrackingMap({ pickup, driverLocation, vehicleType = 
           {driverPoint ? (
             <Marker
               coordinate={{ latitude: driverPoint.lat, longitude: driverPoint.lng }}
-              title={vehicleType === 'moto' ? 'Sua moto' : 'Seu motorista'}
+              title={vehicleType === 'moto' ? 'Moto do motorista' : 'Carro do motorista'}
               anchor={{ x: 0.5, y: 0.5 }}
               tracksViewChanges
             >
