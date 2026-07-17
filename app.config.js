@@ -2,9 +2,12 @@ const appJson = require('./app.json');
 
 const expoConfig = appJson.expo ?? {};
 const googleMapsAndroidApiKey = process.env.GOOGLE_MAPS_ANDROID_API_KEY || '';
-const appEnvironment = process.env.APP_ENV === 'prod' ? 'production' : 'development';
+const normalizedAppEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
+const appEnvironment = ['prod', 'production'].includes(normalizedAppEnv)
+  ? 'production'
+  : 'development';
 const devRideSimulatorEnabled = appEnvironment === 'development'
-  && process.env.ENABLE_DEV_RIDE_SIMULATOR !== '0';
+  && process.env.ENABLE_DEV_RIDE_SIMULATOR === '1';
 
 const managedPlugins = new Set([
   '@react-native-firebase/app',
