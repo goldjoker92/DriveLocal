@@ -69,6 +69,41 @@ service cloud.firestore {
       return ['fullName', 'whatsApp', 'displayName', 'updatedAt'];
     }
 
+    function pointValid(point) {
+      return point.lat is number &&
+        point.lng is number &&
+        point.lat >= -90 && point.lat <= 90 &&
+        point.lng >= -180 && point.lng <= 180;
+    }
+
+    function driverLocationFields() {
+      return [
+        'location', 'locationAccuracyMeters', 'locationHeadingDegrees',
+        'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt'
+      ];
+    }
+
+    function driverOperationalUpdateValid() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let locationChanged = changed.hasAny(driverLocationFields());
+      let availabilityChanged = changed.hasAny(['availabilityStatus', 'availabilityUpdatedAt']);
+
+      return (!locationChanged || (
+          request.resource.data.keys().hasAll(driverLocationFields()) &&
+          pointValid(request.resource.data.location) &&
+          request.resource.data.locationUpdatedAtMs is int &&
+          request.resource.data.locationUpdatedAt == request.time &&
+          (request.resource.data.locationAccuracyMeters == null || request.resource.data.locationAccuracyMeters is number) &&
+          (request.resource.data.locationHeadingDegrees == null || request.resource.data.locationHeadingDegrees is number) &&
+          (request.resource.data.locationSpeedMps == null || request.resource.data.locationSpeedMps is number)
+        )) &&
+        (!availabilityChanged || (
+          request.resource.data.availabilityStatus in ['online', 'offline'] &&
+          request.resource.data.availabilityUpdatedAt == request.time
+        )) &&
+        request.resource.data.updatedAt == request.time;
+    }
+
     function liveLocationKeys() {
       return [
         'rideId', 'driverId', 'vehicleType', 'location',
@@ -78,10 +113,7 @@ service cloud.firestore {
     }
 
     function livePointValid(data) {
-      return data.location.lat is number &&
-        data.location.lng is number &&
-        data.location.lat >= -90 && data.location.lat <= 90 &&
-        data.location.lng >= -180 && data.location.lng <= 180;
+      return pointValid(data.location);
     }
 
     function liveOptionalNumbersValid(data) {
@@ -122,7 +154,8 @@ service cloud.firestore {
            .hasOnly(driverAdminReviewSafe())) ||
         (isOwner(driverId) &&
          request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(driverUpdateSafe()));
+           .hasOnly(driverUpdateSafe()) &&
+         driverOperationalUpdateValid());
 
       allow delete: if false;
     }
