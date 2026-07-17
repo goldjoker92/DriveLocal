@@ -1,21 +1,32 @@
-const appJson = require("./app.json");
+const appJson = require('./app.json');
 
 const expoConfig = appJson.expo ?? {};
+const googleMapsAndroidApiKey = process.env.GOOGLE_MAPS_ANDROID_API_KEY || '';
 
 const managedPlugins = new Set([
-  "@react-native-firebase/app",
-  "expo-location",
-  "expo-notifications",
-  "expo-audio",
-  "expo-secure-store",
-  "expo-image",
-  "expo-status-bar",
+  '@react-native-firebase/app',
+  'expo-location',
+  'expo-notifications',
+  'expo-audio',
+  'expo-secure-store',
+  'expo-image',
+  'expo-status-bar',
+  'react-native-maps',
 ]);
 
 const existingPlugins = (expoConfig.plugins ?? []).filter((plugin) => {
   const pluginName = Array.isArray(plugin) ? plugin[0] : plugin;
   return !managedPlugins.has(pluginName);
 });
+
+const mapsPlugin = googleMapsAndroidApiKey
+  ? [
+      'react-native-maps',
+      {
+        androidGoogleMapsApiKey: googleMapsAndroidApiKey,
+      },
+    ]
+  : 'react-native-maps';
 
 module.exports = ({ config }) => ({
   ...config,
@@ -24,31 +35,34 @@ module.exports = ({ config }) => ({
   plugins: [
     ...existingPlugins,
 
-    "@react-native-firebase/app",
+    '@react-native-firebase/app',
 
     [
-      "expo-location",
+      'expo-location',
       {
         locationWhenInUsePermission:
-          "DriveLocal utilise votre position pour rechercher et réaliser des courses.",
+          'O DriveLocal usa sua localização para encontrar corridas próximas e acompanhar a corrida.',
         locationAlwaysAndWhenInUsePermission:
-          "DriveLocal utilise votre position en arrière-plan lorsque vous êtes chauffeur disponible ou pendant une course.",
+          'Quando você fica disponível ou está em uma corrida, o DriveLocal usa sua localização em segundo plano para o despacho e para mostrar seu deslocamento ao passageiro. O rastreamento para quando você fica indisponível.',
         isAndroidBackgroundLocationEnabled: true,
         isAndroidForegroundServiceEnabled: true,
+        androidForegroundServiceIcon: './assets/images/notification-icon.png',
       },
     ],
 
+    mapsPlugin,
+
     [
-      "expo-notifications",
+      'expo-notifications',
       {
-        defaultChannel: "drivelocal-ride-status",
-        icon: "./assets/images/notification-icon.png",
-        color: "#2563EB",
+        defaultChannel: 'drivelocal-ride-status',
+        icon: './assets/images/notification-icon.png',
+        color: '#2563EB',
       },
     ],
 
     [
-      "expo-audio",
+      'expo-audio',
       {
         microphonePermission: false,
         recordAudioAndroid: false,
@@ -57,9 +71,9 @@ module.exports = ({ config }) => ({
       },
     ],
 
-    "expo-secure-store",
-    "expo-image",
-    "expo-status-bar",
+    'expo-secure-store',
+    'expo-image',
+    'expo-status-bar',
   ],
 
   android: {
@@ -68,6 +82,11 @@ module.exports = ({ config }) => ({
     googleServicesFile:
       process.env.GOOGLE_SERVICES_JSON ??
       expoConfig.android?.googleServicesFile ??
-      "./google-services.json",
+      './google-services.json',
+  },
+
+  extra: {
+    ...(expoConfig.extra ?? {}),
+    googleMapsAndroidConfigured: Boolean(googleMapsAndroidApiKey),
   },
 });
