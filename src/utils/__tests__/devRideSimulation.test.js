@@ -76,26 +76,29 @@ describe('DEV simulator native-build gate', () => {
   });
 
   function readExtra(appEnv, flag) {
-    process.env.APP_ENV = appEnv;
-    process.env.ENABLE_DEV_RIDE_SIMULATOR = flag;
+    restoreEnv('APP_ENV', appEnv);
+    restoreEnv('ENABLE_DEV_RIDE_SIMULATOR', flag);
     jest.resetModules();
     const factory = require('../../../app.config');
     return factory({ config: {} }).extra;
   }
 
-  it('enables the lab only for the explicit development build', () => {
-    expect(readExtra('dev', '1')).toEqual(expect.objectContaining({
+  it.each(['dev', 'development'])('enables the lab for explicit APP_ENV=%s', (appEnv) => {
+    expect(readExtra(appEnv, '1')).toEqual(expect.objectContaining({
       appEnvironment: 'development',
       devRideSimulatorEnabled: true,
     }));
   });
 
-  it.each(['prod', 'production'])('fails closed for APP_ENV=%s even if forced on', (appEnv) => {
-    expect(readExtra(appEnv, '1')).toEqual(expect.objectContaining({
-      appEnvironment: 'production',
-      devRideSimulatorEnabled: false,
-    }));
-  });
+  it.each(['prod', 'production', 'staging', undefined])(
+    'fails closed for APP_ENV=%s even if forced on',
+    (appEnv) => {
+      expect(readExtra(appEnv, '1')).toEqual(expect.objectContaining({
+        appEnvironment: 'production',
+        devRideSimulatorEnabled: false,
+      }));
+    }
+  );
 
   it('keeps preview/internal builds clean when explicitly disabled', () => {
     expect(readExtra('dev', '0')).toEqual(expect.objectContaining({
