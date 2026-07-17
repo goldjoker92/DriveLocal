@@ -76,6 +76,11 @@ function geocoderQuery(text) {
   return `${clean}, Horizonte, Ceará, Brasil`;
 }
 
+function hasCoordinates(lat, lng) {
+  if (lat == null || lng == null || lat === '' || lng === '') return false;
+  return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
+}
+
 function clientRideErrorMessage(error) {
   const details = error?.details && typeof error.details === 'object' ? error.details : null;
   const code = details?.code || error?.code || '';
@@ -159,18 +164,20 @@ export default function RequestRide() {
     setLoadingLocation(false);
 
     if (result.status === 'denied') {
-      logRideClientEvent('ride.request.pickup_gps_denied', {
-        step: 'pickup_gps',
-        durationMs: Date.now() - startedAt,
-      }, 'warning');
+      logRideClientEvent(
+        'ride.request.pickup_gps_denied',
+        { step: 'pickup_gps', durationMs: Date.now() - startedAt },
+        'warning'
+      );
       showAppAlert('Localização', 'Permissão negada. Digite seu endereço de origem manualmente.');
       return;
     }
     if (result.status === 'error') {
-      logRideClientEvent('ride.request.pickup_gps_failed', {
-        step: 'pickup_gps',
-        durationMs: Date.now() - startedAt,
-      }, 'warning');
+      logRideClientEvent(
+        'ride.request.pickup_gps_failed',
+        { step: 'pickup_gps', durationMs: Date.now() - startedAt },
+        'warning'
+      );
       showAppAlert('Localização', 'Não foi possível obter sua localização. Digite o endereço manualmente.');
       return;
     }
@@ -194,15 +201,13 @@ export default function RequestRide() {
   }
 
   async function resolveRidePoint({ text, knownLat, knownLng, step }) {
-    const existingLat = Number(knownLat);
-    const existingLng = Number(knownLng);
-    if (Number.isFinite(existingLat) && Number.isFinite(existingLng)) {
+    if (hasCoordinates(knownLat, knownLng)) {
       logRideClientEvent('ride.request.geocode_skipped', {
         step,
         hasPickupCoordinates: step === 'pickup' ? true : undefined,
         hasDestinationCoordinates: step === 'destination' ? true : undefined,
       });
-      return { status: 'ok', lat: existingLat, lng: existingLng };
+      return { status: 'ok', lat: Number(knownLat), lng: Number(knownLng) };
     }
 
     const startedAt = Date.now();
@@ -238,7 +243,7 @@ export default function RequestRide() {
       action: 'requestRide',
       vehicleType,
       originSource,
-      hasPickupCoordinates: Number.isFinite(Number(originLat)) && Number.isFinite(Number(originLng)),
+      hasPickupCoordinates: hasCoordinates(originLat, originLng),
       hasDestinationCoordinates: false,
       originTextLength: originText.trim().length,
       destinationTextLength: destinationText.trim().length,
@@ -284,10 +289,14 @@ export default function RequestRide() {
         idempotencyKeyRef,
       });
 
+      if (!ride?.rideId) {
+        throw new Error('A solicitação não retornou uma corrida válida. Tente novamente.');
+      }
+
       logRideClientEvent('ride.request.navigation_to_searching', {
         action: 'router.replace',
-        rideId: ride?.rideId,
-        resultStatus: ride?.status,
+        rideId: ride.rideId,
+        resultStatus: ride.status,
         vehicleType,
         durationMs: Date.now() - startedAt,
         ride,
@@ -305,12 +314,16 @@ export default function RequestRide() {
         },
       });
     } catch (submitError) {
-      logRideClientEvent('ride.request.submit_failed', {
-        action: 'requestRide',
-        vehicleType,
-        durationMs: Date.now() - startedAt,
-        error: submitError,
-      }, 'error');
+      logRideClientEvent(
+        'ride.request.submit_failed',
+        {
+          action: 'requestRide',
+          vehicleType,
+          durationMs: Date.now() - startedAt,
+          error: submitError,
+        },
+        'error'
+      );
       setError(clientRideErrorMessage(submitError));
     } finally {
       setSubmitting(false);
@@ -365,7 +378,11 @@ export default function RequestRide() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Pedir corrida" subtitle="Embarque e destino em Horizonte / CE" onBack={goBackSafely} />
+        <Header
+          title="Pedir corrida"
+          subtitle="Embarque e destino em Horizonte / CE"
+          onBack={goBackSafely}
+        />
 
         <AppCard>
           <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Origem</Text>
@@ -389,6 +406,8 @@ export default function RequestRide() {
               setOriginSource('manual');
               setOriginLat(null);
               setOriginLng(null);
+              setOriginCity('');
+              setOriginState('');
               setGpsFound(false);
               resetRequestAttempt();
             }}
