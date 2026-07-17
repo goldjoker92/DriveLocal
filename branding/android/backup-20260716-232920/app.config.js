@@ -1,4 +1,4 @@
-const appJson = require("./app.json");
+﻿const appJson = require("./app.json");
 
 const expoConfig = appJson.expo ?? {};
 
@@ -41,9 +41,8 @@ module.exports = ({ config }) => ({
     [
       "expo-notifications",
       {
-        defaultChannel: "drivelocal-ride-status",
-        icon: "./assets/images/notification-icon.png",
-        color: "#2563EB",
+        defaultChannel: "ride-requests",
+        color: "#0F172A",
       },
     ],
 

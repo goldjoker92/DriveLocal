@@ -1,0 +1,34 @@
+{
+  "logo": "DriveLocal D bleu/violet avec trois traits",
+  "background": "#FFFFFF",
+  "assets": {
+    "icon.png": [
+      1024,
+      1024
+    ],
+    "android-icon-foreground.png": [
+      1024,
+      1024
+    ],
+    "android-icon-background.png": [
+      1024,
+      1024
+    ],
+    "android-icon-monochrome.png": [
+      1024,
+      1024
+    ],
+    "notification-icon.png": [
+      96,
+      96
+    ],
+    "splash-icon.png": [
+      512,
+      512
+    ]
+  },
+  "playStore": [
+    512,
+    512
+  ]
+}
