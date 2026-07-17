@@ -81,6 +81,8 @@ export default function DriverAccepted() {
   const canCancel = ride && ['assigned', 'driver_arrived'].includes(ride.status);
   const canPay = ride && ['awaiting_payment', 'payment_marked_sent'].includes(ride.status);
   const showMap = ride && MAP_STATUSES.has(ride.status);
+  const mapTarget = ride?.status === 'in_progress' ? ride?.destination : ride?.pickup;
+  const mapTargetTitle = ride?.status === 'in_progress' ? 'Destino da corrida' : 'Local de embarque';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -103,10 +105,11 @@ export default function DriverAccepted() {
             {showMap ? (
               <AppCard>
                 <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
-                  Acompanhe seu motorista
+                  {ride.status === 'in_progress' ? 'Acompanhe a corrida' : 'Acompanhe seu motorista'}
                 </Text>
                 <RideTrackingMap
-                  pickup={ride.pickup}
+                  target={mapTarget}
+                  targetTitle={mapTargetTitle}
                   driverLocation={driverLocation}
                   vehicleType={driver.vehicleType || ride.vehicleType}
                 />
