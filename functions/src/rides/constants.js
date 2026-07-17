@@ -6,6 +6,7 @@ module.exports = Object.freeze({
   // Collections.
   RIDE_REQUESTS: 'rideRequests',
   DRIVER_OFFERS: 'driverOffers',
+  ACTIVE_RIDE_LOCATIONS: 'activeRideLocations',
   DRIVERS: 'drivers',
   PASSENGERS: 'passengers',
   PRIVATE_DRIVER_DATA: 'privateDriverData',
@@ -31,18 +32,15 @@ module.exports = Object.freeze({
     CANCELLED: 'cancelled',
     DISPUTED: 'disputed',
   }),
-  // A passenger may not open a new ride while one of these is in progress.
   NON_FINAL_RIDE_STATUSES: Object.freeze([
     'searching', 'assigned', 'driver_arrived', 'in_progress', 'awaiting_payment', 'payment_marked_sent',
   ]),
 
-  // Android notification channels (created client-side before token retrieval).
   NOTIFICATION_CHANNELS: Object.freeze({
     RIDE_OFFERS: 'drivelocal-ride-offers',
     RIDE_STATUS: 'drivelocal-ride-status',
   }),
 
-  // notificationEvents.eventType values (also used for deterministic dedupe ids).
   NOTIFICATION_EVENT: Object.freeze({
     OFFER_CREATED: 'offer_created',
     RIDE_ASSIGNED: 'ride_assigned',
@@ -69,22 +67,19 @@ module.exports = Object.freeze({
     EXPIRED: 'expired',
   }),
 
-  // Stable reason codes surfaced in logs / dispatch results (never localized).
   REASON: Object.freeze({
     NO_ELIGIBLE_DRIVERS: 'NO_ELIGIBLE_DRIVERS',
     OFFER_BATCH_FAILED: 'OFFER_BATCH_FAILED',
     OFFERS_CREATED: 'OFFERS_CREATED',
   }),
 
-  // Timing / bounds (defaults; the safe city config may override some).
-  OFFER_TTL_SECONDS: 15, // targeted offer lifetime from server time
-  SEARCH_TTL_SECONDS: 90, // MVP single-wave search window (§F: ~70-90s)
-  MAX_CANDIDATES: 25, // configurable HARD cap; never read an unlimited collection
+  OFFER_TTL_SECONDS: 15,
+  SEARCH_TTL_SECONDS: 90,
+  MAX_CANDIDATES: 25,
   DEFAULT_SEARCH_RADIUS_METERS: 5000,
-  LOCATION_MAX_AGE_MS: 2 * 60 * 1000, // driver location must be this recent
+  LOCATION_MAX_AGE_MS: 2 * 60 * 1000,
 
-  // Wallet gate for standard (post-promotion) drivers.
-  MIN_WALLET_BALANCE_CENTAVOS: 300, // must be strictly greater than R$3,00
+  MIN_WALLET_BALANCE_CENTAVOS: 300,
 
   VEHICLE_TYPES: Object.freeze(['moto', 'car']),
 });
