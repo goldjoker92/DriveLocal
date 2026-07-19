@@ -10,7 +10,8 @@ describe('ride offer lifecycle contract', () => {
     const layout = source('src/app/(driver)/_layout.jsx');
     expect(layout).toContain('listenToMyOffer');
     expect(layout).toContain('getDriver(uid)');
-    expect(layout).toContain('driver?.activeRideId === offer.rideId');
+    expect(layout).toContain('driver?.activeRideId');
+    expect(layout).toContain('driver.activeRideId === offer.rideId');
     expect(layout).toContain("pathname: '/ride-request'");
     expect(layout).toContain("pathname: '/active-ride'");
   });
