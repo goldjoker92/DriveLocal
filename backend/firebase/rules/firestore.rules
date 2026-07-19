@@ -48,7 +48,7 @@ service cloud.firestore {
         'displayName', 'fullName', 'whatsApp', 'cpf', 'pixKeyType', 'pixKey',
         'vehicleType', 'vehicleBrand', 'vehicleModel', 'vehicleColor',
         'vehiclePlate', 'vehicleYear',
-        'profilePhotoUrl', 'profileStatus', 'vehicleStatus', 'documentsStatus',
+        'profilePhotoUrl', 'profileStatus', 'vehicleStatus',
         'selfieUrl', 'selfieStatus',
         'cnhFrenteUrl', 'cnhFrenteStatus', 'cnhVersoUrl', 'cnhVersoStatus',
         'crlvUrl', 'crlvStatus', 'vehiclePhotoUrl', 'vehiclePhotoStatus',
@@ -69,12 +69,19 @@ service cloud.firestore {
       return request.resource.data.profileStatus == 'complete' &&
         request.resource.data.vehicleStatus == 'complete' &&
         request.resource.data.selfieStatus == 'submitted' &&
+        request.resource.data.selfieUrl is string &&
         request.resource.data.cnhFrenteStatus == 'submitted' &&
+        request.resource.data.cnhFrenteUrl is string &&
         request.resource.data.cnhVersoStatus == 'submitted' &&
+        request.resource.data.cnhVersoUrl is string &&
         request.resource.data.crlvStatus == 'submitted' &&
+        request.resource.data.crlvUrl is string &&
         request.resource.data.vehiclePhotoStatus == 'submitted' &&
-        (request.resource.data.vehicleType != 'moto' ||
-          request.resource.data.motofreteStatus == 'submitted');
+        request.resource.data.vehiclePhotoUrl is string &&
+        (request.resource.data.vehicleType != 'moto' || (
+          request.resource.data.motofreteStatus == 'submitted' &&
+          request.resource.data.motofreteUrl is string
+        ));
     }
 
     // First write performed by the documents screen: mark the document package
