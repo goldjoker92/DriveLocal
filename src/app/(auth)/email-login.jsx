@@ -1,14 +1,5 @@
-// ============================================================
-// Email login (route "/email-login"). Iteration 1D — real Firebase Auth.
-// Single email/password screen used by three entry points:
-//   - "Entrar com e-mail" (general)      -> redirect by role
-//   - "Entrar como motorista" (?roleIntent=driver) -> same role redirect
-//   - "Área interna" (?intent=internal)  -> STRICT admin only
-//
-// Role redirect logic lives here (admin/driver/passenger). Driver status->route
-// is delegated to useDriverRedirect() so the mapping stays in one place.
-// All auth/Firestore errors are caught and shown as clean UI messages.
-// ============================================================
+// Email login shared by admin, driver and passenger entry points.
+// Existing accounts reconnect normally and are redirected by their stored role.
 
 import { useState } from 'react';
 import { ScrollView, Text } from 'react-native';
@@ -24,17 +15,16 @@ import { typography, fontFamily } from '../../constants/typography';
 import { loginUser, logoutUser } from '../../services/authService';
 import { useDriverRedirect } from '../../hooks/useDriverRedirect';
 import { showAppAlert } from '../../utils/alertUtils';
+import { loginErrorMessage } from '../../utils/authErrorMessage';
 
 export default function EmailLogin() {
   const router = useRouter();
   const redirectDriver = useDriverRedirect();
   const params = useLocalSearchParams();
 
-  // Entry-point intent. "internal" = Área interna (strict admin). roleIntent is
-  // informational for now (future Google login will use it to create the right
-  // role); email may be passed to pre-fill after a failed lookup.
   const isInternal = params.intent === 'internal';
   const roleIntent = typeof params.roleIntent === 'string' ? params.roleIntent : null;
+  const passengerIntent = roleIntent === 'passenger';
 
   const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
   const [password, setPassword] = useState('');
@@ -42,7 +32,6 @@ export default function EmailLogin() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
-  // Blocks a non-admin who reached the internal entry: message, sign out, home.
   async function denyInternal() {
     console.log('[INTERNAL_ACCESS] non-admin blocked -> signOut + landing');
     try {
@@ -61,9 +50,8 @@ export default function EmailLogin() {
     setLoading(true);
     try {
       console.log(`[AUTH_FLOW] login attempt intent=${isInternal ? 'internal' : 'general'} roleIntent=${roleIntent}`);
-      const result = await loginUser(email.trim(), password);
+      const result = await loginUser(email, password);
 
-      // --- Área interna: STRICT admin only. Never route to driver/passenger. ---
       if (isInternal) {
         if (result.role === 'admin') {
           console.log('[INTERNAL_ACCESS] admin ok -> /(admin)/admin-home');
@@ -74,7 +62,6 @@ export default function EmailLogin() {
         return;
       }
 
-      // --- General login: redirect by role. ---
       if (result.role === 'admin') {
         console.log('[ROLE_REDIRECT] admin -> /(admin)/admin-home');
         router.replace('/(admin)/admin-home');
@@ -94,16 +81,33 @@ export default function EmailLogin() {
         return;
       }
 
-      // Unknown: authenticated but no profile yet. Clean placeholder message —
-      // most likely a new user who should create a driver account.
-      console.log('[ROLE_REDIRECT] unknown role -> profile placeholder message');
-      setInfo('Sua conta ainda não tem um perfil. Crie seu cadastro de motorista para começar.');
+      console.log('[ROLE_REDIRECT] unknown role -> recovery message');
+      setInfo(
+        passengerIntent
+          ? 'Sua conta existe, mas o perfil de passageiro está incompleto. Use “Criar conta de passageiro” abaixo para repará-lo.'
+          : 'Sua conta existe, mas o perfil de motorista está incompleto. Use “Criar cadastro de motorista” abaixo para repará-lo.'
+      );
     } catch (e) {
       console.log('[AUTH_FLOW] login error', e.code || e.message);
-      setError('Não foi possível entrar. Verifique seu e-mail e senha.');
+      setError(loginErrorMessage(e));
     } finally {
       setLoading(false);
     }
+  }
+
+  function openRegistration() {
+    if (passengerIntent) {
+      router.push({
+        pathname: '/passenger-register',
+        params: { email: email.trim(), roleIntent: 'passenger' },
+      });
+      return;
+    }
+
+    router.push({
+      pathname: '/email-register',
+      params: { email: email.trim(), roleIntent: 'driver' },
+    });
   }
 
   return (
@@ -142,12 +146,11 @@ export default function EmailLogin() {
           />
         </AppCard>
 
-        {/* No account-creation shortcut inside the internal entry. */}
         {!isInternal ? (
           <AppButton
-            title="Criar cadastro de motorista"
+            title={passengerIntent ? 'Criar conta de passageiro' : 'Criar cadastro de motorista'}
             variant="ghost"
-            onPress={() => router.push({ pathname: '/email-register', params: { email: email.trim() } })}
+            onPress={openRegistration}
           />
         ) : null}
       </ScrollView>
