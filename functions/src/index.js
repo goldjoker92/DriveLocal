@@ -38,6 +38,9 @@ exports.cancelRideSecure = rideCallables.cancelRideSecure;
 exports.reportRidePaymentIssueSecure = rideCallables.reportRidePaymentIssueSecure;
 exports.resolveRideDisputeSecure = rideCallables.resolveRideDisputeSecure;
 
+const { expireRideOffersTask } = require('./rides/expireOffersTask');
+exports.expireRideOffersTask = expireRideOffersTask;
+
 const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
 exports.processRideNotificationEvent = notificationCallables.processRideNotificationEvent;
