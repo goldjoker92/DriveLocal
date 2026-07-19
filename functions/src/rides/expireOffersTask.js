@@ -16,31 +16,39 @@ function ts() {
 
 /**
  * Idempotently closes expired offers for one ride and ends the search only when
- * the ride is still searching and no live offer remains.
+ * the ride is still searching and no live offer remains. The ride and offers are
+ * read inside one Firestore transaction so acceptance and expiry cannot both win.
  *
  * @param {{db:object, rideId:string, nowMs:number, context?:object}} args
  */
 async function expireRideOffers({ db, rideId, nowMs, context }) {
-  const offersSnap = await db.collection(C.DRIVER_OFFERS).where('rideId', '==', rideId).get();
-  const expiredRefs = [];
-  let liveOfferCount = 0;
-
-  offersSnap.forEach((doc) => {
-    const offer = doc.data() || {};
-    if (offer.status !== C.OFFER_STATUS.OFFERED) return;
-    if (Number(offer.expiresAtMs || 0) > nowMs) liveOfferCount += 1;
-    else expiredRefs.push(doc.ref);
-  });
-
   const rideRef = db.collection(C.RIDE_REQUESTS).doc(rideId);
-  const outcome = await db.runTransaction(async (tx) => {
-    const rideSnap = await tx.get(rideRef);
-    if (!rideSnap.exists) return 'ride_missing';
-    const ride = rideSnap.data() || {};
-    if (ride.status !== C.RIDE_STATUS.SEARCHING) return `ride_${ride.status}`;
+  const offersQuery = db.collection(C.DRIVER_OFFERS).where('rideId', '==', rideId);
 
-    expiredRefs.forEach((ref) => {
-      tx.set(ref, {
+  const result = await db.runTransaction(async (tx) => {
+    const rideSnap = await tx.get(rideRef);
+    if (!rideSnap.exists) {
+      return { outcome: 'ride_missing', expiredOfferCount: 0, liveOfferCount: 0 };
+    }
+
+    const ride = rideSnap.data() || {};
+    if (ride.status !== C.RIDE_STATUS.SEARCHING) {
+      return { outcome: `ride_${ride.status}`, expiredOfferCount: 0, liveOfferCount: 0 };
+    }
+
+    const offersSnap = await tx.get(offersQuery);
+    const expiredDocs = [];
+    let liveOfferCount = 0;
+
+    offersSnap.forEach((doc) => {
+      const offer = doc.data() || {};
+      if (offer.status !== C.OFFER_STATUS.OFFERED) return;
+      if (Number(offer.expiresAtMs || 0) > nowMs) liveOfferCount += 1;
+      else expiredDocs.push(doc);
+    });
+
+    expiredDocs.forEach((doc) => {
+      tx.set(doc.ref, {
         status: C.OFFER_STATUS.CLOSED,
         declineReason: 'expired_server',
         declinedAtMs: nowMs,
@@ -49,25 +57,28 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
       }, { merge: true });
     });
 
-    if (liveOfferCount > 0) return 'live_offers_remain';
+    if (liveOfferCount > 0) {
+      return { outcome: 'live_offers_remain', expiredOfferCount: expiredDocs.length, liveOfferCount };
+    }
 
     tx.set(rideRef, {
       status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE,
       reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS,
       updatedAt: ts(),
     }, { merge: true });
-    return 'search_closed';
+
+    return { outcome: 'search_closed', expiredOfferCount: expiredDocs.length, liveOfferCount: 0 };
   });
 
   logInfo(context, 'ride.offer_expiry.completed', {
     operation: 'expire_offers',
     rideId,
-    expiredOfferCount: expiredRefs.length,
-    liveOfferCount,
-    outcome,
+    expiredOfferCount: result.expiredOfferCount,
+    liveOfferCount: result.liveOfferCount,
+    outcome: result.outcome,
   });
 
-  return { rideId, expiredOfferCount: expiredRefs.length, liveOfferCount, outcome };
+  return { rideId, ...result };
 }
 
 const expireRideOffersTask = onTaskDispatched(
@@ -82,6 +93,7 @@ const expireRideOffersTask = onTaskDispatched(
       logWarning({}, 'ride.offer_expiry.invalid_payload', { operation: 'expire_offers' });
       return { outcome: 'invalid_payload' };
     }
+
     return expireRideOffers({
       db: admin.firestore(),
       rideId,
