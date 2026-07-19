@@ -3,6 +3,7 @@
 
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
@@ -17,24 +18,38 @@ import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
 import { disablePushNotifications } from './notificationsService';
 
 // Creates a Firebase Auth user, then a drivers/{uid} document in "draft" state.
+// If Firestore rejects the profile creation, remove the just-created Auth user so
+// the email is not left blocked by a half-created account.
 // Returns the Firebase user.
 export async function registerDriver(email, password) {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   const user = credential.user;
 
-  await setDoc(doc(db, 'drivers', user.uid), {
-    uid: user.uid,
-    email,
-    verificationStatus: 'draft',
-    profileStatus: 'incomplete',
-    vehicleStatus: 'incomplete',
-    documentsStatus: 'missing',
-    selfieStatus: 'missing',
-    duplicateCheckStatus: 'clear',
-    serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
+  try {
+    await setDoc(doc(db, 'drivers', user.uid), {
+      uid: user.uid,
+      email,
+      verificationStatus: 'draft',
+      profileStatus: 'incomplete',
+      vehicleStatus: 'incomplete',
+      documentsStatus: 'missing',
+      selfieStatus: 'missing',
+      duplicateCheckStatus: 'clear',
+      serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    try {
+      await deleteUser(user);
+    } catch (cleanupError) {
+      console.error(
+        '[AUTH_FLOW] failed to rollback incomplete driver account',
+        cleanupError?.code || cleanupError?.message
+      );
+    }
+    throw error;
+  }
 
   return user;
 }
