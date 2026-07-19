@@ -37,11 +37,21 @@ describe('registration, login and notification regressions', () => {
     expect(authService).toContain("error.code = 'auth/account-role-conflict'");
   });
 
+  it('clears stale device sessions before creating or switching accounts', () => {
+    const authService = source('src/services/authService.js');
+
+    expect(authService).toContain('async function clearAuthenticatedSession()');
+    expect(authService).toContain('if (auth.currentUser)');
+    expect(authService).toContain('await clearAuthenticatedSession()');
+    expect(authService).toContain('await disablePushNotifications()');
+  });
+
   it('normalizes emails and displays actionable registration errors', () => {
     const authService = source('src/services/authService.js');
     const messages = source('src/utils/authErrorMessage.js');
     const driverRegister = source('src/app/(auth)/email-register.jsx');
-    const passengerRegister = source('src/app/(passenger)/passenger-register.jsx');
+    const passengerRegister = source('src/app/(auth)/passenger-register.jsx');
+    const login = source('src/app/(auth)/email-login.jsx');
 
     expect(authService).toContain("trim().toLowerCase()");
     expect(messages).toContain('Este e-mail já possui uma conta');
@@ -49,6 +59,7 @@ describe('registration, login and notification regressions', () => {
     expect(driverRegister).toContain("result.accountState === 'existing'");
     expect(driverRegister).toContain('redirectDriver(result.profile)');
     expect(passengerRegister).toContain("roleIntent: 'passenger'");
+    expect(login).toContain("passengerIntent ? 'Criar conta de passageiro'");
   });
 
   it('keeps the Expo SDK 56 default-sound warning fixed', () => {
