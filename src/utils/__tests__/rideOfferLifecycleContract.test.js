@@ -31,14 +31,18 @@ describe('ride offer lifecycle contract', () => {
 
     expect(offers).toContain('taskQueue(EXPIRY_TASK_NAME)');
     expect(offers).toContain('scheduleTime: new Date(expiresAtMs + 1000)');
-    expect(expiry).toContain('onTaskDispatched');
+    expect(expiry).toContain("require('firebase-functions/tasks')");
     expect(expiry).toContain('const offersSnap = await tx.get(offersQuery)');
     expect(expiry).toContain("status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE");
     expect(index).toContain('exports.expireRideOffersTask = expireRideOffersTask');
   });
 
-  it('keeps lifecycle status mirrored for completed, cancelled and disputed rides', () => {
+  it('mirrors assigned and terminal ride states without timestamp coercion', () => {
+    const acceptance = source('functions/src/rides/acceptOffer.js');
     const lifecycle = source('functions/src/rides/lifecycle.js');
+
+    expect(acceptance).toContain('driverRideStatus: C.RIDE_STATUS.ASSIGNED');
+    expect(acceptance).toContain('toMillis(driver.commissionFreeUntil)');
     expect(lifecycle).toContain('setDriverOfferStatusTx');
     expect(lifecycle).toContain('C.RIDE_STATUS.COMPLETED');
     expect(lifecycle).toContain('C.RIDE_STATUS.CANCELLED');
