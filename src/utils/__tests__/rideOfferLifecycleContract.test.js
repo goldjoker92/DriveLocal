@@ -42,6 +42,19 @@ describe('ride offer lifecycle contract', () => {
     expect(index).toContain('exports.expireRideOffersTask = expireRideOffersTask');
   });
 
+  it('clears passenger activeRideId on every terminal no-driver path', () => {
+    const create = source('functions/src/rides/createRideRequest.js');
+    const expiry = source('functions/src/rides/expireOffersTask.js');
+    const decline = source('functions/src/rides/declineOffer.js');
+
+    expect(create).toContain('clearPassengerActiveRideIfCurrent');
+    expect(create).toContain("dispatch.status === C.RIDE_STATUS.NO_DRIVER_AVAILABLE");
+    expect(expiry).toContain('passengerStateCleared');
+    expect(expiry).toContain('{ activeRideId: null, updatedAt: ts() }');
+    expect(decline).toContain('passengerStateCleared');
+    expect(decline).toContain('{ activeRideId: null, updatedAt: ts() }');
+  });
+
   it('mirrors assigned and terminal ride states without timestamp coercion', () => {
     const acceptance = source('functions/src/rides/acceptOffer.js');
     const lifecycle = source('functions/src/rides/lifecycle.js');
