@@ -12,6 +12,12 @@ const SESSION_KEY = '@drivelocal/driver-location-session-v1';
 const LAST_STATUS_KEY = '@drivelocal/driver-location-last-status-v1';
 const DEV_OVERRIDE_KEY = '@drivelocal/driver-location-dev-override-v1';
 
+// Dispatch rejects a driver location after two minutes. An online driver must
+// therefore publish a heartbeat even while stationary. Active rides use a faster
+// interval; idle-online tracking is slower to limit battery and Firestore writes.
+const ONLINE_HEARTBEAT_INTERVAL_MS = 30_000;
+const ACTIVE_RIDE_INTERVAL_MS = 5_000;
+
 function validIdentifier(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
@@ -105,6 +111,11 @@ async function publishLocation(session, locationObject) {
   }
 
   await writeSafeStatus(session.rideId ? 'active_ride_published' : 'online_published');
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log(
+      `[DRIVER_LOCATION] published mode=${session.rideId ? 'active_ride' : 'online'} atMs=${nowMs}`
+    );
+  }
   return true;
 }
 
@@ -121,8 +132,14 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK)) {
       const latest = locations[locations.length - 1];
       if (!session || !latest) return;
       await publishLocation(session, latest);
-    } catch (_error) {
+    } catch (taskError) {
       await writeSafeStatus('publish_error');
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log(
+          '[DRIVER_LOCATION] background publish error',
+          taskError?.code || taskError?.message || 'unknown'
+        );
+      }
     }
   });
 }
@@ -163,16 +180,25 @@ export async function requestDriverTrackingPermissions() {
   return { status: 'granted' };
 }
 
-async function ensureNativeTaskStarted() {
+async function ensureNativeTaskStarted(rideId = null) {
   const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
-  if (started) return;
+
+  // Expo does not expose the currently running task options. Restart on a mode
+  // change/start so online-idle and active-ride intervals cannot drift apart.
+  if (started) {
+    await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+  }
+
+  const intervalMs = rideId ? ACTIVE_RIDE_INTERVAL_MS : ONLINE_HEARTBEAT_INTERVAL_MS;
 
   await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, {
     accuracy: Location.Accuracy.High,
-    timeInterval: 5_000,
-    distanceInterval: 10,
-    deferredUpdatesInterval: 5_000,
-    deferredUpdatesDistance: 10,
+    timeInterval: intervalMs,
+    // Zero is intentional: a stationary online driver still needs a freshness
+    // heartbeat, otherwise dispatch removes them after LOCATION_MAX_AGE_MS.
+    distanceInterval: 0,
+    deferredUpdatesInterval: intervalMs,
+    deferredUpdatesDistance: 0,
     pausesUpdatesAutomatically: false,
     foregroundService: {
       notificationTitle: 'DriveLocal — localização ativa',
@@ -216,7 +242,7 @@ async function startSession({ driverId, vehicleType, rideId = null, requestPermi
     return { status: 'active', rideId, source: 'dev_simulation' };
   }
 
-  await ensureNativeTaskStarted();
+  await ensureNativeTaskStarted(rideId);
   await publishImmediate(session);
   return { status: 'active', rideId, source: 'native' };
 }
@@ -302,7 +328,7 @@ export async function restoreRealDriverTrackingAfterSimulation() {
 
   const permission = await getDriverTrackingPermissionState();
   if (permission.status !== 'granted') return permission;
-  await ensureNativeTaskStarted();
+  await ensureNativeTaskStarted(session.rideId || null);
   await publishImmediate(session);
   await writeSafeStatus('dev_simulation_native_tracking_restored');
   return { status: 'active', rideId: session.rideId || null, source: 'native' };
@@ -321,7 +347,11 @@ export async function detachActiveRideTracking(rideId) {
   const override = await readDevOverride();
   if (override?.rideId === rideId) await clearDevOverride();
   if (!session || session.rideId !== rideId) return;
-  await writeSession({ ...session, rideId: null, updatedAtMs: Date.now() });
+
+  const onlineSession = { ...session, rideId: null, updatedAtMs: Date.now() };
+  await writeSession(onlineSession);
+  await ensureNativeTaskStarted(null);
+  await publishImmediate(onlineSession);
   await writeSafeStatus('active_ride_detached');
 }
 
