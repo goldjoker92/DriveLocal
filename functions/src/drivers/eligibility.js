@@ -58,7 +58,7 @@ function safeDriverView(driverId, d = {}) {
   return {
     driverId,
     verificationStatus: d.verificationStatus != null ? d.verificationStatus : null,
-    approvalNumber: d.approvalNumber != null ? d.apvalNumber : d.approvalNumber,
+    approvalNumber: d.approvalNumber != null ? d.approvalNumber : null,
     founderEligible: d.founderEligible === true,
     founderNumber: d.founderNumber != null ? d.founderNumber : null,
     approvedAtMs: d.approvedAtMs != null ? d.approvedAtMs : null,
