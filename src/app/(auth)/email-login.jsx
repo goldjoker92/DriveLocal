@@ -13,6 +13,7 @@ import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { loginUser, logoutUser } from '../../services/authService';
+import { requestPasswordReset } from '../../services/passwordResetService';
 import { useDriverRedirect } from '../../hooks/useDriverRedirect';
 import { showAppAlert } from '../../utils/alertUtils';
 import { loginErrorMessage } from '../../utils/authErrorMessage';
@@ -29,6 +30,7 @@ export default function EmailLogin() {
   const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
@@ -95,6 +97,21 @@ export default function EmailLogin() {
     }
   }
 
+  async function handlePasswordReset() {
+    setError('');
+    setInfo('');
+    setResetLoading(true);
+    try {
+      await requestPasswordReset(email);
+      setInfo('Enviamos um link para redefinir sua senha. Verifique também a caixa de spam.');
+    } catch (e) {
+      console.log('[AUTH_FLOW] password reset error', e.code || e.message);
+      setError(loginErrorMessage(e));
+    } finally {
+      setResetLoading(false);
+    }
+  }
+
   function openRegistration() {
     if (passengerIntent) {
       router.push({
@@ -109,6 +126,8 @@ export default function EmailLogin() {
       params: { email: email.trim(), roleIntent: 'driver' },
     });
   }
+
+  const busy = loading || resetLoading;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -142,16 +161,25 @@ export default function EmailLogin() {
           <AppButton
             title={loading ? 'Entrando...' : 'Entrar'}
             onPress={handleLogin}
-            disabled={loading}
+            disabled={busy}
           />
         </AppCard>
 
         {!isInternal ? (
-          <AppButton
-            title={passengerIntent ? 'Criar conta de passageiro' : 'Criar cadastro de motorista'}
-            variant="ghost"
-            onPress={openRegistration}
-          />
+          <>
+            <AppButton
+              title={resetLoading ? 'Enviando...' : 'Esqueci minha senha'}
+              variant="ghost"
+              onPress={handlePasswordReset}
+              disabled={busy}
+            />
+            <AppButton
+              title={passengerIntent ? 'Criar conta de passageiro' : 'Criar cadastro de motorista'}
+              variant="ghost"
+              onPress={openRegistration}
+              disabled={busy}
+            />
+          </>
         ) : null}
       </ScrollView>
     </SafeAreaView>
