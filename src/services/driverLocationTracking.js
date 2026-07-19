@@ -14,8 +14,8 @@ const DEV_OVERRIDE_KEY = '@drivelocal/driver-location-dev-override-v1';
 const LAST_PUBLISH_KEY = '@drivelocal/driver-location-last-publish-v1';
 
 // Backend dispatch accepts a fresh point for five minutes. Native updates remain
-// more frequent so a working driver stays fresh, while the write throttle below
-// prevents Android from replaying a queued batch as hundreds of Firestore writes.
+// more frequent so a working driver stays fresh, while the guards below prevent
+// Android from replaying a queued batch as hundreds of Firestore writes.
 const ONLINE_HEARTBEAT_INTERVAL_MS = 30_000;
 const ACTIVE_RIDE_INTERVAL_MS = 5_000;
 const ONLINE_MIN_PUBLISH_GAP_MS = 20_000;
@@ -23,9 +23,18 @@ const ACTIVE_RIDE_MIN_PUBLISH_GAP_MS = 3_000;
 
 let publishQueue = Promise.resolve();
 let lastThrottleLogAtMs = 0;
+const lastQueuedAtByMode = { online: 0, active_ride: 0 };
 
 function validIdentifier(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+function trackingMode(session) {
+  return session?.rideId ? 'active_ride' : 'online';
+}
+
+function minimumPublishGapMs(session) {
+  return session?.rideId ? ACTIVE_RIDE_MIN_PUBLISH_GAP_MS : ONLINE_MIN_PUBLISH_GAP_MS;
 }
 
 async function readSession() {
@@ -110,33 +119,34 @@ function samePublishMode(last, session, currentUid) {
     && (last?.rideId || null) === (session?.rideId || null);
 }
 
+function reportThrottle(mode, minGapMs) {
+  const nowMs = Date.now();
+  if (nowMs - lastThrottleLogAtMs < 5_000) return;
+  lastThrottleLogAtMs = nowMs;
+  writeSafeStatus(`${mode}_throttled`).catch(() => undefined);
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log(`[DRIVER_LOCATION] burst throttled mode=${mode} minGapMs=${minGapMs}`);
+  }
+}
+
 async function publishLocationUnlocked(session, locationObject, { force = false } = {}) {
   const payload = safeTrackingPayload(locationObject);
   const currentUid = await authenticatedUid();
   if (!payload || !currentUid || currentUid !== session?.driverId) return false;
 
   const nowMs = Date.now();
-  const minGapMs = session.rideId
-    ? ACTIVE_RIDE_MIN_PUBLISH_GAP_MS
-    : ONLINE_MIN_PUBLISH_GAP_MS;
+  const mode = trackingMode(session);
+  const minGapMs = minimumPublishGapMs(session);
   const last = await readLastPublish();
 
+  // Persisted guard survives JS/headless restarts. The in-memory guard in
+  // publishLocation() rejects most burst events before they even join the queue.
   if (
     !force
     && samePublishMode(last, session, currentUid)
     && nowMs - Number(last.atMs) < minGapMs
   ) {
-    await writeSafeStatus(session.rideId ? 'active_ride_throttled' : 'online_throttled');
-    if (
-      typeof __DEV__ !== 'undefined'
-      && __DEV__
-      && nowMs - lastThrottleLogAtMs >= 5_000
-    ) {
-      lastThrottleLogAtMs = nowMs;
-      console.log(
-        `[DRIVER_LOCATION] burst throttled mode=${session.rideId ? 'active_ride' : 'online'} minGapMs=${minGapMs}`
-      );
-    }
+    reportThrottle(mode, minGapMs);
     return false;
   }
 
@@ -174,14 +184,25 @@ async function publishLocationUnlocked(session, locationObject, { force = false 
   });
   await writeSafeStatus(session.rideId ? 'active_ride_published' : 'online_published');
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(
-      `[DRIVER_LOCATION] published mode=${session.rideId ? 'active_ride' : 'online'} atMs=${nowMs}`
-    );
+    console.log(`[DRIVER_LOCATION] published mode=${mode} atMs=${nowMs}`);
   }
   return true;
 }
 
-function publishLocation(session, locationObject, options) {
+function publishLocation(session, locationObject, options = {}) {
+  const mode = trackingMode(session);
+  const minGapMs = minimumPublishGapMs(session);
+  const nowMs = Date.now();
+  const force = options?.force === true;
+
+  // Fast in-memory gate: a 160-event Android replay becomes one queued operation,
+  // rather than 160 AsyncStorage reads followed by 159 rejected Firestore writes.
+  if (!force && nowMs - lastQueuedAtByMode[mode] < minGapMs) {
+    reportThrottle(mode, minGapMs);
+    return Promise.resolve(false);
+  }
+  lastQueuedAtByMode[mode] = nowMs;
+
   const run = publishQueue.then(() => publishLocationUnlocked(session, locationObject, options));
   publishQueue = run.catch(() => undefined);
   return run;
@@ -458,6 +479,8 @@ export async function stopDriverOnlineTracking() {
   if (started) await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   await AsyncStorage.removeItem(SESSION_KEY);
   await AsyncStorage.removeItem(LAST_PUBLISH_KEY);
+  lastQueuedAtByMode.online = 0;
+  lastQueuedAtByMode.active_ride = 0;
   await clearDevOverride();
   await writeSafeStatus('stopped');
 }
