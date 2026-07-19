@@ -23,9 +23,24 @@ service cloud.firestore {
         'fullName', 'whatsApp', 'cpf', 'pixKeyType', 'pixKey',
         'vehicleType', 'vehicleBrand', 'vehicleModel', 'vehicleColor',
         'vehiclePlate', 'vehicleYear', 'profilePhotoUrl',
-        'profileStatus', 'vehicleStatus',
+        'verificationStatus', 'profileStatus', 'vehicleStatus',
+        'documentsStatus', 'selfieStatus', 'duplicateCheckStatus',
         'createdAt', 'updatedAt'
       ];
+    }
+
+    function driverCreateValid(driverId) {
+      return request.resource.data.uid == driverId &&
+        request.resource.data.email is string &&
+        request.resource.data.serviceAreaId == 'HORIZONTE_CE_BR' &&
+        request.resource.data.verificationStatus == 'draft' &&
+        request.resource.data.profileStatus == 'incomplete' &&
+        request.resource.data.vehicleStatus == 'incomplete' &&
+        request.resource.data.documentsStatus == 'missing' &&
+        request.resource.data.selfieStatus == 'missing' &&
+        request.resource.data.duplicateCheckStatus == 'clear' &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time;
     }
 
     function driverUpdateSafe() {
@@ -146,7 +161,8 @@ service cloud.firestore {
       allow read: if isOwner(driverId) || isAdmin();
 
       allow create: if isOwner(driverId) &&
-        request.resource.data.keys().hasOnly(driverCreateSafe());
+        request.resource.data.keys().hasOnly(driverCreateSafe()) &&
+        driverCreateValid(driverId);
 
       allow update: if
         (isAdmin() &&
