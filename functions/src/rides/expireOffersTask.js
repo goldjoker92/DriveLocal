@@ -16,8 +16,8 @@ function ts() {
 
 /**
  * Idempotently closes expired offers for one ride and ends the search only when
- * the ride is still searching and no live offer remains. The ride and offers are
- * read inside one Firestore transaction so acceptance and expiry cannot both win.
+ * the ride is still searching and no live offer remains. The ride, passenger and
+ * offers are read before any write so acceptance and expiry cannot both win.
  *
  * @param {{db:object, rideId:string, nowMs:number, context?:object}} args
  */
@@ -28,14 +28,28 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
   const result = await db.runTransaction(async (tx) => {
     const rideSnap = await tx.get(rideRef);
     if (!rideSnap.exists) {
-      return { outcome: 'ride_missing', expiredOfferCount: 0, liveOfferCount: 0 };
+      return {
+        outcome: 'ride_missing',
+        expiredOfferCount: 0,
+        liveOfferCount: 0,
+        passengerStateCleared: false,
+      };
     }
 
     const ride = rideSnap.data() || {};
     if (ride.status !== C.RIDE_STATUS.SEARCHING) {
-      return { outcome: `ride_${ride.status}`, expiredOfferCount: 0, liveOfferCount: 0 };
+      return {
+        outcome: `ride_${ride.status}`,
+        expiredOfferCount: 0,
+        liveOfferCount: 0,
+        passengerStateCleared: false,
+      };
     }
 
+    const passengerRef = ride.passengerId
+      ? db.collection(C.PASSENGERS).doc(ride.passengerId)
+      : null;
+    const passengerSnap = passengerRef ? await tx.get(passengerRef) : null;
     const offersSnap = await tx.get(offersQuery);
     const expiredDocs = [];
     let liveOfferCount = 0;
@@ -58,7 +72,12 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
     });
 
     if (liveOfferCount > 0) {
-      return { outcome: 'live_offers_remain', expiredOfferCount: expiredDocs.length, liveOfferCount };
+      return {
+        outcome: 'live_offers_remain',
+        expiredOfferCount: expiredDocs.length,
+        liveOfferCount,
+        passengerStateCleared: false,
+      };
     }
 
     tx.set(rideRef, {
@@ -67,7 +86,26 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
       updatedAt: ts(),
     }, { merge: true });
 
-    return { outcome: 'search_closed', expiredOfferCount: expiredDocs.length, liveOfferCount: 0 };
+    let passengerStateCleared = false;
+    if (
+      passengerRef
+      && passengerSnap?.exists
+      && (passengerSnap.data() || {}).activeRideId === rideId
+    ) {
+      tx.set(
+        passengerRef,
+        { activeRideId: null, updatedAt: ts() },
+        { merge: true }
+      );
+      passengerStateCleared = true;
+    }
+
+    return {
+      outcome: 'search_closed',
+      expiredOfferCount: expiredDocs.length,
+      liveOfferCount: 0,
+      passengerStateCleared,
+    };
   });
 
   logInfo(context, 'ride.offer_expiry.completed', {
@@ -75,6 +113,7 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
     rideId,
     expiredOfferCount: result.expiredOfferCount,
     liveOfferCount: result.liveOfferCount,
+    passengerStateCleared: result.passengerStateCleared,
     outcome: result.outcome,
   });
 
