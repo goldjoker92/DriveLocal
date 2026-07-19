@@ -4,7 +4,7 @@
 // open, a notification being tapped, or a client timer continuing to run.
 
 const admin = require('firebase-admin');
-const { onTaskDispatched } = require('firebase-functions/v2/tasks');
+const { onTaskDispatched } = require('firebase-functions/tasks');
 const { logInfo, logWarning } = require('../logging/logger');
 const C = require('./constants');
 
