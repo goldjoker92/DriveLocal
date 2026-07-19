@@ -42,6 +42,20 @@ function sanitizeCoord(value, field) {
   return out;
 }
 
+async function clearPassengerActiveRideIfCurrent({ db, passengerId, rideId }) {
+  const paxRef = db.collection(C.PASSENGERS).doc(passengerId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(paxRef);
+    if (!snap.exists || (snap.data() || {}).activeRideId !== rideId) return false;
+    tx.set(
+      paxRef,
+      { activeRideId: null, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+    return true;
+  });
+}
+
 /**
  * @param {{db:object, request:object, context:object, clock:{now:()=>number}, routingAdapter:object}} args
  */
@@ -185,6 +199,23 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       clock,
     });
 
+    if (
+      dispatch.status === C.RIDE_STATUS.NO_DRIVER_AVAILABLE
+      || dispatch.status === C.RIDE_STATUS.DISPATCH_FAILED
+    ) {
+      const cleared = await clearPassengerActiveRideIfCurrent({
+        db,
+        passengerId,
+        rideId,
+      });
+      logInfo(context, 'ride.passenger_active_ride_cleared', {
+        operation: OPERATION_TYPE,
+        rideId,
+        passengerStateCleared: cleared,
+        finalStatus: dispatch.status,
+      });
+    }
+
     const view = safeRideView(rideId, {
       ...ride,
       status: dispatch.status,
@@ -199,4 +230,4 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
   }
 }
 
-module.exports = { createRideRequestSecure };
+module.exports = { createRideRequestSecure, clearPassengerActiveRideIfCurrent };
