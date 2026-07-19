@@ -3,6 +3,7 @@
 
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth';
@@ -16,13 +17,35 @@ import { auth, db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
 import { disablePushNotifications } from './notificationsService';
 
-// Creates a Firebase Auth user, then a drivers/{uid} document in "draft" state.
-// Returns the Firebase user.
-export async function registerDriver(email, password) {
+async function createAccountWithProfile(email, password, collectionName, buildProfile) {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
   const user = credential.user;
 
-  await setDoc(doc(db, 'drivers', user.uid), {
+  try {
+    await setDoc(doc(db, collectionName, user.uid), buildProfile(user));
+    return user;
+  } catch (error) {
+    // Firebase Auth succeeds before Firestore. If the profile write is rejected,
+    // remove the just-created Auth user so retrying the same email does not fail
+    // with auth/email-already-in-use.
+    try {
+      await deleteUser(user);
+    } catch (rollbackError) {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn(
+          '[AUTH_FLOW] profile creation failed and Auth rollback also failed',
+          rollbackError?.code || rollbackError?.message || 'unknown'
+        );
+      }
+    }
+    throw error;
+  }
+}
+
+// Creates a Firebase Auth user, then a drivers/{uid} document in "draft" state.
+// Returns the Firebase user.
+export async function registerDriver(email, password) {
+  return createAccountWithProfile(email, password, 'drivers', (user) => ({
     uid: user.uid,
     email,
     verificationStatus: 'draft',
@@ -34,9 +57,7 @@ export async function registerDriver(email, password) {
     serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
-
-  return user;
+  }));
 }
 
 // Creates a Firebase Auth user, then a passengers/{uid} document. Iteration 3A.
@@ -44,10 +65,7 @@ export async function registerDriver(email, password) {
 // convenience, but the source of truth is still collection membership.
 export async function registerPassenger(email, password, profile) {
   const p = profile || {};
-  const credential = await createUserWithEmailAndPassword(auth, email, password);
-  const user = credential.user;
-
-  await setDoc(doc(db, 'passengers', user.uid), {
+  return createAccountWithProfile(email, password, 'passengers', (user) => ({
     uid: user.uid,
     email,
     fullName: p.fullName || '',
@@ -56,9 +74,7 @@ export async function registerPassenger(email, password, profile) {
     serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  });
-
-  return user;
+  }));
 }
 
 // Signs the user in, then resolves their role.
