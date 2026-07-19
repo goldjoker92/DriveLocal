@@ -16,10 +16,20 @@ function buildAddressText(place) {
   return parts.filter(Boolean).join(', ');
 }
 
+// Android requires foreground location permission before native geocoding can
+// run. Reuse an existing grant and ask only when the OS still allows a prompt.
+async function ensureForegroundPermission() {
+  let permission = await Location.getForegroundPermissionsAsync();
+  if (permission.status !== 'granted' && permission.canAskAgain) {
+    permission = await Location.requestForegroundPermissionsAsync();
+  }
+  return permission.status === 'granted';
+}
+
 export async function getCurrentLocationWithAddress() {
   try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') return { status: 'denied' };
+    const granted = await ensureForegroundPermission();
+    if (!granted) return { status: 'denied' };
 
     const position = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Balanced,
@@ -51,7 +61,11 @@ export async function getCurrentLocationWithAddress() {
 export async function resolveAddressToCoords(text) {
   const query = (text || '').trim();
   if (query.length < 3) return { status: 'too_short' };
+
   try {
+    const granted = await ensureForegroundPermission();
+    if (!granted) return { status: 'denied' };
+
     const results = await Location.geocodeAsync(query);
     const first = results?.[0];
     if (!first || typeof first.latitude !== 'number' || typeof first.longitude !== 'number') {
