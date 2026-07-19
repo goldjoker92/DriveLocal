@@ -80,18 +80,26 @@ async function recoverExistingAccount({
   }
 
   if (account.role !== 'unknown') {
+    // Do not leave the device silently authenticated as the wrong account type.
+    await signOut(auth);
     throw accountRoleConflict(account.role, requestedRole);
   }
 
   // Legacy/orphan account: Auth exists but no Firestore role profile was ever
   // created. Repair it now using the same validated initial profile as a new user.
-  const profile = await writeRoleProfile(user, collectionName, buildProfile, email);
-  return {
-    user,
-    role: requestedRole,
-    profile,
-    accountState: 'recovered',
-  };
+  try {
+    const profile = await writeRoleProfile(user, collectionName, buildProfile, email);
+    return {
+      user,
+      role: requestedRole,
+      profile,
+      accountState: 'recovered',
+    };
+  } catch (error) {
+    // Keep the Auth account intact, but leave no misleading signed-in session.
+    await signOut(auth);
+    throw error;
+  }
 }
 
 async function createAccountWithProfile({
@@ -103,6 +111,12 @@ async function createAccountWithProfile({
 }) {
   const normalizedEmail = normalizeEmail(email);
   let credential;
+
+  // Registration may be opened while another test account is still signed in.
+  // Start from a clean session so a failed attempt never keeps a stale user active.
+  if (auth.currentUser) {
+    await signOut(auth);
+  }
 
   try {
     credential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
