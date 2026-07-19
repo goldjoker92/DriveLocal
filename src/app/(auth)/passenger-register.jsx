@@ -1,7 +1,5 @@
-// Passenger register (route "/passenger-register"). Iteration 3A.
-// Creates the Firebase user + passengers/{uid} document, then continues straight
-// into the ride-request intent (forwarding any address typed on the landing).
-// Passengers are simple: name + WhatsApp + email + password. No CPF in V1.
+// Passenger registration. New emails create an account; an existing email with
+// the correct password reconnects and repairs a missing passenger profile.
 
 import { useState } from 'react';
 import { ScrollView, Text } from 'react-native';
@@ -15,6 +13,7 @@ import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { registerPassenger } from '../../services/authService';
+import { registrationErrorMessage } from '../../utils/authErrorMessage';
 
 export default function PassengerRegister() {
   const router = useRouter();
@@ -32,15 +31,17 @@ export default function PassengerRegister() {
       setError('Informe seu nome e WhatsApp.');
       return;
     }
+
     setLoading(true);
     try {
       console.log('[AUTH_FLOW] registerPassenger');
-      await registerPassenger(email.trim(), password, {
+      const result = await registerPassenger(email, password, {
         fullName: fullName.trim(),
         whatsApp: whatsApp.trim(),
       });
-      // Continue into the ride-request flow, forwarding any address the
-      // passenger already typed on the landing page.
+      console.log('[AUTH_FLOW] registerPassenger accountState=', result.accountState);
+
+      // New, existing and repaired accounts all continue into the requested ride.
       router.replace({
         pathname: '/request-ride',
         params: {
@@ -50,7 +51,7 @@ export default function PassengerRegister() {
       });
     } catch (e) {
       console.log('[AUTH_FLOW] passenger register error', e.code || e.message);
-      setError('Não foi possível criar a conta. Verifique o e-mail e a senha (mínimo 6 caracteres).');
+      setError(registrationErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -84,13 +85,18 @@ export default function PassengerRegister() {
           {error ? (
             <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
           ) : null}
-          <AppButton title={loading ? 'Criando...' : 'Criar conta'} onPress={handleRegister} disabled={loading} />
+          <AppButton title={loading ? 'Acessando...' : 'Criar conta'} onPress={handleRegister} disabled={loading} />
         </AppCard>
 
         <AppButton
           title="Já tenho conta"
           variant="ghost"
-          onPress={() => router.push({ pathname: '/email-login', params: { email: email.trim() } })}
+          onPress={() =>
+            router.push({
+              pathname: '/email-login',
+              params: { email: email.trim(), roleIntent: 'passenger' },
+            })
+          }
         />
       </ScrollView>
     </SafeAreaView>
