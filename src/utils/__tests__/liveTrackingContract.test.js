@@ -14,8 +14,12 @@ describe('Android live driver tracking contracts', () => {
 
     expect(service).toContain('TaskManager.defineTask');
     expect(service).toContain('Location.startLocationUpdatesAsync');
-    expect(service).toContain('timeInterval: 5_000');
-    expect(service).toContain('distanceInterval: 10');
+    expect(service).toContain('const ACTIVE_RIDE_INTERVAL_MS = 5_000');
+    expect(service).toContain('timeInterval: intervalMs');
+    expect(service).toContain('distanceInterval: 0');
+    expect(service).toContain('const ONLINE_MIN_PUBLISH_GAP_MS = 20_000');
+    expect(service).toContain('const ACTIVE_RIDE_MIN_PUBLISH_GAP_MS = 3_000');
+    expect(service).toContain('lastQueuedAtByMode');
     expect(service).toContain('auth.authStateReady');
     expect(entry).toContain("import './src/services/driverLocationTracking'");
     expect(entry).toContain("import 'expo-router/entry'");
