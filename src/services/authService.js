@@ -22,6 +22,15 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
+async function clearAuthenticatedSession() {
+  try {
+    await disablePushNotifications();
+  } catch (_error) {
+    // Best effort — token cleanup must never block account switching.
+  }
+  await signOut(auth);
+}
+
 function accountRoleConflict(existingRole, requestedRole) {
   const error = new Error(
     `This email is already linked to a ${existingRole} account and cannot be registered as ${requestedRole}.`
@@ -81,7 +90,7 @@ async function recoverExistingAccount({
 
   if (account.role !== 'unknown') {
     // Do not leave the device silently authenticated as the wrong account type.
-    await signOut(auth);
+    await clearAuthenticatedSession();
     throw accountRoleConflict(account.role, requestedRole);
   }
 
@@ -97,7 +106,7 @@ async function recoverExistingAccount({
     };
   } catch (error) {
     // Keep the Auth account intact, but leave no misleading signed-in session.
-    await signOut(auth);
+    await clearAuthenticatedSession();
     throw error;
   }
 }
@@ -115,7 +124,7 @@ async function createAccountWithProfile({
   // Registration may be opened while another test account is still signed in.
   // Start from a clean session so a failed attempt never keeps a stale user active.
   if (auth.currentUser) {
-    await signOut(auth);
+    await clearAuthenticatedSession();
   }
 
   try {
@@ -234,12 +243,7 @@ export async function loginUser(email, password) {
 }
 
 export async function logoutUser() {
-  try {
-    await disablePushNotifications();
-  } catch (_error) {
-    // Best effort — notification cleanup must never block logout.
-  }
-  await signOut(auth);
+  await clearAuthenticatedSession();
 }
 
 export function getCurrentUser() {
