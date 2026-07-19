@@ -1,5 +1,6 @@
 // Auth service — Firebase Auth (email/password) + driver/admin role resolution.
-// Iteration 1A. No WhatsApp OTP, no Storage, no push notifications here.
+// Account creation is idempotent: an existing email with the correct password is
+// signed in and its missing Firestore role profile is repaired when safe.
 
 import {
   createUserWithEmailAndPassword,
@@ -17,17 +18,126 @@ import { auth, db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
 import { disablePushNotifications } from './notificationsService';
 
-async function createAccountWithProfile(email, password, collectionName, buildProfile) {
-  const credential = await createUserWithEmailAndPassword(auth, email, password);
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function accountRoleConflict(existingRole, requestedRole) {
+  const error = new Error(
+    `This email is already linked to a ${existingRole} account and cannot be registered as ${requestedRole}.`
+  );
+  error.code = 'auth/account-role-conflict';
+  error.existingRole = existingRole;
+  error.requestedRole = requestedRole;
+  return error;
+}
+
+async function resolveAccountRole(uid) {
+  const adminSnap = await getDoc(doc(db, 'admins', uid));
+  if (adminSnap.exists()) {
+    return { role: 'admin', profile: adminSnap.data() };
+  }
+
+  const driverSnap = await getDoc(doc(db, 'drivers', uid));
+  if (driverSnap.exists()) {
+    return { role: 'driver', profile: driverSnap.data() };
+  }
+
+  const passengerSnap = await getDoc(doc(db, 'passengers', uid));
+  if (passengerSnap.exists()) {
+    return { role: 'passenger', profile: passengerSnap.data() };
+  }
+
+  return { role: 'unknown', profile: null };
+}
+
+async function writeRoleProfile(user, collectionName, buildProfile, normalizedEmail) {
+  const profile = buildProfile(user, normalizedEmail);
+  await setDoc(doc(db, collectionName, user.uid), profile);
+  return profile;
+}
+
+async function recoverExistingAccount({
+  email,
+  password,
+  collectionName,
+  requestedRole,
+  buildProfile,
+}) {
+  // The email already exists in Firebase Auth. Authenticate it with the password
+  // entered by the user instead of leaving the registration screen blocked.
+  const credential = await signInWithEmailAndPassword(auth, email, password);
+  const user = credential.user;
+  const account = await resolveAccountRole(user.uid);
+
+  if (account.role === requestedRole) {
+    return {
+      user,
+      role: requestedRole,
+      profile: account.profile,
+      accountState: 'existing',
+    };
+  }
+
+  if (account.role !== 'unknown') {
+    throw accountRoleConflict(account.role, requestedRole);
+  }
+
+  // Legacy/orphan account: Auth exists but no Firestore role profile was ever
+  // created. Repair it now using the same validated initial profile as a new user.
+  const profile = await writeRoleProfile(user, collectionName, buildProfile, email);
+  return {
+    user,
+    role: requestedRole,
+    profile,
+    accountState: 'recovered',
+  };
+}
+
+async function createAccountWithProfile({
+  email,
+  password,
+  collectionName,
+  requestedRole,
+  buildProfile,
+}) {
+  const normalizedEmail = normalizeEmail(email);
+  let credential;
+
+  try {
+    credential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+  } catch (error) {
+    if (error?.code !== 'auth/email-already-in-use') {
+      throw error;
+    }
+
+    return recoverExistingAccount({
+      email: normalizedEmail,
+      password,
+      collectionName,
+      requestedRole,
+      buildProfile,
+    });
+  }
+
   const user = credential.user;
 
   try {
-    await setDoc(doc(db, collectionName, user.uid), buildProfile(user));
-    return user;
+    const profile = await writeRoleProfile(
+      user,
+      collectionName,
+      buildProfile,
+      normalizedEmail
+    );
+    return {
+      user,
+      role: requestedRole,
+      profile,
+      accountState: 'created',
+    };
   } catch (error) {
-    // Firebase Auth succeeds before Firestore. If the profile write is rejected,
-    // remove the just-created Auth user so retrying the same email does not fail
-    // with auth/email-already-in-use.
+    // Firebase Auth succeeds before Firestore. Roll back only a genuinely new
+    // Auth user. Existing accounts are never deleted by the recovery path.
     try {
       await deleteUser(user);
     } catch (rollbackError) {
@@ -42,10 +152,8 @@ async function createAccountWithProfile(email, password, collectionName, buildPr
   }
 }
 
-// Creates a Firebase Auth user, then a drivers/{uid} document in "draft" state.
-// Returns the Firebase user.
-export async function registerDriver(email, password) {
-  return createAccountWithProfile(email, password, 'drivers', (user) => ({
+function buildInitialDriverProfile(user, email) {
+  return {
     uid: user.uid,
     email,
     verificationStatus: 'draft',
@@ -57,71 +165,69 @@ export async function registerDriver(email, password) {
     serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  }));
+  };
 }
 
-// Creates a Firebase Auth user, then a passengers/{uid} document. Iteration 3A.
-// Passengers are simple: no CPF, no documents, no vehicle. `role` is stored for
-// convenience, but the source of truth is still collection membership.
-export async function registerPassenger(email, password, profile) {
-  const p = profile || {};
-  return createAccountWithProfile(email, password, 'passengers', (user) => ({
-    uid: user.uid,
+export async function registerDriver(email, password) {
+  return createAccountWithProfile({
     email,
-    fullName: p.fullName || '',
-    whatsApp: p.whatsApp || '',
-    role: 'passenger',
-    serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }));
+    password,
+    collectionName: 'drivers',
+    requestedRole: 'driver',
+    buildProfile: buildInitialDriverProfile,
+  });
+}
+
+export async function registerPassenger(email, password, profile) {
+  const passenger = profile || {};
+  return createAccountWithProfile({
+    email,
+    password,
+    collectionName: 'passengers',
+    requestedRole: 'passenger',
+    buildProfile: (user, normalizedEmail) => ({
+      uid: user.uid,
+      email: normalizedEmail,
+      fullName: passenger.fullName || '',
+      whatsApp: passenger.whatsApp || '',
+      role: 'passenger',
+      serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }),
+  });
 }
 
 // Signs the user in, then resolves their role.
-// Order matters: admins/{uid} first (highest privilege), then drivers/{uid},
-// then passengers/{uid}, otherwise "unknown".
-// Returns { user, role, driver? }.
+// Returns { user, role, driver?, passenger? }.
 export async function loginUser(email, password) {
-  const credential = await signInWithEmailAndPassword(auth, email, password);
+  const normalizedEmail = normalizeEmail(email);
+  const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
   const user = credential.user;
+  const account = await resolveAccountRole(user.uid);
 
-  const adminSnap = await getDoc(doc(db, 'admins', user.uid));
-  if (adminSnap.exists()) {
+  if (account.role === 'admin') {
     return { user, role: 'admin' };
   }
-
-  const driverSnap = await getDoc(doc(db, 'drivers', user.uid));
-  if (driverSnap.exists()) {
-    return { user, role: 'driver', driver: driverSnap.data() };
+  if (account.role === 'driver') {
+    return { user, role: 'driver', driver: account.profile };
   }
-
-  // Passengers are not part of Iteration 1: the collection may not exist yet and
-  // security rules can deny the read. Guard it so an unknown account never
-  // red-screens — a denied/missing read simply falls through to "unknown".
-  try {
-    const passengerSnap = await getDoc(doc(db, 'passengers', user.uid));
-    if (passengerSnap.exists()) {
-      return { user, role: 'passenger' };
-    }
-  } catch (e) {
-    console.log('[AUTH_FLOW] passenger lookup skipped:', e.code || e.message);
+  if (account.role === 'passenger') {
+    return { user, role: 'passenger', passenger: account.profile };
   }
 
   return { user, role: 'unknown' };
 }
 
-// Signs the current user out of Firebase Auth. Disables this device's push token
-// first (best effort) so a signed-out device stops receiving notifications.
 export async function logoutUser() {
   try {
     await disablePushNotifications();
-  } catch (_e) {
-    // best effort — never block logout
+  } catch (_error) {
+    // Best effort — notification cleanup must never block logout.
   }
   await signOut(auth);
 }
 
-// Returns the current Firebase Auth user (or null).
 export function getCurrentUser() {
   return auth.currentUser;
 }
