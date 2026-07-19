@@ -20,12 +20,12 @@ const { resolveEnvironment } = require('../config/environment');
 const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
 const { createRideRequestSecure } = require('./createRideRequest');
 const { acceptDriverOfferSecure } = require('./acceptOffer');
+const { declineDriverOfferSecure } = require('./declineOffer');
 const lifecycle = require('./lifecycle');
 const { resolveRideDispute } = require('./disputeResolution');
 
 const REGION = 'southamerica-east1';
 
-// Binds a lifecycle handler (Firestore + systemClock injected) to a callable.
 function bindLifecycle(name, handler) {
   return onCall(
     { region: REGION },
@@ -57,16 +57,24 @@ const acceptDriverOfferSecureFn = onCall(
   )
 );
 
+const declineDriverOfferSecureFn = onCall(
+  { region: REGION },
+  withCallableBoundary('declineDriverOfferSecure', (request, context) =>
+    declineDriverOfferSecure({ db: admin.firestore(), request, context, clock: systemClock })
+  )
+);
+
 module.exports = {
   createRideRequestSecure: createRideRequestSecureFn,
   acceptDriverOfferSecure: acceptDriverOfferSecureFn,
+  declineDriverOfferSecure: declineDriverOfferSecureFn,
   markDriverArrivedSecure: bindLifecycle('markDriverArrivedSecure', lifecycle.markDriverArrived),
   startRideSecure: bindLifecycle('startRideSecure', lifecycle.startRide),
   finishRideSecure: bindLifecycle('finishRideSecure', lifecycle.finishRide),
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
   confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
   cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide),
-  reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
+  reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportPaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
 };
