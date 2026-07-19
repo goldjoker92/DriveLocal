@@ -35,6 +35,15 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
   });
   const eligible = selectEligibleDrivers(candidates, { pickup: ride.pickup, searchRadiusMeters, clock });
 
+  // Counts only — no UID, coordinates or driver profile data. This makes a
+  // no-driver result distinguishable between an empty query and eligibility/
+  // freshness filtering without leaking sensitive information.
+  logInfo(context, 'ride.dispatch.candidates_evaluated', {
+    ...base,
+    candidateCount: candidates.length,
+    eligibleCount: eligible.length,
+  });
+
   if (eligible.length === 0) {
     await rideRef.set(
       { status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE, reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
