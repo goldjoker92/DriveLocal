@@ -10,7 +10,7 @@ const { assertShape, validateIdentifier, validateIdempotencyKey } = require('../
 const { logInfo, logWarning } = require('../logging/logger');
 const { writeAuditLog } = require('../audit/auditLog');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
-const { evaluateRideEligibility } = require('../drivers/eligibility');
+const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
 const { safeAcceptanceView } = require('./safeViews');
 const C = require('./constants');
 
@@ -35,7 +35,7 @@ function publicDriverSummary(driver, vehicleType) {
 }
 
 function resolveHold(driver, ride, nowMs) {
-  const commissionFree = driver.commissionFreeUntil != null && Number(driver.commissionFreeUntil) > nowMs;
+  const commissionFree = toMillis(driver.commissionFreeUntil) > nowMs;
   if (commissionFree) return { holdAmount: 0, commissionFree: true };
   return { holdAmount: Number(ride.estimatedCommissionCentavos || 0), commissionFree: false };
 }
@@ -149,6 +149,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       offerRef,
       {
         status: C.OFFER_STATUS.ACCEPTED,
+        driverRideStatus: C.RIDE_STATUS.ASSIGNED,
         acceptedAtMs: nowMs,
         acceptedAt: ts(),
         exactPickup: { lat: ride.pickup.lat, lng: ride.pickup.lng, label: ride.pickup.label || null },

@@ -11,6 +11,45 @@
 const C = require('./constants');
 
 /**
+ * Normalizes Firestore Timestamp / Date / epoch-ms values to epoch-ms.
+ *
+ * Never use Number(timestamp) for Firestore Timestamp objects: Timestamp.valueOf
+ * returns a comparison string, not epoch milliseconds. That made founder free
+ * windows and paid subscriptions look expired in backend dispatch even though
+ * the mobile app displayed them as active.
+ *
+ * @param {unknown} value
+ * @returns {number}
+ */
+function toMillis(value) {
+  if (value == null) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (value instanceof Date) return value.getTime();
+
+  if (typeof value === 'object') {
+    const candidate = /** @type {{toMillis?:()=>number,toDate?:()=>Date,seconds?:number,nanoseconds?:number}} */ (value);
+
+    if (typeof candidate.toMillis === 'function') {
+      const millis = Number(candidate.toMillis());
+      return Number.isFinite(millis) ? millis : 0;
+    }
+
+    if (typeof candidate.toDate === 'function') {
+      const date = candidate.toDate();
+      const millis = date instanceof Date ? date.getTime() : 0;
+      return Number.isFinite(millis) ? millis : 0;
+    }
+
+    if (Number.isFinite(candidate.seconds)) {
+      const nanos = Number.isFinite(candidate.nanoseconds) ? Number(candidate.nanoseconds) : 0;
+      return Number(candidate.seconds) * 1000 + Math.floor(nanos / 1e6);
+    }
+  }
+
+  return 0;
+}
+
+/**
  * Minimal, safe projection of a driver document for callable responses.
  * @param {string} driverId
  * @param {object} d driver document data
@@ -39,23 +78,26 @@ function safeDriverView(driverId, d = {}) {
  *   - non-founders: covered for their first FREE_RIDE_LIMIT rides, then need an
  *     active subscription.
  * @param {object} d driver document data
- * @param {{now:()=>number}} clock
+ * @param {{now:()=>number|Date|object}} clock
  */
 function evaluateRideEligibility(d = {}, clock) {
-  const now = clock.now();
+  const rawNow = clock && typeof clock.now === 'function' ? clock.now() : Date.now();
+  const now = toMillis(rawNow) || Date.now();
   const isFounder = d.founderEligible === true;
   const approved = d.verificationStatus === 'approved';
   const blocked = d.isBlocked === true;
 
-  const commissionFree = d.commissionFreeUntil != null && Number(d.commissionFreeUntil) > now;
+  const commissionFreeUntilMs = toMillis(d.commissionFreeUntil);
+  const subscriptionExpiresAtMs = toMillis(d.subscriptionExpiresAt);
+  const subscriptionFreeUntilMs = toMillis(d.subscriptionFreeUntil || d.founderFreeUntil);
+
+  const commissionFree = commissionFreeUntilMs > now;
 
   const activeSubscription =
     d.subscriptionActive === true &&
-    d.subscriptionExpiresAt != null &&
-    Number(d.subscriptionExpiresAt) > now;
+    subscriptionExpiresAtMs > now;
 
-  const founderCovered =
-    isFounder && d.subscriptionFreeUntil != null && Number(d.subscriptionFreeUntil) > now;
+  const founderCovered = isFounder && subscriptionFreeUntilMs > now;
 
   const freeRidesRemaining = !isFounder && Number(d.freeRideCountUsed || 0) < C.FREE_RIDE_LIMIT;
 
@@ -71,4 +113,4 @@ function evaluateRideEligibility(d = {}, clock) {
   };
 }
 
-module.exports = { safeDriverView, evaluateRideEligibility };
+module.exports = { safeDriverView, evaluateRideEligibility, toMillis };

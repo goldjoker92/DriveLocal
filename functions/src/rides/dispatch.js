@@ -3,8 +3,9 @@
 // never left stuck:
 //   - eligible offers created -> ride stays 'searching';
 //   - zero candidates        -> ride becomes 'no_driver_available';
-//   - offer batch failure     -> ride becomes 'dispatch_failed' (safe reasonCode).
-// No multi-wave optimization, no Cloud Tasks, no global pending-ride reads.
+//   - genuine offer/task failure -> ride becomes 'dispatch_failed'.
+// Offer expiry is scheduled server-side after the deterministic offer documents
+// are persisted; duplicate expiry tasks are treated as idempotent success.
 
 const admin = require('firebase-admin');
 const { logInfo, logWarning } = require('../logging/logger');
@@ -35,6 +36,15 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
   });
   const eligible = selectEligibleDrivers(candidates, { pickup: ride.pickup, searchRadiusMeters, clock });
 
+  // Counts only — no UID, coordinates or driver profile data. This makes a
+  // no-driver result distinguishable between an empty query and eligibility/
+  // freshness filtering without leaking sensitive information.
+  logInfo(context, 'ride.dispatch.candidates_evaluated', {
+    ...base,
+    candidateCount: candidates.length,
+    eligibleCount: eligible.length,
+  });
+
   if (eligible.length === 0) {
     await rideRef.set(
       { status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE, reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
@@ -51,6 +61,7 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
       eligible,
       offerTtlSeconds,
       traceId: context && context.traceId,
+      context,
       clock,
     });
     // Ride REMAINS searching while offers are live.
@@ -61,7 +72,12 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
       { status: C.RIDE_STATUS.DISPATCH_FAILED, reasonCode: C.REASON.OFFER_BATCH_FAILED, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
       { merge: true }
     );
-    logWarning(context, 'ride.dispatch.no_candidates', { ...base, normalizedStatus: C.RIDE_STATUS.DISPATCH_FAILED, reasonCode: C.REASON.OFFER_BATCH_FAILED });
+    logWarning(context, 'ride.dispatch.offer_batch_failed', {
+      ...base,
+      normalizedStatus: C.RIDE_STATUS.DISPATCH_FAILED,
+      reasonCode: C.REASON.OFFER_BATCH_FAILED,
+      internalMessage: err?.message || 'unknown dispatch failure',
+    });
     return { status: C.RIDE_STATUS.DISPATCH_FAILED, reasonCode: C.REASON.OFFER_BATCH_FAILED, offersCreated: 0 };
   }
 }

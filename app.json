@@ -41,7 +41,9 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "O DriveLocal usa sua localizaÃ§Ã£o para preencher o endereÃ§o de origem da sua corrida."
+          "locationWhenInUsePermission": "O DriveLocal usa sua localização para preencher o endereço de origem da sua corrida.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ]
     ],
