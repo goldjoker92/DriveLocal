@@ -25,16 +25,35 @@ describe('driver document submission contract', () => {
     expect(rules).toContain("request.resource.data.duplicateCheckStatus == 'pending_admin_review'");
   });
 
-  it('requires every document and prevents driver self-approval', () => {
+  it('requires every uploaded document and prevents driver self-approval', () => {
     const rules = source('backend/firebase/rules/firestore.rules');
 
     expect(rules).toContain("request.resource.data.selfieStatus == 'submitted'");
+    expect(rules).toContain('request.resource.data.selfieUrl is string');
     expect(rules).toContain("request.resource.data.cnhFrenteStatus == 'submitted'");
+    expect(rules).toContain('request.resource.data.cnhFrenteUrl is string');
     expect(rules).toContain("request.resource.data.cnhVersoStatus == 'submitted'");
+    expect(rules).toContain('request.resource.data.cnhVersoUrl is string');
     expect(rules).toContain("request.resource.data.crlvStatus == 'submitted'");
+    expect(rules).toContain('request.resource.data.crlvUrl is string');
     expect(rules).toContain("request.resource.data.vehiclePhotoStatus == 'submitted'");
+    expect(rules).toContain('request.resource.data.vehiclePhotoUrl is string');
     expect(rules).toContain("request.resource.data.motofreteStatus == 'submitted'");
+    expect(rules).toContain('request.resource.data.motofreteUrl is string');
     expect(rules).toContain("resource.data.verificationStatus in ['draft', 'correction_requested']");
     expect(rules).not.toContain("request.resource.data.verificationStatus == 'approved'");
+  });
+
+  it('keeps package submission out of the generic driver update allowlist', () => {
+    const rules = source('backend/firebase/rules/firestore.rules');
+    const safeFunction = rules.slice(
+      rules.indexOf('function driverUpdateSafe()'),
+      rules.indexOf('function requiredDriverDocumentsSubmitted()')
+    );
+
+    expect(safeFunction).not.toContain("'documentsStatus'");
+    expect(safeFunction).not.toContain("'submittedAt'");
+    expect(safeFunction).not.toContain("'verificationStatus'");
+    expect(safeFunction).not.toContain("'duplicateCheckStatus'");
   });
 });
