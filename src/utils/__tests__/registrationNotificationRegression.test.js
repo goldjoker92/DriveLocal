@@ -62,6 +62,16 @@ describe('registration, login and notification regressions', () => {
     expect(login).toContain("passengerIntent ? 'Criar conta de passageiro'");
   });
 
+  it('offers a real Firebase password-reset flow from login', () => {
+    const resetService = source('src/services/passwordResetService.js');
+    const login = source('src/app/(auth)/email-login.jsx');
+
+    expect(resetService).toContain('sendPasswordResetEmail');
+    expect(resetService).toContain('trim().toLowerCase()');
+    expect(login).toContain('requestPasswordReset(email)');
+    expect(login).toContain('Esqueci minha senha');
+  });
+
   it('keeps the Expo SDK 56 default-sound warning fixed', () => {
     const notifications = source('src/services/notificationsService.js');
     const passengerLogger = source('src/utils/clientRideLog.js');
