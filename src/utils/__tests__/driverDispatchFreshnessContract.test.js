@@ -17,15 +17,31 @@ describe('driver dispatch freshness contract', () => {
     expect(plugin[1].isAndroidForegroundServiceEnabled).toBe(true);
   });
 
-  it('publishes a heartbeat even when an online driver is stationary', () => {
+  it('publishes stationary heartbeats without allowing Android write bursts', () => {
     const tracking = source('src/services/driverLocationTracking.js');
 
     expect(tracking).toContain('const ONLINE_HEARTBEAT_INTERVAL_MS = 30_000');
     expect(tracking).toContain('const ACTIVE_RIDE_INTERVAL_MS = 5_000');
+    expect(tracking).toContain('const ONLINE_MIN_PUBLISH_GAP_MS = 20_000');
+    expect(tracking).toContain('const ACTIVE_RIDE_MIN_PUBLISH_GAP_MS = 3_000');
+    expect(tracking).toContain('const LAST_PUBLISH_KEY');
+    expect(tracking).toContain('let publishQueue = Promise.resolve()');
+    expect(tracking).toContain('burst throttled');
     expect(tracking).toContain('distanceInterval: 0');
     expect(tracking).toContain('deferredUpdatesDistance: 0');
     expect(tracking).not.toContain('distanceInterval: 10');
-    expect(tracking).toContain('await ensureNativeTaskStarted(rideId)');
+  });
+
+  it('adds a foreground pulse that repairs a stopped native task', () => {
+    const tracking = source('src/services/driverLocationTracking.js');
+    const layout = source('src/app/(driver)/_layout.jsx');
+
+    expect(tracking).toContain('export async function refreshDriverOnlineHeartbeat()');
+    expect(tracking).toContain('if (!started)');
+    expect(tracking).toContain("await writeSafeStatus('foreground_native_task_restarted')");
+    expect(layout).toContain('const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000');
+    expect(layout).toContain('refreshDriverOnlineHeartbeat');
+    expect(layout).toContain("state === 'active'");
   });
 
   it('normalizes Firestore Timestamp dates in backend driver eligibility', () => {
