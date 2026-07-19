@@ -25,13 +25,17 @@ describe('ride offer lifecycle contract', () => {
     expect(service).toContain("httpsCallable(functions, 'declineDriverOfferSecure')");
   });
 
-  it('schedules offer expiry on the server independently of the driver app', () => {
+  it('schedules expiry server-side without breaking tests or idempotent retries', () => {
     const offers = source('functions/src/rides/offers.js');
     const expiry = source('functions/src/rides/expireOffersTask.js');
     const index = source('functions/src/index.js');
 
     expect(offers).toContain('taskQueue(EXPIRY_TASK_NAME)');
     expect(offers).toContain('scheduleTime: new Date(expiresAtMs + 1000)');
+    expect(offers).toContain("process.env.NODE_ENV === 'test'");
+    expect(offers).toContain('isTaskAlreadyExists(error)');
+    expect(offers).toContain("ride.offer_expiry.duplicate_ignored");
+    expect(offers).toContain("ride.offer_expiry.enqueue_failed");
     expect(expiry).toContain("require('firebase-functions/tasks')");
     expect(expiry).toContain('const offersSnap = await tx.get(offersQuery)');
     expect(expiry).toContain("status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE");
