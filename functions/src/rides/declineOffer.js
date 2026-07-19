@@ -38,8 +38,7 @@ async function finishSearchWhenNoLiveOffer({ db, rideId, nowMs, context }) {
   });
 
   logInfo(context, 'ride.dispatch.all_offers_closed', {
-    operation: 'decline_offer',
-    rideId,
+    operation: 'decline_offer', rideId,
     normalizedStatus: C.RIDE_STATUS.NO_DRIVER_AVAILABLE,
     reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS,
   });
@@ -52,7 +51,9 @@ async function declineDriverOfferSecure({ db, request, context, clock }) {
     throw new AppError(ERROR_CODES.UNAUTHENTICATED, { internalMessage: 'offer decline without authentication' });
   }
 
-  const payload = assertShape(request && request.data, { required: ['offerId'] });
+  const payload = assertShape(request && request.data, {
+    required: ['offerId'], optional: ['reasonCode'],
+  });
   const offerId = validateIdentifier(payload.offerId, 'offerId');
   const offerRef = db.collection(C.DRIVER_OFFERS).doc(offerId);
   const nowMs = clock.now();
@@ -78,10 +79,7 @@ async function declineDriverOfferSecure({ db, request, context, clock }) {
     }, { merge: true });
   });
 
-  if (rideId) {
-    await finishSearchWhenNoLiveOffer({ db, rideId, nowMs, context });
-  }
-
+  if (rideId) await finishSearchWhenNoLiveOffer({ db, rideId, nowMs, context });
   return { offerId, rideId, status: 'closed' };
 }
 
