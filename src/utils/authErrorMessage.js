@@ -4,6 +4,14 @@ const ROLE_LABELS = {
   passenger: 'passageiro',
 };
 
+function isCredentialError(code) {
+  return (
+    code === 'auth/invalid-credential' ||
+    code === 'auth/wrong-password' ||
+    code === 'auth/user-not-found'
+  );
+}
+
 export function registrationErrorMessage(error) {
   const code = error?.code || '';
 
@@ -15,11 +23,7 @@ export function registrationErrorMessage(error) {
     return 'A senha deve ter pelo menos 6 caracteres.';
   }
 
-  if (
-    code === 'auth/invalid-credential' ||
-    code === 'auth/wrong-password' ||
-    code === 'auth/user-not-found'
-  ) {
+  if (isCredentialError(code)) {
     return 'Este e-mail já possui uma conta. Digite a senha correta ou use a opção Entrar.';
   }
 
@@ -41,4 +45,26 @@ export function registrationErrorMessage(error) {
   }
 
   return 'Não foi possível concluir o acesso. Verifique o e-mail e a senha e tente novamente.';
+}
+
+export function loginErrorMessage(error) {
+  const code = error?.code || '';
+
+  if (code === 'auth/invalid-email') {
+    return 'Informe um e-mail válido.';
+  }
+
+  if (isCredentialError(code)) {
+    return 'E-mail ou senha incorretos.';
+  }
+
+  if (code === 'auth/too-many-requests') {
+    return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente novamente.';
+  }
+
+  if (code === 'auth/network-request-failed' || code === 'unavailable') {
+    return 'Sem conexão com o servidor. Verifique sua internet e tente novamente.';
+  }
+
+  return 'Não foi possível entrar agora. Tente novamente.';
 }
