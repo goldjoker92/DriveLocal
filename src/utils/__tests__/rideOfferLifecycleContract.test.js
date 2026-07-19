@@ -6,9 +6,11 @@ function source(relativePath) {
 }
 
 describe('ride offer lifecycle contract', () => {
-  it('surfaces offers globally for the driver', () => {
+  it('surfaces offers globally and recovers only the authoritative active ride', () => {
     const layout = source('src/app/(driver)/_layout.jsx');
     expect(layout).toContain('listenToMyOffer');
+    expect(layout).toContain('getDriver(uid)');
+    expect(layout).toContain('driver?.activeRideId === offer.rideId');
     expect(layout).toContain("pathname: '/ride-request'");
     expect(layout).toContain("pathname: '/active-ride'");
   });
@@ -20,5 +22,26 @@ describe('ride offer lifecycle contract', () => {
     expect(screen).toContain("declineOffer(offer.offerId, 'expired')");
     expect(screen).toContain("declineOffer(offer.offerId, 'driver_declined')");
     expect(service).toContain("httpsCallable(functions, 'declineDriverOfferSecure')");
+  });
+
+  it('schedules offer expiry on the server independently of the driver app', () => {
+    const offers = source('functions/src/rides/offers.js');
+    const expiry = source('functions/src/rides/expireOffersTask.js');
+    const index = source('functions/src/index.js');
+
+    expect(offers).toContain('taskQueue(EXPIRY_TASK_NAME)');
+    expect(offers).toContain('scheduleTime: new Date(expiresAtMs + 1000)');
+    expect(expiry).toContain('onTaskDispatched');
+    expect(expiry).toContain('const offersSnap = await tx.get(offersQuery)');
+    expect(expiry).toContain("status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE");
+    expect(index).toContain('exports.expireRideOffersTask = expireRideOffersTask');
+  });
+
+  it('keeps lifecycle status mirrored for completed, cancelled and disputed rides', () => {
+    const lifecycle = source('functions/src/rides/lifecycle.js');
+    expect(lifecycle).toContain('setDriverOfferStatusTx');
+    expect(lifecycle).toContain('C.RIDE_STATUS.COMPLETED');
+    expect(lifecycle).toContain('C.RIDE_STATUS.CANCELLED');
+    expect(lifecycle).toContain('C.RIDE_STATUS.DISPUTED');
   });
 });
