@@ -31,8 +31,9 @@ describe('registration and notification regressions', () => {
     const notifications = source('src/services/notificationsService.js');
     const passengerLogger = source('src/utils/clientRideLog.js');
 
-    expect(notifications).not.toContain("sound: 'default'");
-    expect(notifications).not.toContain('sound: "default"');
+    // Match only an executable object property. Documentation comments may quote
+    // the forbidden value while explaining why it must not be configured.
+    expect(notifications).not.toMatch(/^\s*sound\s*:\s*['"]default['"]\s*,?\s*$/m);
     expect(passengerLogger).toContain('export function logRideClientEvent');
   });
 });
