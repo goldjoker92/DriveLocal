@@ -5,7 +5,7 @@ function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-describe('registration and notification regressions', () => {
+describe('registration, login and notification regressions', () => {
   it('allows only the validated initial driver profile written by registerDriver', () => {
     const rules = source('backend/firebase/rules/firestore.rules');
 
@@ -18,22 +18,45 @@ describe('registration and notification regressions', () => {
     expect(rules).toContain("request.resource.data.serviceAreaId == 'HORIZONTE_CE_BR'");
   });
 
-  it('removes a new Auth user when its Firestore profile cannot be created', () => {
+  it('rolls back only a newly created Auth user when its Firestore profile fails', () => {
     const authService = source('src/services/authService.js');
 
-    expect(authService).toContain('deleteUser');
-    expect(authService).toContain('createAccountWithProfile');
     expect(authService).toContain('await deleteUser(user)');
-    expect(authService).toContain('throw error');
+    expect(authService).toContain("accountState: 'created'");
+    expect(authService).toContain('Existing accounts are never deleted by the recovery path');
+  });
+
+  it('reconnects an existing email and repairs an orphan Auth account', () => {
+    const authService = source('src/services/authService.js');
+
+    expect(authService).toContain("error?.code !== 'auth/email-already-in-use'");
+    expect(authService).toContain('signInWithEmailAndPassword(auth, email, password)');
+    expect(authService).toContain('resolveAccountRole(user.uid)');
+    expect(authService).toContain("accountState: 'existing'");
+    expect(authService).toContain("accountState: 'recovered'");
+    expect(authService).toContain("error.code = 'auth/account-role-conflict'");
+  });
+
+  it('normalizes emails and displays actionable registration errors', () => {
+    const authService = source('src/services/authService.js');
+    const messages = source('src/utils/authErrorMessage.js');
+    const driverRegister = source('src/app/(auth)/email-register.jsx');
+    const passengerRegister = source('src/app/(passenger)/passenger-register.jsx');
+
+    expect(authService).toContain("trim().toLowerCase()");
+    expect(messages).toContain('Este e-mail já possui uma conta');
+    expect(messages).toContain("code === 'auth/account-role-conflict'");
+    expect(driverRegister).toContain("result.accountState === 'existing'");
+    expect(driverRegister).toContain('redirectDriver(result.profile)');
+    expect(passengerRegister).toContain("roleIntent: 'passenger'");
   });
 
   it('keeps the Expo SDK 56 default-sound warning fixed', () => {
     const notifications = source('src/services/notificationsService.js');
     const passengerLogger = source('src/utils/clientRideLog.js');
 
-    // Match only an executable object property. Documentation comments may quote
-    // the forbidden value while explaining why it must not be configured.
-    expect(notifications).not.toMatch(/^\s*sound\s*:\s*['"]default['"]\s*,?\s*$/m);
+    // Match an executable object property only, not explanatory comments.
+    expect(notifications).not.toMatch(/^\s*sound\s*:\s*['"]default['"]\s*,?/m);
     expect(passengerLogger).toContain('export function logRideClientEvent');
   });
 });
