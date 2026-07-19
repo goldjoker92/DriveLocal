@@ -6,8 +6,12 @@
 // label). The exact address/coordinates are delivered to the winner at acceptance.
 
 const admin = require('firebase-admin');
+const { getFunctions } = require('firebase-admin/functions');
 const { buildNotificationEvent, enqueueEvent } = require('../notifications/events');
 const C = require('./constants');
+
+const REGION = 'southamerica-east1';
+const EXPIRY_TASK_NAME = `locations/${REGION}/functions/expireRideOffersTask`;
 
 // Coarsen a coordinate to ~110 m so a pre-acceptance offer never reveals the
 // passenger's exact location.
@@ -28,6 +32,18 @@ function pickupPreview(pickup) {
   };
 }
 
+async function scheduleOfferExpiry({ rideId, expiresAtMs, traceId }) {
+  const queue = getFunctions().taskQueue(EXPIRY_TASK_NAME);
+  await queue.enqueue(
+    { rideId, traceId: traceId || null },
+    {
+      scheduleTime: new Date(expiresAtMs + 1000),
+      dispatchDeadlineSeconds: 60,
+      id: `expire-${rideId}`,
+    }
+  );
+}
+
 /**
  * @param {{db:object, ride:object, eligible:Array<object>, offerTtlSeconds:number,
  *          traceId?:string, clock:{now:()=>number}}} args
@@ -39,6 +55,8 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
   const preview = pickupPreview(ride.pickup);
   const offerIds = [];
 
+  // Persist every deterministic offer first. If scheduling the authoritative
+  // expiry fails, dispatch fails closed rather than leaving an endless search.
   for (const cand of eligible) {
     const id = offerId(ride.rideId, cand.driverId);
     await db.collection(C.DRIVER_OFFERS).doc(id).set({
@@ -50,11 +68,21 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
       pickupPreview: preview,
       distanceToPickupMeters: cand.distanceToPickupMeters,
       status: C.OFFER_STATUS.OFFERED,
+      driverRideStatus: null,
       createdAtMs: nowMs,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       expiresAtMs,
       traceId: traceId || null,
     });
+    offerIds.push(id);
+  }
+
+  await scheduleOfferExpiry({ rideId: ride.rideId, expiresAtMs, traceId });
+
+  // Notify only after the server expiry task is safely queued.
+  for (let index = 0; index < eligible.length; index += 1) {
+    const cand = eligible[index];
+    const id = offerIds[index];
     await enqueueEvent(
       db,
       buildNotificationEvent({
@@ -69,9 +97,15 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
         nowMs,
       })
     );
-    offerIds.push(id);
   }
+
   return { createdCount: offerIds.length, offerIds };
 }
 
-module.exports = { createTargetedOffers, offerId, pickupPreview };
+module.exports = {
+  createTargetedOffers,
+  offerId,
+  pickupPreview,
+  scheduleOfferExpiry,
+  EXPIRY_TASK_NAME,
+};
