@@ -1,14 +1,6 @@
 // @ts-check
 // Callable bindings for the ride request / dispatch / acceptance domain. Thin
 // adapters over the pure clock-injected handlers.
-//
-// Per the final scope: there are NO callable wrappers for safe reads. The
-// passenger listens to their own rideRequests/{rideId} and the driver listens to
-// driverOffers where driverId == auth.uid — BLOCK 04 Rules already secure both.
-//
-// The routing provider API key is a Secret Manager parameter
-// (ROUTING_PROVIDER_API_KEY), bound only to createRideRequestSecure (the only
-// function that measures a route). Its value is never read or logged here.
 
 const { onCall } = require('firebase-functions/v2/https');
 const { defineSecret } = require('firebase-functions/params');
@@ -74,7 +66,7 @@ module.exports = {
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
   confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
   cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide),
-  reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportPaymentIssue),
+  reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
 };
