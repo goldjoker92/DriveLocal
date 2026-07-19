@@ -48,7 +48,7 @@ service cloud.firestore {
         'displayName', 'fullName', 'whatsApp', 'cpf', 'pixKeyType', 'pixKey',
         'vehicleType', 'vehicleBrand', 'vehicleModel', 'vehicleColor',
         'vehiclePlate', 'vehicleYear',
-        'profilePhotoUrl', 'profileStatus', 'vehicleStatus', 'documentsStatus',
+        'profilePhotoUrl', 'profileStatus', 'vehicleStatus',
         'selfieUrl', 'selfieStatus',
         'cnhFrenteUrl', 'cnhFrenteStatus', 'cnhVersoUrl', 'cnhVersoStatus',
         'crlvUrl', 'crlvStatus', 'vehiclePhotoUrl', 'vehiclePhotoStatus',
@@ -61,6 +61,55 @@ service cloud.firestore {
         'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt',
         'updatedAt'
       ];
+    }
+
+    // A driver may submit only after the profile, vehicle and every required
+    // document are complete. Moto drivers must also submit the motofrete file.
+    function requiredDriverDocumentsSubmitted() {
+      return request.resource.data.profileStatus == 'complete' &&
+        request.resource.data.vehicleStatus == 'complete' &&
+        request.resource.data.selfieStatus == 'submitted' &&
+        request.resource.data.selfieUrl is string &&
+        request.resource.data.cnhFrenteStatus == 'submitted' &&
+        request.resource.data.cnhFrenteUrl is string &&
+        request.resource.data.cnhVersoStatus == 'submitted' &&
+        request.resource.data.cnhVersoUrl is string &&
+        request.resource.data.crlvStatus == 'submitted' &&
+        request.resource.data.crlvUrl is string &&
+        request.resource.data.vehiclePhotoStatus == 'submitted' &&
+        request.resource.data.vehiclePhotoUrl is string &&
+        (request.resource.data.vehicleType != 'moto' || (
+          request.resource.data.motofreteStatus == 'submitted' &&
+          request.resource.data.motofreteUrl is string
+        ));
+    }
+
+    // First write performed by the documents screen: mark the document package
+    // submitted. No verification/admin-controlled field may change here.
+    function driverDocumentsSubmissionValid() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['documentsStatus', 'submittedAt', 'updatedAt']) &&
+        resource.data.verificationStatus in ['draft', 'correction_requested'] &&
+        request.resource.data.documentsStatus == 'submitted' &&
+        request.resource.data.submittedAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        requiredDriverDocumentsSubmitted();
+    }
+
+    // Second write performed by submitForReview: exact transition to the admin
+    // review queue. A driver can never self-approve or choose another status.
+    function driverReviewTransitionValid() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly([
+          'verificationStatus', 'duplicateCheckStatus', 'submittedAt', 'updatedAt'
+        ]) &&
+        resource.data.verificationStatus in ['draft', 'correction_requested'] &&
+        request.resource.data.documentsStatus == 'submitted' &&
+        request.resource.data.verificationStatus == 'pending_review' &&
+        request.resource.data.duplicateCheckStatus == 'pending_admin_review' &&
+        request.resource.data.submittedAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        requiredDriverDocumentsSubmitted();
     }
 
     function driverAdminReviewSafe() {
@@ -168,10 +217,13 @@ service cloud.firestore {
         (isAdmin() &&
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(driverAdminReviewSafe())) ||
-        (isOwner(driverId) &&
-         request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(driverUpdateSafe()) &&
-         driverOperationalUpdateValid());
+        (isOwner(driverId) && (
+          (request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(driverUpdateSafe()) &&
+           driverOperationalUpdateValid()) ||
+          driverDocumentsSubmissionValid() ||
+          driverReviewTransitionValid()
+        ));
 
       allow delete: if false;
     }
