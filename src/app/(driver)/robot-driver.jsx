@@ -62,13 +62,26 @@ export default function RobotDriverScreen() {
 
   async function run(label, action) {
     setBusy(true);
-    console.log('[ROBOT_DRIVER_UI] action.started', { label, atMs: Date.now() });
+    console.log('[ROBOT_DRIVER_UI] action.started', {
+      label,
+      rideId: robot?.rideId,
+      rideStatus: robot?.rideStatus,
+      phase: robot?.phase,
+      atMs: Date.now(),
+    });
     try {
       await action();
-      console.log('[ROBOT_DRIVER_UI] action.succeeded', { label, atMs: Date.now() });
+      console.log('[ROBOT_DRIVER_UI] action.succeeded', {
+        label,
+        rideId: robot?.rideId,
+        rideStatus: robot?.rideStatus,
+        atMs: Date.now(),
+      });
     } catch (error) {
       console.error('[ROBOT_DRIVER_UI] action.failed', {
         label,
+        rideId: robot?.rideId,
+        rideStatus: robot?.rideStatus,
         code: error?.code,
         message: error?.message,
         atMs: Date.now(),
@@ -90,7 +103,13 @@ export default function RobotDriverScreen() {
   }
 
   const enabled = Boolean(robot?.enabled);
-  const canMove = enabled && Boolean(robot?.rideId) && !busy;
+  const hasRide = enabled && Boolean(robot?.rideId);
+  const canMoveToPickup = hasRide && robot?.rideStatus === 'assigned' && !busy;
+  const canMoveToDestination = hasRide && robot?.rideStatus === 'in_progress' && !busy;
+  const canResume = robot?.phase === 'paused'
+    && ((robot?.targetKind === 'pickup' && robot?.rideStatus === 'assigned')
+      || (robot?.targetKind === 'destination' && robot?.rideStatus === 'in_progress'))
+    && !busy;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -154,8 +173,9 @@ export default function RobotDriverScreen() {
       {enabled && (
         <>
           <View style={styles.statusCard}>
-            <Text style={styles.statusLine}>Phase : {robot?.phase}</Text>
+            <Text style={styles.statusLine}>Phase robot : {robot?.phase}</Text>
             <Text style={styles.statusLine}>Course : {robot?.rideId || 'en attente d’une demande client'}</Text>
+            <Text style={styles.statusLine}>Statut réel course : {robot?.rideStatus || '—'}</Text>
             <Text style={styles.statusLine}>Position : {coordinates}</Text>
             <Text style={styles.statusLine}>Vitesse : {robot?.speedKmh} km/h</Text>
             <Text style={styles.statusLine}>Dernier événement : {robot?.lastEvent}</Text>
@@ -163,9 +183,13 @@ export default function RobotDriverScreen() {
             {robot?.errorCode ? <Text style={styles.error}>Erreur : {robot.errorCode}</Text> : null}
           </View>
 
+          <Text style={styles.help}>
+            Pickup autorisé uniquement lorsque la vraie course est « assigned ». Destination autorisée uniquement après « Iniciar corrida ».
+          </Text>
+
           <Action
             label="Aller au pickup"
-            disabled={!canMove}
+            disabled={!canMoveToPickup}
             onPress={() => run('move_to_pickup', () => moveRobotTo('pickup'))}
           />
           <Action
@@ -175,12 +199,12 @@ export default function RobotDriverScreen() {
           />
           <Action
             label="Reprendre"
-            disabled={robot?.phase !== 'paused' || busy}
+            disabled={!canResume}
             onPress={() => resumeRobotDriver()}
           />
           <Action
             label="Aller à destination"
-            disabled={!canMove}
+            disabled={!canMoveToDestination}
             onPress={() => run('move_to_destination', () => moveRobotTo('destination'))}
           />
           <Action
@@ -198,7 +222,7 @@ export default function RobotDriverScreen() {
         <Text style={styles.code}>ROBOT_DRIVER</Text>
         <Text style={styles.code}>ROBOT_DRIVER_UI</Text>
         <Text style={styles.code}>DRIVER_LOCATION</Text>
-        <Text style={styles.help}>Chaque action trace simulationId, driverId, rideId, phase, événement, timestamp et erreur.</Text>
+        <Text style={styles.help}>Chaque action trace simulationId, driverId, rideId, rideStatus, phase, événement, timestamp et erreur.</Text>
       </View>
     </ScrollView>
   );
