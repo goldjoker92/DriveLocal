@@ -2,9 +2,11 @@
 // foreground GPS safety pulse alive across every driver screen.
 
 import { useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { auth } from '../../config/firebase';
+import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
+import { colors } from '../../constants/colors';
 import { getDriver } from '../../services/driverService';
 import { refreshDriverOnlineHeartbeat } from '../../services/driverLocationTracking';
 import { listenToMyOffer } from '../../services/ridesService';
@@ -73,5 +75,40 @@ export default function DriverLayout() {
     });
   }, [router, segments]);
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  const onRobotScreen = segments.includes('robot-driver');
+
+  return (
+    <View style={styles.container}>
+      <Stack screenOptions={{ headerShown: false }} />
+      {DEV_RIDE_SIMULATOR_ENABLED && !onRobotScreen ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Ouvrir Robot Driver"
+          onPress={() => router.push('/robot-driver')}
+          style={styles.robotButton}
+        >
+          <Text style={styles.robotButtonText}>🤖 ROBOT</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  robotButton: {
+    position: 'absolute',
+    right: 14,
+    bottom: 24,
+    minHeight: 44,
+    paddingHorizontal: 15,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.warning,
+    borderWidth: 2,
+    borderColor: colors.white,
+    elevation: 8,
+  },
+  robotButtonText: { color: colors.white, fontWeight: '900', fontSize: 12, letterSpacing: 0.4 },
+});
