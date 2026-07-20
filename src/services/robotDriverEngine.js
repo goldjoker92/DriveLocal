@@ -12,16 +12,20 @@ import { auth, db } from '../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../config/runtimeEnvironment';
 import {
   DRIVER_LOCATION_TASK,
-  attachActiveRideTracking,
   beginDevLocationSimulation,
   publishDevSimulatedLocation,
   restoreRealDriverTrackingAfterSimulation,
 } from './driverLocationTracking';
 
 const STORAGE_KEY = '@drivelocal/robot-driver-v1';
+// Shared intentionally with driverLocationTracking. Writing the ride session
+// before enabling its DEV override avoids one native-GPS publication during the
+// online -> accepted-ride transition.
+const TRACKING_SESSION_KEY = '@drivelocal/driver-location-session-v1';
 const STEP_INTERVAL_MS = 3_000;
 const WAITING_HEARTBEAT_MS = 30_000;
 const ARRIVAL_THRESHOLD_METERS = 12;
+const TERMINAL_RIDE_STATUSES = new Set(['completed', 'cancelled', 'disputed']);
 const listeners = new Set();
 
 const initialState = {
@@ -29,6 +33,7 @@ const initialState = {
   phase: 'idle',
   driverId: null,
   rideId: null,
+  rideStatus: null,
   vehicleType: 'car',
   speedKmh: 20,
   currentPoint: null,
@@ -56,6 +61,7 @@ function trace(event, details = {}, level = 'log') {
     simulationId,
     driverId: state.driverId,
     rideId: state.rideId,
+    rideStatus: state.rideStatus,
     phase: state.phase,
     atMs: Date.now(),
     ...details,
@@ -116,6 +122,12 @@ function ridePoint(kind) {
   return normalizePoint(source);
 }
 
+function movementAllowed(kind, rideStatus = state.rideStatus) {
+  if (kind === 'pickup') return rideStatus === 'assigned';
+  if (kind === 'destination') return rideStatus === 'in_progress';
+  return false;
+}
+
 async function stopNativeTask() {
   try {
     const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
@@ -174,6 +186,13 @@ function stopMovementTimer() {
 
 async function movementTick() {
   if (movementBusy || state.phase !== 'moving' || !state.currentPoint || !state.targetPoint) return;
+  if (!movementAllowed(state.targetKind)) {
+    stopMovementTimer();
+    emit({ phase: 'blocked_by_ride_status', errorCode: 'ROBOT_RIDE_STATUS_CHANGED' }, 'robot.movement_blocked');
+    trace('movement.blocked_by_ride_status', { targetKind: state.targetKind }, 'warn');
+    return;
+  }
+
   movementBusy = true;
   try {
     const remaining = distanceMeters(state.currentPoint, state.targetPoint);
@@ -190,8 +209,10 @@ async function movementTick() {
 
     const next = interpolateStep(state.currentPoint, state.targetPoint, metersPerTick);
     await publishPoint(next, 'movement_tick');
-    const total = distanceMeters(state.currentPoint, state.targetPoint) + remaining;
-    emit({ routeProgress: total > 0 ? Math.max(0, Math.min(1, 1 - remaining / total)) : 0 });
+    const remainingAfter = distanceMeters(next, state.targetPoint);
+    const travelledThisTick = distanceMeters(state.currentPoint, next);
+    const denominator = travelledThisTick + remainingAfter;
+    emit({ routeProgress: denominator > 0 ? Math.max(0, Math.min(1, travelledThisTick / denominator)) : 0 });
   } catch (error) {
     stopMovementTimer();
     emit({ phase: 'failed', errorCode: error?.code || error?.message || 'ROBOT_TICK_FAILED' }, 'robot.failed');
@@ -204,33 +225,59 @@ async function movementTick() {
 async function bindRide(rideId) {
   if (!rideId || rideId === state.rideId) return;
   trace('ride.binding_started', { nextRideId: rideId });
-  emit({ rideId, phase: 'ride_bound' }, 'robot.ride_detected');
+  emit({ rideId, rideStatus: null, phase: 'ride_bound' }, 'robot.ride_detected');
 
-  await attachActiveRideTracking({
+  // Do not call attachActiveRideTracking here: that helper intentionally starts
+  // native GPS before the DEV override exists. Preparing the same secured local
+  // session first keeps simulated GPS authoritative with zero real-GPS flash.
+  await stopNativeTask();
+  await AsyncStorage.setItem(TRACKING_SESSION_KEY, JSON.stringify({
     driverId: state.driverId,
     vehicleType: state.vehicleType,
     rideId,
-    requestPermissions: false,
-  });
+    updatedAtMs: Date.now(),
+  }));
   const simulation = await beginDevLocationSimulation({
     driverId: state.driverId,
     vehicleType: state.vehicleType,
     rideId,
   });
   if (simulation?.status !== 'active') {
-    throw new Error(simulation?.errorCode || 'ROBOT_RIDE_OVERRIDE_FAILED');
+    const error = new Error(simulation?.errorCode || 'ROBOT_RIDE_OVERRIDE_FAILED');
+    error.code = simulation?.errorCode || 'ROBOT_RIDE_OVERRIDE_FAILED';
+    throw error;
   }
+
+  // Seed activeRideLocations immediately so both real screens have a point as
+  // soon as the accepted ride opens, before the operator presses Move.
+  await publishRidePoint(state.currentPoint, 'ride_bound_seed');
 
   if (unsubscribeRide) unsubscribeRide();
   unsubscribeRide = onSnapshot(doc(db, 'rideRequests', rideId), (snapshot) => {
     currentRide = snapshot.exists() ? { rideId: snapshot.id, ...snapshot.data() } : null;
+    const nextStatus = currentRide?.status || null;
     trace('ride.snapshot', {
       exists: Boolean(currentRide),
-      status: currentRide?.status,
+      status: nextStatus,
       hasPickup: Boolean(ridePoint('pickup')),
       hasDestination: Boolean(ridePoint('destination')),
     });
-    emit({}, 'robot.ride_snapshot_received');
+
+    if (TERMINAL_RIDE_STATUSES.has(nextStatus)) {
+      stopMovementTimer();
+      emit({ rideStatus: nextStatus, phase: 'terminal', targetPoint: null, targetKind: null }, 'robot.ride_terminal');
+      trace('ride.terminal', { status: nextStatus });
+      return;
+    }
+
+    if (state.phase === 'moving' && !movementAllowed(state.targetKind, nextStatus)) {
+      stopMovementTimer();
+      emit({ rideStatus: nextStatus, phase: 'blocked_by_ride_status', errorCode: 'ROBOT_RIDE_STATUS_CHANGED' }, 'robot.movement_blocked');
+      trace('movement.blocked_by_ride_status', { targetKind: state.targetKind, nextStatus }, 'warn');
+      return;
+    }
+
+    emit({ rideStatus: nextStatus, errorCode: null }, 'robot.ride_snapshot_received');
   }, (error) => {
     trace('ride.listener_failed', { code: error?.code, message: error?.message }, 'error');
     emit({ errorCode: error?.code || 'ROBOT_RIDE_LISTENER_FAILED' }, 'robot.ride_listener_failed');
@@ -251,8 +298,8 @@ function startDriverListener() {
     });
     if (activeRideId && activeRideId !== state.rideId) {
       bindRide(activeRideId).catch((error) => {
-        emit({ phase: 'failed', errorCode: error?.message || 'ROBOT_BIND_RIDE_FAILED' }, 'robot.failed');
-        trace('ride.binding_failed', { message: error?.message }, 'error');
+        emit({ phase: 'failed', errorCode: error?.code || error?.message || 'ROBOT_BIND_RIDE_FAILED' }, 'robot.failed');
+        trace('ride.binding_failed', { code: error?.code, message: error?.message }, 'error');
       });
     }
   }, (error) => {
@@ -316,9 +363,13 @@ export async function activateRobotDriver({ vehicleType, speedKmh, startPoint })
 
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = setInterval(() => {
-    publishWaitingPoint(state.currentPoint, 'waiting_heartbeat').catch((error) => {
-      trace('waiting_heartbeat.failed', { message: error?.message }, 'error');
-    });
+    // The online screen is also guarded, but this watchdog repairs any external
+    // native-task restart and republishes the authoritative simulated point.
+    stopNativeTask()
+      .then(() => publishWaitingPoint(state.currentPoint, 'waiting_heartbeat'))
+      .catch((error) => {
+        trace('waiting_heartbeat.failed', { message: error?.message }, 'error');
+      });
   }, WAITING_HEARTBEAT_MS);
 
   emit({ phase: 'waiting_request' }, 'robot.active_waiting_request');
@@ -330,6 +381,14 @@ export async function moveRobotTo(kind) {
   if (!state.enabled) throw new Error('ROBOT_NOT_ACTIVE');
   if (!state.rideId || !currentRide) throw new Error('ROBOT_RIDE_NOT_READY');
   if (kind !== 'pickup' && kind !== 'destination') throw new Error('ROBOT_INVALID_TARGET');
+  if (!movementAllowed(kind)) {
+    const error = new Error(kind === 'pickup'
+      ? 'ROBOT_PICKUP_REQUIRES_ASSIGNED_RIDE'
+      : 'ROBOT_DESTINATION_REQUIRES_IN_PROGRESS_RIDE');
+    error.code = error.message;
+    trace('movement.rejected_by_ride_status', { targetKind: kind }, 'warn');
+    throw error;
+  }
   const target = ridePoint(kind);
   if (!target) throw new Error(`ROBOT_${kind.toUpperCase()}_MISSING`);
 
@@ -337,7 +396,7 @@ export async function moveRobotTo(kind) {
   emit({ phase: 'moving', targetPoint: target, targetKind: kind, routeProgress: 0, errorCode: null }, `robot.moving_${kind}`);
   trace('movement.started', { targetKind: kind, target, speedKmh: state.speedKmh });
   await movementTick();
-  movementTimer = setInterval(movementTick, STEP_INTERVAL_MS);
+  if (state.phase === 'moving') movementTimer = setInterval(movementTick, STEP_INTERVAL_MS);
 }
 
 export function pauseRobotDriver() {
@@ -349,7 +408,12 @@ export function pauseRobotDriver() {
 
 export function resumeRobotDriver() {
   if (state.phase !== 'paused' || !state.targetPoint) return;
-  emit({ phase: 'moving' }, 'robot.resumed');
+  if (!movementAllowed(state.targetKind)) {
+    emit({ phase: 'blocked_by_ride_status', errorCode: 'ROBOT_RIDE_STATUS_CHANGED' }, 'robot.resume_blocked');
+    trace('movement.resume_blocked_by_ride_status', { targetKind: state.targetKind }, 'warn');
+    return;
+  }
+  emit({ phase: 'moving', errorCode: null }, 'robot.resumed');
   trace('movement.resumed');
   movementTimer = setInterval(movementTick, STEP_INTERVAL_MS);
 }
