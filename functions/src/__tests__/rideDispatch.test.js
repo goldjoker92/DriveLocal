@@ -14,6 +14,7 @@ const { makeFakeFirestore } = require('./helpers/fakeFirestore');
 const C = require('../rides/constants');
 
 const T0 = 1_700_000_000_000;
+const EXPIRED_OFFER_AT_MS = T0 + (C.OFFER_TTL_SECONDS + 1) * 1000;
 const ctx = { traceId: 'trace_ride', environment: 'emulator' };
 
 // Horizonte square polygon; pickup/destination are inside, SP is outside.
@@ -43,6 +44,7 @@ function seedCity(db) {
     active: true,
     allowedVehicleTypes: ['moto', 'car'],
     boundary: BOUNDARY,
+    // Deliberately legacy values: Horizonte launch mode must self-heal them.
     offerTtlSeconds: 15,
     searchRadiusMeters: 5000,
     maxCandidates: 25,
@@ -166,7 +168,7 @@ describe('dispatch targeting', () => {
     seedDriver(db, 'blocked', { isBlocked: true });
     seedDriver(db, 'unapproved', { verificationStatus: 'pending_review' });
     seedDriver(db, 'stale', { locationUpdatedAtMs: T0 - 10 * 60 * 1000 });
-    seedDriver(db, 'far', { location: { lat: -4.14, lng: -38.54 } }); // ~ >5 km away? within box but far
+    seedDriver(db, 'far', { location: { lat: -4.14, lng: -38.54 } });
     seedDriver(db, 'busy', { activeRideId: 'other' });
 
     const view = await createRide(db, fixedClock(T0), fakeRouting());
@@ -227,10 +229,9 @@ describe('transactional acceptance & wallet hold', () => {
       acceptDriverOfferSecure({ db, request: { auth: { uid: 'B' }, data: { offerId: `${view.rideId}_A`, idempotencyKey: 'acc-foreign-01' } }, context: ctx, clock })
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
 
-    // Expired: advance past the 15 s offer TTL.
-    const late = fixedClock(T0 + 16 * 1000);
+    // Expired: advance past the current server-authoritative offer TTL.
     await expect(
-      acceptDriverOfferSecure({ db, request: { auth: { uid: 'A' }, data: { offerId: `${view.rideId}_A`, idempotencyKey: 'acc-expired-01' } }, context: ctx, clock: late })
+      acceptDriverOfferSecure({ db, request: { auth: { uid: 'A' }, data: { offerId: `${view.rideId}_A`, idempotencyKey: 'acc-expired-01' } }, context: ctx, clock: fixedClock(EXPIRED_OFFER_AT_MS) })
     ).rejects.toMatchObject({ code: 'OFFER_EXPIRED' });
   });
 
@@ -349,7 +350,7 @@ describe('exact pickup privacy & coordinate gating', () => {
     seedDriver(db2, 'A');
     const v2 = await createRide(db2, fixedClock(T0), fakeRouting());
     await expect(
-      acceptDriverOfferSecure({ db: db2, request: { auth: { uid: 'A' }, data: { offerId: `${v2.rideId}_A`, idempotencyKey: 'acc-exp-000001' } }, context: ctx, clock: fixedClock(T0 + 16 * 1000) })
+      acceptDriverOfferSecure({ db: db2, request: { auth: { uid: 'A' }, data: { offerId: `${v2.rideId}_A`, idempotencyKey: 'acc-exp-000001' } }, context: ctx, clock: fixedClock(EXPIRED_OFFER_AT_MS) })
     ).rejects.toMatchObject({ code: 'OFFER_EXPIRED' });
     expect(db2._store.get(`${C.DRIVER_OFFERS}/${v2.rideId}_A`).exactPickup).toBeUndefined();
   });

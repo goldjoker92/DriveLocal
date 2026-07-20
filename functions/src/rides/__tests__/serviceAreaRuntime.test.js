@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { validateServiceArea } = require('../serviceArea');
+const C = require('../constants');
 
 const SERVICE_AREA_ID = 'HORIZONTE_CE_BR';
 const geometry = {
@@ -29,8 +30,10 @@ function config(overrides = {}) {
     boundaryChecksum: checksum(geometry),
     boundaryBoundingBox: [-38.60, -4.20, -38.40, -4.00],
     allowedVehicleTypes: ['moto', 'car'],
+    // Legacy values prove that Horizonte launch mode self-heals an old seed.
     offerTtlSeconds: 15,
     searchRadiusMeters: 5000,
+    maxCandidates: 25,
     ...overrides,
   };
 }
@@ -49,7 +52,7 @@ function dbWithConfig(value) {
 }
 
 describe('runtime service-area geofence', () => {
-  it('loads the serialized seeded geometry inside the deployed callable', async () => {
+  it('loads the serialized geometry and self-heals an old Horizonte dispatch seed', async () => {
     const result = await validateServiceArea({
       db: dbWithConfig(config()),
       serviceAreaId: SERVICE_AREA_ID,
@@ -58,9 +61,28 @@ describe('runtime service-area geofence', () => {
       destination: { lat: -4.08, lng: -38.48 },
     });
 
+    expect(result.dispatchMode).toBe('citywide_launch');
+    expect(result.policySource).toBe('backend_launch_fallback');
+    expect(result.offerTtlSeconds).toBe(C.OFFER_TTL_SECONDS);
+    expect(result.searchRadiusMeters).toBe(C.DEFAULT_SEARCH_RADIUS_METERS);
+    expect(result.maxCandidates).toBe(C.MAX_CANDIDATES);
+    expect(result.config.boundaryChecksum).toBe(checksum(geometry));
+  });
+
+  it('honors explicit density-optimized values when launch mode is retired', async () => {
+    const result = await validateServiceArea({
+      db: dbWithConfig(config({ dispatchMode: 'density_optimized' })),
+      serviceAreaId: SERVICE_AREA_ID,
+      vehicleType: 'car',
+      pickup: { lat: -4.10, lng: -38.50 },
+      destination: { lat: -4.08, lng: -38.48 },
+    });
+
+    expect(result.dispatchMode).toBe('density_optimized');
+    expect(result.policySource).toBe('firestore_config');
     expect(result.offerTtlSeconds).toBe(15);
     expect(result.searchRadiusMeters).toBe(5000);
-    expect(result.config.boundaryChecksum).toBe(checksum(geometry));
+    expect(result.maxCandidates).toBe(25);
   });
 
   it('rejects an endpoint outside the seeded polygon with the stable code', async () => {

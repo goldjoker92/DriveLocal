@@ -11,15 +11,30 @@ export const DRIVER_LOCATION_TASK = 'drivelocal-driver-live-location-v1';
 const SESSION_KEY = '@drivelocal/driver-location-session-v1';
 const LAST_STATUS_KEY = '@drivelocal/driver-location-last-status-v1';
 const DEV_OVERRIDE_KEY = '@drivelocal/driver-location-dev-override-v1';
+const LAST_PUBLISH_KEY = '@drivelocal/driver-location-last-publish-v1';
 
-// Dispatch rejects a driver location after two minutes. An online driver must
-// therefore publish a heartbeat even while stationary. Active rides use a faster
-// interval; idle-online tracking is slower to limit battery and Firestore writes.
+// Backend dispatch accepts a fresh point for five minutes. Native updates remain
+// more frequent so a working driver stays fresh, while the guards below prevent
+// Android from replaying a queued batch as hundreds of Firestore writes.
 const ONLINE_HEARTBEAT_INTERVAL_MS = 30_000;
 const ACTIVE_RIDE_INTERVAL_MS = 5_000;
+const ONLINE_MIN_PUBLISH_GAP_MS = 20_000;
+const ACTIVE_RIDE_MIN_PUBLISH_GAP_MS = 3_000;
+
+let publishQueue = Promise.resolve();
+let lastThrottleLogAtMs = 0;
+const lastQueuedAtByMode = { online: 0, active_ride: 0 };
 
 function validIdentifier(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
+function trackingMode(session) {
+  return session?.rideId ? 'active_ride' : 'online';
+}
+
+function minimumPublishGapMs(session) {
+  return session?.rideId ? ACTIVE_RIDE_MIN_PUBLISH_GAP_MS : ONLINE_MIN_PUBLISH_GAP_MS;
 }
 
 async function readSession() {
@@ -39,6 +54,24 @@ async function writeSession(session) {
   await AsyncStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
+async function readLastPublish() {
+  try {
+    const raw = await AsyncStorage.getItem(LAST_PUBLISH_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Number.isFinite(Number(parsed?.atMs)) ? parsed : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function writeLastPublish({ driverId, rideId, atMs }) {
+  await AsyncStorage.setItem(
+    LAST_PUBLISH_KEY,
+    JSON.stringify({ driverId, rideId: rideId || null, atMs })
+  );
+}
+
 async function readDevOverride() {
   if (!DEV_RIDE_SIMULATOR_ENABLED) return null;
   try {
@@ -53,7 +86,10 @@ async function readDevOverride() {
 }
 
 async function writeDevOverride({ driverId, rideId }) {
-  await AsyncStorage.setItem(DEV_OVERRIDE_KEY, JSON.stringify({ driverId, rideId, atMs: Date.now() }));
+  await AsyncStorage.setItem(
+    DEV_OVERRIDE_KEY,
+    JSON.stringify({ driverId, rideId, atMs: Date.now() })
+  );
 }
 
 async function clearDevOverride() {
@@ -62,27 +98,58 @@ async function clearDevOverride() {
 
 async function writeSafeStatus(status) {
   try {
-    await AsyncStorage.setItem(LAST_STATUS_KEY, JSON.stringify({ status, atMs: Date.now() }));
+    await AsyncStorage.setItem(
+      LAST_STATUS_KEY,
+      JSON.stringify({ status, atMs: Date.now() })
+    );
   } catch (_error) {
-    // Tracking must never fail only because diagnostic persistence failed.
+    // Diagnostic persistence must never stop tracking.
   }
 }
 
 async function authenticatedUid() {
-  // Android may launch this module headlessly. Wait for persisted Firebase Auth
-  // to restore before deciding that the driver is signed out.
   if (typeof auth.authStateReady === 'function') {
     await auth.authStateReady();
   }
   return auth.currentUser?.uid || null;
 }
 
-async function publishLocation(session, locationObject) {
+function samePublishMode(last, session, currentUid) {
+  return last?.driverId === currentUid
+    && (last?.rideId || null) === (session?.rideId || null);
+}
+
+function reportThrottle(mode, minGapMs) {
+  const nowMs = Date.now();
+  if (nowMs - lastThrottleLogAtMs < 5_000) return;
+  lastThrottleLogAtMs = nowMs;
+  writeSafeStatus(`${mode}_throttled`).catch(() => undefined);
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.log(`[DRIVER_LOCATION] burst throttled mode=${mode} minGapMs=${minGapMs}`);
+  }
+}
+
+async function publishLocationUnlocked(session, locationObject, { force = false } = {}) {
   const payload = safeTrackingPayload(locationObject);
   const currentUid = await authenticatedUid();
   if (!payload || !currentUid || currentUid !== session?.driverId) return false;
 
   const nowMs = Date.now();
+  const mode = trackingMode(session);
+  const minGapMs = minimumPublishGapMs(session);
+  const last = await readLastPublish();
+
+  // Persisted guard survives JS/headless restarts. The in-memory guard in
+  // publishLocation() rejects most burst events before they even join the queue.
+  if (
+    !force
+    && samePublishMode(last, session, currentUid)
+    && nowMs - Number(last.atMs) < minGapMs
+  ) {
+    reportThrottle(mode, minGapMs);
+    return false;
+  }
+
   const driverUpdate = {
     location: payload.location,
     locationAccuracyMeters: payload.accuracyMeters,
@@ -110,13 +177,35 @@ async function publishLocation(session, locationObject) {
     );
   }
 
+  await writeLastPublish({
+    driverId: currentUid,
+    rideId: session.rideId || null,
+    atMs: nowMs,
+  });
   await writeSafeStatus(session.rideId ? 'active_ride_published' : 'online_published');
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(
-      `[DRIVER_LOCATION] published mode=${session.rideId ? 'active_ride' : 'online'} atMs=${nowMs}`
-    );
+    console.log(`[DRIVER_LOCATION] published mode=${mode} atMs=${nowMs}`);
   }
   return true;
+}
+
+function publishLocation(session, locationObject, options = {}) {
+  const mode = trackingMode(session);
+  const minGapMs = minimumPublishGapMs(session);
+  const nowMs = Date.now();
+  const force = options?.force === true;
+
+  // Fast in-memory gate: a 160-event Android replay becomes one queued operation,
+  // rather than 160 AsyncStorage reads followed by 159 rejected Firestore writes.
+  if (!force && nowMs - lastQueuedAtByMode[mode] < minGapMs) {
+    reportThrottle(mode, minGapMs);
+    return Promise.resolve(false);
+  }
+  lastQueuedAtByMode[mode] = nowMs;
+
+  const run = publishQueue.then(() => publishLocationUnlocked(session, locationObject, options));
+  publishQueue = run.catch(() => undefined);
+  return run;
 }
 
 if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK)) {
@@ -182,20 +271,14 @@ export async function requestDriverTrackingPermissions() {
 
 async function ensureNativeTaskStarted(rideId = null) {
   const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
-
-  // Expo does not expose the currently running task options. Restart on a mode
-  // change/start so online-idle and active-ride intervals cannot drift apart.
   if (started) {
     await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   }
 
   const intervalMs = rideId ? ACTIVE_RIDE_INTERVAL_MS : ONLINE_HEARTBEAT_INTERVAL_MS;
-
   await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, {
     accuracy: Location.Accuracy.High,
     timeInterval: intervalMs,
-    // Zero is intentional: a stationary online driver still needs a freshness
-    // heartbeat, otherwise dispatch removes them after LOCATION_MAX_AGE_MS.
     distanceInterval: 0,
     deferredUpdatesInterval: intervalMs,
     deferredUpdatesDistance: 0,
@@ -209,10 +292,15 @@ async function ensureNativeTaskStarted(rideId = null) {
   });
 }
 
-async function publishImmediate(session) {
-  const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 30_000, requiredAccuracy: 100 });
-  const current = lastKnown || await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-  await publishLocation(session, current);
+async function publishImmediate(session, options) {
+  const lastKnown = await Location.getLastKnownPositionAsync({
+    maxAge: 30_000,
+    requiredAccuracy: 100,
+  });
+  const current = lastKnown || await Location.getCurrentPositionAsync({
+    accuracy: Location.Accuracy.High,
+  });
+  return publishLocation(session, current, options);
 }
 
 async function startSession({ driverId, vehicleType, rideId = null, requestPermissions = false }) {
@@ -233,9 +321,6 @@ async function startSession({ driverId, vehicleType, rideId = null, requestPermi
   };
   await writeSession(session);
 
-  // While the explicit DEV override is active, lifecycle re-renders must not
-  // restart native GPS and overwrite the synthetic point. Production can never
-  // reach this branch because the build flag fails closed.
   const override = await readDevOverride();
   if (override && override.driverId === driverId && override.rideId === rideId) {
     await writeSafeStatus('dev_simulation_override_preserved');
@@ -243,7 +328,7 @@ async function startSession({ driverId, vehicleType, rideId = null, requestPermi
   }
 
   await ensureNativeTaskStarted(rideId);
-  await publishImmediate(session);
+  await publishImmediate(session, { force: true });
   return { status: 'active', rideId, source: 'native' };
 }
 
@@ -255,8 +340,32 @@ export async function attachActiveRideTracking({ driverId, vehicleType, rideId, 
   return startSession({ driverId, vehicleType, rideId, requestPermissions });
 }
 
-// DEV-only override used by the two-phone manual test lab. It stops the native
-// task but preserves the authenticated tracking session and Firestore rules.
+// Foreground safety net. The native background task remains primary, but this
+// pulse repairs a stopped task and refreshes the last-known point while any
+// driver screen is open. The write throttle makes duplicate pulses inexpensive.
+export async function refreshDriverOnlineHeartbeat() {
+  const session = await readSession();
+  if (!session) return { status: 'no_session' };
+  if (session.rideId) return { status: 'active_ride_managed' };
+
+  const currentUid = await authenticatedUid();
+  if (!currentUid || currentUid !== session.driverId) {
+    return { status: 'session_mismatch' };
+  }
+
+  const permission = await getDriverTrackingPermissionState();
+  if (permission.status !== 'granted') return permission;
+
+  const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+  if (!started) {
+    await ensureNativeTaskStarted(null);
+    await writeSafeStatus('foreground_native_task_restarted');
+  }
+
+  const published = await publishImmediate(session, { force: false });
+  return { status: published ? 'published' : 'throttled' };
+}
+
 export async function beginDevLocationSimulation({ driverId, vehicleType, rideId }) {
   if (!DEV_RIDE_SIMULATOR_ENABLED) {
     return { status: 'disabled', errorCode: 'DEV_SIMULATOR_DISABLED' };
@@ -310,7 +419,8 @@ export async function publishDevSimulatedLocation({ driverId, vehicleType, rideI
         heading: null,
         speed: 6,
       },
-    }
+    },
+    { force: true }
   );
   return published
     ? { status: 'published' }
@@ -329,7 +439,7 @@ export async function restoreRealDriverTrackingAfterSimulation() {
   const permission = await getDriverTrackingPermissionState();
   if (permission.status !== 'granted') return permission;
   await ensureNativeTaskStarted(session.rideId || null);
-  await publishImmediate(session);
+  await publishImmediate(session, { force: true });
   await writeSafeStatus('dev_simulation_native_tracking_restored');
   return { status: 'active', rideId: session.rideId || null, source: 'native' };
 }
@@ -351,7 +461,7 @@ export async function detachActiveRideTracking(rideId) {
   const onlineSession = { ...session, rideId: null, updatedAtMs: Date.now() };
   await writeSession(onlineSession);
   await ensureNativeTaskStarted(null);
-  await publishImmediate(onlineSession);
+  await publishImmediate(onlineSession, { force: true });
   await writeSafeStatus('active_ride_detached');
 }
 
@@ -368,6 +478,9 @@ export async function stopDriverOnlineTracking() {
   const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   if (started) await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   await AsyncStorage.removeItem(SESSION_KEY);
+  await AsyncStorage.removeItem(LAST_PUBLISH_KEY);
+  lastQueuedAtByMode.online = 0;
+  lastQueuedAtByMode.active_ride = 0;
   await clearDevOverride();
   await writeSafeStatus('stopped');
 }

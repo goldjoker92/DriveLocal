@@ -1,17 +1,50 @@
-// Driver route group layout. Keeps a single offer listener alive across every
-// driver screen so an online driver cannot miss an offer while viewing the home,
-// wallet or another cockpit screen.
+// Driver route group layout. Keeps one offer listener and one inexpensive
+// foreground GPS safety pulse alive across every driver screen.
 
 import { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { auth } from '../../config/firebase';
 import { getDriver } from '../../services/driverService';
+import { refreshDriverOnlineHeartbeat } from '../../services/driverLocationTracking';
 import { listenToMyOffer } from '../../services/ridesService';
+
+const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000;
 
 export default function DriverLayout() {
   const router = useRouter();
   const segments = useSegments();
   const lastOfferId = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function pulse() {
+      if (!active) return;
+      try {
+        await refreshDriverOnlineHeartbeat();
+      } catch (error) {
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log(
+            '[DRIVER_LOCATION] foreground heartbeat error',
+            error?.code || error?.message || 'unknown'
+          );
+        }
+      }
+    }
+
+    pulse();
+    const timer = setInterval(pulse, FOREGROUND_HEARTBEAT_INTERVAL_MS);
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') pulse();
+    });
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+      appStateSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -20,8 +53,6 @@ export default function DriverLayout() {
     return listenToMyOffer(uid, async (offer) => {
       if (!offer?.offerId) return;
 
-      // After acceptance, drivers/{uid}.activeRideId is the source of truth. An
-      // old accepted offer must never reopen a completed or cancelled ride.
       if (offer.status === 'accepted') {
         try {
           const driver = await getDriver(uid);
@@ -29,8 +60,7 @@ export default function DriverLayout() {
             router.replace({ pathname: '/active-ride', params: { rideId: driver.activeRideId } });
           }
         } catch (_error) {
-          // The screen-level listeners and push notification remain available;
-          // do not redirect from stale or unverifiable local state.
+          // Screen listeners and push notifications remain available.
         }
         return;
       }

@@ -1,8 +1,7 @@
 // @ts-check
 // Service-area / geofence validation. Loads the ACTIVE service-area
-// configuration from Firestore (cityPublicConfig/{serviceAreaId}) and validates
-// that pickup and destination are inside the configured polygon. There is no
-// hardcoded rectangular geofence and no minimum-driver / operating-hours gate.
+// configuration from Firestore and validates that pickup and destination are
+// inside the committed municipality polygon.
 
 const crypto = require('crypto');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -10,14 +9,6 @@ const { pointInServiceArea } = require('../geo/geo');
 const { validateBoundaryArtifact } = require('../geo/boundaryArtifact');
 const C = require('./constants');
 
-// Firebase deploy packages the functions/ directory only. The source IBGE file
-// intentionally remains outside that directory for import/seed tooling, so a
-// callable must never try to read that repository path at runtime.
-//
-// The seed stores the validated geometry as JSON in cityPublicConfig. Runtime
-// reparses it, revalidates its checksum/shape, then caches it by version,
-// declared checksum and serialized-content fingerprint. Missing or tampered
-// configuration therefore fails closed even when another config was cached.
 const boundaryCache = new Map();
 
 function configurationError(serviceAreaId, internalMessage, cause) {
@@ -29,9 +20,6 @@ function configurationError(serviceAreaId, internalMessage, cause) {
 }
 
 function loadOperationalPolygon(serviceAreaId, cfg) {
-  // Validate the deployed representation BEFORE consulting the cache. This is
-  // important when a config is removed/corrupted after a previous valid call:
-  // a stale cached polygon must never make an invalid document appear healthy.
   if (cfg.boundaryFormat !== 'geojson-geometry-json-v1') {
     throw configurationError(serviceAreaId, 'unsupported boundary format');
   }
@@ -85,10 +73,51 @@ function loadOperationalPolygon(serviceAreaId, cfg) {
   return geometry;
 }
 
+function positiveNumber(value, fallback) {
+  const parsed = Number(value);
+  return parsed > 0 && Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Resolves the effective dispatch policy. Horizonte V1 is deliberately
+ * self-healing: an old Firestore document created before the launch-policy seed
+ * must not silently restore a 5 km radius, 15 second offer or 25-driver cap.
+ * A future density-optimized mode can explicitly opt back into configurable
+ * values after launch.
+ *
+ * @param {string} serviceAreaId
+ * @param {object} cfg
+ */
+function resolveDispatchPolicy(serviceAreaId, cfg = {}) {
+  const launchMode = serviceAreaId === C.DEFAULT_SERVICE_AREA_ID
+    && cfg.dispatchMode !== 'density_optimized';
+
+  if (launchMode) {
+    return {
+      dispatchMode: 'citywide_launch',
+      offerTtlSeconds: C.OFFER_TTL_SECONDS,
+      searchRadiusMeters: C.DEFAULT_SEARCH_RADIUS_METERS,
+      maxCandidates: C.MAX_CANDIDATES,
+      source: cfg.dispatchMode === 'citywide_launch' ? 'firestore_launch' : 'backend_launch_fallback',
+    };
+  }
+
+  return {
+    dispatchMode: cfg.dispatchMode || 'configured',
+    offerTtlSeconds: positiveNumber(cfg.offerTtlSeconds, C.OFFER_TTL_SECONDS),
+    searchRadiusMeters: positiveNumber(cfg.searchRadiusMeters, C.DEFAULT_SEARCH_RADIUS_METERS),
+    maxCandidates: Math.min(
+      Math.floor(positiveNumber(cfg.maxCandidates, C.MAX_CANDIDATES)),
+      C.MAX_CANDIDATES
+    ),
+    source: 'firestore_config',
+  };
+}
+
 /**
  * Loads and validates the service-area config, then geofences both endpoints.
  * @param {{db:object, serviceAreaId:string, vehicleType:string, pickup:object, destination:object}} args
- * @returns {Promise<{config:object, offerTtlSeconds:number, searchRadiusMeters:number}>}
+ * @returns {Promise<{config:object,dispatchMode:string,policySource:string,offerTtlSeconds:number,searchRadiusMeters:number,maxCandidates:number}>}
  */
 async function validateServiceArea({ db, serviceAreaId, vehicleType, pickup, destination }) {
   const snap = await db.collection(C.CITY_PUBLIC_CONFIG).doc(serviceAreaId).get();
@@ -103,19 +132,12 @@ async function validateServiceArea({ db, serviceAreaId, vehicleType, pickup, des
       internalMessage: `service area inactive: ${serviceAreaId}`,
     });
   }
-  // Vehicle type must be allowed in this area when the config declares a list.
   if (Array.isArray(cfg.allowedVehicleTypes) && !cfg.allowedVehicleTypes.includes(vehicleType)) {
     throw new AppError(ERROR_CODES.SERVICE_AREA_INACTIVE, {
       internalMessage: `vehicle type ${vehicleType} not allowed in ${serviceAreaId}`,
     });
   }
 
-  // Geofence authority: the pickup AND destination must both be inside the
-  // operational polygon. Coordinate presence/type/range are validated upstream
-  // (createRideRequest.sanitizeCoord). Edge policy: ray-casting is deterministic
-  // for fixed geometry; a point exactly on an edge resolves consistently and V1
-  // accepts that result. The route POLYLINE is never the authority — only the two
-  // endpoints are — so a route that briefly exits the polygon does not fail.
   const boundary = loadOperationalPolygon(serviceAreaId, cfg);
   if (!pointInServiceArea(pickup, boundary)) {
     throw new AppError(ERROR_CODES.OUT_OF_SERVICE_AREA, {
@@ -130,10 +152,15 @@ async function validateServiceArea({ db, serviceAreaId, vehicleType, pickup, des
     });
   }
 
-  const offerTtlSeconds = Number(cfg.offerTtlSeconds) > 0 ? Number(cfg.offerTtlSeconds) : C.OFFER_TTL_SECONDS;
-  const searchRadiusMeters =
-    Number(cfg.searchRadiusMeters) > 0 ? Number(cfg.searchRadiusMeters) : C.DEFAULT_SEARCH_RADIUS_METERS;
-  return { config: cfg, offerTtlSeconds, searchRadiusMeters };
+  const policy = resolveDispatchPolicy(serviceAreaId, cfg);
+  return {
+    config: cfg,
+    dispatchMode: policy.dispatchMode,
+    policySource: policy.source,
+    offerTtlSeconds: policy.offerTtlSeconds,
+    searchRadiusMeters: policy.searchRadiusMeters,
+    maxCandidates: policy.maxCandidates,
+  };
 }
 
-module.exports = { validateServiceArea, loadOperationalPolygon };
+module.exports = { validateServiceArea, loadOperationalPolygon, resolveDispatchPolicy };
