@@ -27,18 +27,38 @@ describe('DEV Robot Driver contracts', () => {
 
     expect(engine).toContain("doc(db, 'drivers', state.driverId)");
     expect(engine).toContain('publishDevSimulatedLocation');
-    expect(engine).toContain('attachActiveRideTracking');
+    expect(engine).toContain('TRACKING_SESSION_KEY');
+    expect(engine).not.toContain('attachActiveRideTracking');
     expect(tracking).toContain("doc(db, 'activeRideLocations', session.rideId)");
   });
 
-  it('keeps native heartbeat from overwriting simulated GPS', () => {
+  it('keeps native GPS from overwriting simulated GPS before and after going online', () => {
     const layout = source('src/app/(driver)/_layout.jsx');
+    const home = source('src/app/(driver)/driver-home.jsx');
     const engine = source('src/services/robotDriverEngine.js');
 
     expect(layout).toContain('getRobotDriverState().enabled');
     expect(layout).toContain('native_heartbeat.skipped');
+    expect(home).toContain('go_online.native_tracking_skipped');
+    expect(home).toContain('online_restore.native_tracking_skipped');
+    expect(home).toContain('robotSimulationActive()');
     expect(engine).toContain('Location.stopLocationUpdatesAsync');
+    expect(engine).toContain('ride_bound_seed');
     expect(engine).toContain('restoreRealDriverTrackingAfterSimulation');
+  });
+
+  it('gates movement against the real ride lifecycle', () => {
+    const screen = source('src/app/(driver)/robot-driver.jsx');
+    const engine = source('src/services/robotDriverEngine.js');
+
+    expect(engine).toContain("rideStatus === 'assigned'");
+    expect(engine).toContain("rideStatus === 'in_progress'");
+    expect(engine).toContain('ROBOT_DESTINATION_REQUIRES_IN_PROGRESS_RIDE');
+    expect(engine).toContain('TERMINAL_RIDE_STATUSES');
+    expect(engine).toContain('movement.blocked_by_ride_status');
+    expect(screen).toContain("robot?.rideStatus === 'assigned'");
+    expect(screen).toContain("robot?.rideStatus === 'in_progress'");
+    expect(screen).toContain('Statut réel course');
   });
 
   it('provides traceable manual controls for the full successful ride observation', () => {
