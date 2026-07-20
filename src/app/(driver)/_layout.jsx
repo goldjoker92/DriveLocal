@@ -9,6 +9,7 @@ import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
 import { getDriver } from '../../services/driverService';
 import { refreshDriverOnlineHeartbeat } from '../../services/driverLocationTracking';
+import { getRobotDriverState } from '../../services/robotDriverEngine';
 import { listenToMyOffer } from '../../services/ridesService';
 
 const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000;
@@ -23,6 +24,13 @@ export default function DriverLayout() {
 
     async function pulse() {
       if (!active) return;
+      if (DEV_RIDE_SIMULATOR_ENABLED && getRobotDriverState().enabled) {
+        console.log('[ROBOT_DRIVER] native_heartbeat.skipped', {
+          reason: 'robot_simulation_active',
+          atMs: Date.now(),
+        });
+        return;
+      }
       try {
         await refreshDriverOnlineHeartbeat();
       } catch (error) {
