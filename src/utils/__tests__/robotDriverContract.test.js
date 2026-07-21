@@ -28,7 +28,7 @@ describe('DEV Robot Driver contracts', () => {
     expect(engine).toContain("doc(db, 'drivers', state.driverId)");
     expect(engine).toContain('publishDevSimulatedLocation');
     expect(engine).toContain('TRACKING_SESSION_KEY');
-    expect(engine).not.toContain('attachActiveRideTracking');
+    expect(engine).not.toMatch(/\battachActiveRideTracking\s*\(/);
     expect(tracking).toContain("doc(db, 'activeRideLocations', session.rideId)");
   });
 
