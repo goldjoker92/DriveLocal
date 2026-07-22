@@ -17,12 +17,60 @@ import {
 import { auth, db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
 import { disablePushNotifications } from './notificationsService';
+import { stopDriverOnlineTracking } from './driverLocationTracking';
+import { getRobotDriverState, stopRobotDriver } from './robotDriverEngine';
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
+async function clearLocalDriverTracking(reason) {
+  const robot = getRobotDriverState();
+  console.log('[AUTH_TRACKING_CLEANUP] started', {
+    reason,
+    authenticatedUid: auth.currentUser?.uid || null,
+    robotEnabled: Boolean(robot?.enabled),
+    robotDriverId: robot?.driverId || null,
+    robotRideId: robot?.rideId || null,
+    atMs: Date.now(),
+  });
+
+  try {
+    if (robot?.enabled) {
+      await stopRobotDriver();
+    }
+  } catch (error) {
+    console.warn('[AUTH_TRACKING_CLEANUP] robot stop failed', {
+      reason,
+      code: error?.code,
+      message: error?.message,
+      atMs: Date.now(),
+    });
+  }
+
+  try {
+    // Always stop the native task after Robot Driver cleanup. stopRobotDriver()
+    // briefly restores native tracking by design; account changes must end with
+    // no task and no persisted ride session owned by the previous account.
+    await stopDriverOnlineTracking();
+  } catch (error) {
+    console.warn('[AUTH_TRACKING_CLEANUP] native stop failed', {
+      reason,
+      code: error?.code,
+      message: error?.message,
+      atMs: Date.now(),
+    });
+  }
+
+  console.log('[AUTH_TRACKING_CLEANUP] completed', { reason, atMs: Date.now() });
+}
+
 async function clearAuthenticatedSession() {
+  // Location tasks survive navigation and may survive sign-out. Stop them while
+  // the old Firebase user is still authenticated so they cannot keep producing
+  // permission-denied writes or leak a previous ride session into the next login.
+  await clearLocalDriverTracking('sign_out');
+
   try {
     await disablePushNotifications();
   } catch (_error) {
@@ -125,6 +173,10 @@ async function createAccountWithProfile({
   // Start from a clean session so a failed attempt never keeps a stale user active.
   if (auth.currentUser) {
     await clearAuthenticatedSession();
+  } else {
+    // A native background task can remain after an earlier process/session even
+    // when Firebase Auth is already signed out. Clear it before creating a user.
+    await clearLocalDriverTracking('register_preflight');
   }
 
   try {
@@ -225,6 +277,13 @@ export async function registerPassenger(email, password, profile) {
 // Returns { user, role, driver?, passenger? }.
 export async function loginUser(email, password) {
   const normalizedEmail = normalizeEmail(email);
+
+  // Critical account-switch preflight: an Expo background location task can be
+  // alive while Auth is signed out. Clear the persisted driver/ride session
+  // before authenticating, otherwise the new user inherits permission-denied
+  // activeRideLocations writes from the previous session.
+  await clearLocalDriverTracking('login_preflight');
+
   const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
   const user = credential.user;
   const account = await resolveAccountRole(user.uid);
