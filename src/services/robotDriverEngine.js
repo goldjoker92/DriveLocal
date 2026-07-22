@@ -16,6 +16,7 @@ import {
   publishDevSimulatedLocation,
   restoreRealDriverTrackingAfterSimulation,
 } from './driverLocationTracking';
+import { listenToMyOffer } from './ridesService';
 
 const STORAGE_KEY = '@drivelocal/robot-driver-v1';
 // Shared intentionally with driverLocationTracking. Writing the ride session
@@ -118,8 +119,18 @@ function normalizePoint(value) {
 }
 
 function ridePoint(kind) {
-  const source = kind === 'pickup' ? currentRide?.pickup : currentRide?.destination;
+  const source = kind === 'pickup'
+    ? (currentRide?.exactPickup || currentRide?.pickup)
+    : (currentRide?.exactDestination || currentRide?.destination);
   return normalizePoint(source);
+}
+
+function offerRideStatus(offer) {
+  if (offer?.driverRideStatus) return offer.driverRideStatus;
+  // The accepted offer reveals the exact destination only after the real ride is
+  // started. Keep this fallback aligned with the existing active-ride screen.
+  if (offer?.exactDestination) return 'in_progress';
+  return offer?.status === 'accepted' ? 'assigned' : null;
 }
 
 function movementAllowed(kind, rideStatus = state.rideStatus) {
@@ -222,14 +233,44 @@ async function movementTick() {
   }
 }
 
+function processRideOffer(nextOffer, rideId) {
+  if (!nextOffer || nextOffer.rideId !== rideId) return;
+  currentRide = nextOffer;
+  const nextStatus = offerRideStatus(nextOffer);
+  trace('ride.snapshot', {
+    source: 'driverOffers',
+    exists: true,
+    status: nextStatus,
+    offerStatus: nextOffer.status,
+    hasPickup: Boolean(ridePoint('pickup')),
+    hasDestination: Boolean(ridePoint('destination')),
+  });
+
+  if (TERMINAL_RIDE_STATUSES.has(nextStatus)) {
+    stopMovementTimer();
+    emit({ rideStatus: nextStatus, phase: 'terminal', targetPoint: null, targetKind: null }, 'robot.ride_terminal');
+    trace('ride.terminal', { status: nextStatus });
+    return;
+  }
+
+  if (state.phase === 'moving' && !movementAllowed(state.targetKind, nextStatus)) {
+    stopMovementTimer();
+    emit({ rideStatus: nextStatus, phase: 'blocked_by_ride_status', errorCode: 'ROBOT_RIDE_STATUS_CHANGED' }, 'robot.movement_blocked');
+    trace('movement.blocked_by_ride_status', { targetKind: state.targetKind, nextStatus }, 'warn');
+    return;
+  }
+
+  emit({ rideStatus: nextStatus, errorCode: null }, 'robot.ride_snapshot_received');
+}
+
 async function bindRide(rideId) {
   if (!rideId || rideId === state.rideId) return;
   trace('ride.binding_started', { nextRideId: rideId });
   emit({ rideId, rideStatus: null, phase: 'ride_bound' }, 'robot.ride_detected');
 
-  // Do not call attachActiveRideTracking here: that helper intentionally starts
-  // native GPS before the DEV override exists. Preparing the same secured local
-  // session first keeps simulated GPS authoritative with zero real-GPS flash.
+  // Avoid the legacy native tracking helper here because it starts native GPS
+  // before the DEV override exists. Preparing the same secured local session
+  // first keeps simulated GPS authoritative with zero real-GPS flash.
   await stopNativeTask();
   await AsyncStorage.setItem(TRACKING_SESSION_KEY, JSON.stringify({
     driverId: state.driverId,
@@ -253,36 +294,23 @@ async function bindRide(rideId) {
   await publishRidePoint(state.currentPoint, 'ride_bound_seed');
 
   if (unsubscribeRide) unsubscribeRide();
-  unsubscribeRide = onSnapshot(doc(db, 'rideRequests', rideId), (snapshot) => {
-    currentRide = snapshot.exists() ? { rideId: snapshot.id, ...snapshot.data() } : null;
-    const nextStatus = currentRide?.status || null;
-    trace('ride.snapshot', {
-      exists: Boolean(currentRide),
-      status: nextStatus,
-      hasPickup: Boolean(ridePoint('pickup')),
-      hasDestination: Boolean(ridePoint('destination')),
-    });
-
-    if (TERMINAL_RIDE_STATUSES.has(nextStatus)) {
-      stopMovementTimer();
-      emit({ rideStatus: nextStatus, phase: 'terminal', targetPoint: null, targetKind: null }, 'robot.ride_terminal');
-      trace('ride.terminal', { status: nextStatus });
-      return;
-    }
-
-    if (state.phase === 'moving' && !movementAllowed(state.targetKind, nextStatus)) {
-      stopMovementTimer();
-      emit({ rideStatus: nextStatus, phase: 'blocked_by_ride_status', errorCode: 'ROBOT_RIDE_STATUS_CHANGED' }, 'robot.movement_blocked');
-      trace('movement.blocked_by_ride_status', { targetKind: state.targetKind, nextStatus }, 'warn');
-      return;
-    }
-
-    emit({ rideStatus: nextStatus, errorCode: null }, 'robot.ride_snapshot_received');
-  }, (error) => {
-    trace('ride.listener_failed', { code: error?.code, message: error?.message }, 'error');
-    emit({ errorCode: error?.code || 'ROBOT_RIDE_LISTENER_FAILED' }, 'robot.ride_listener_failed');
-  });
-  trace('ride.binding_succeeded', { rideId });
+  // Drivers are intentionally forbidden from reading rideRequests directly.
+  // The secured winning offer is their source of truth for lifecycle status and
+  // reveals exact pickup/destination coordinates at the correct moments.
+  unsubscribeRide = listenToMyOffer(
+    state.driverId,
+    (nextOffer) => processRideOffer(nextOffer, rideId),
+    (error) => {
+      trace('ride.listener_failed', {
+        source: 'driverOffers',
+        code: error?.code,
+        message: error?.message,
+      }, 'error');
+      emit({ errorCode: error?.code || 'ROBOT_RIDE_LISTENER_FAILED' }, 'robot.ride_listener_failed');
+    },
+    rideId
+  );
+  trace('ride.binding_succeeded', { rideId, source: 'driverOffers' });
 }
 
 function startDriverListener() {
