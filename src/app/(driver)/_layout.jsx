@@ -18,6 +18,8 @@ export default function DriverLayout() {
   const router = useRouter();
   const segments = useSegments();
   const lastOfferId = useRef(null);
+  const onRobotScreen = segments.includes('robot-driver');
+  const onActiveRideScreen = segments.includes('active-ride');
 
   useEffect(() => {
     let active = true;
@@ -64,6 +66,12 @@ export default function DriverLayout() {
       if (!offer?.offerId) return;
 
       if (offer.status === 'accepted') {
+        // Do not steal navigation from tools/screens that intentionally coexist
+        // with an active ride. Re-subscribing on a segment change immediately
+        // replays the accepted offer snapshot, which previously made Robot Driver
+        // appear for a split second and then jump back to the active ride screen.
+        if (onRobotScreen || onActiveRideScreen) return;
+
         try {
           const driver = await getDriver(uid);
           if (driver?.activeRideId && driver.activeRideId === offer.rideId) {
@@ -81,9 +89,7 @@ export default function DriverLayout() {
       lastOfferId.current = offer.offerId;
       router.push({ pathname: '/ride-request', params: { offerId: offer.offerId } });
     });
-  }, [router, segments]);
-
-  const onRobotScreen = segments.includes('robot-driver');
+  }, [router, segments, onRobotScreen, onActiveRideScreen]);
 
   return (
     <View style={styles.container}>
