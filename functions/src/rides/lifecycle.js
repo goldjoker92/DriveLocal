@@ -1,8 +1,9 @@
 // @ts-check
 // Secure ride lifecycle. Every mutation is authenticated, ownership-checked,
 // state-guarded, transactional and idempotent. The winning driver offer mirrors
-// driverRideStatus so the Android driver screen recovers correctly after restart.
-// The single activeRideLocations point exists only while the ride is moving.
+// driverRideStatus and payment presentation data so the Android driver screen
+// recovers correctly after restart. The single activeRideLocations point exists
+// only while the ride is moving.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -98,8 +99,16 @@ async function finishRide({ db, request, context, clock }) {
   const driverId = requireAuthUid(request, 'finish');
   const { rideId } = baseArgs(request);
   const rideRef = db.collection(C.RIDE_REQUESTS).doc(rideId);
-  const pixSnap = await db.collection(C.PRIVATE_DRIVER_DATA).doc(driverId).get();
+
+  // Newer records keep Pix data in privateDriverData. Older/current mobile builds
+  // may still have it on drivers/{uid}; keep a traceable compatibility fallback
+  // until a migration moves every record to the private collection.
+  const [pixSnap, driverSnap] = await Promise.all([
+    db.collection(C.PRIVATE_DRIVER_DATA).doc(driverId).get(),
+    db.collection(C.DRIVERS).doc(driverId).get(),
+  ]);
   const pix = pixSnap.exists ? pixSnap.data() || {} : {};
+  const driverProfile = driverSnap.exists ? driverSnap.data() || {} : {};
 
   const out = await db.runTransaction(async (tx) => {
     const snap = await tx.get(rideRef);
@@ -109,8 +118,20 @@ async function finishRide({ db, request, context, clock }) {
     if (ride.status === C.RIDE_STATUS.AWAITING_PAYMENT) return { replay: true, ride };
     if (ride.status !== C.RIDE_STATUS.IN_PROGRESS) throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, { internalMessage: `finish from ${ride.status}` });
 
-    const pixKey = pix.pixKey || ride.driverPixKey;
-    if (!pixKey) throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, { internalMessage: `no verified pix key for driver ${driverId}` });
+    const pixKey = pix.pixKey || driverProfile.pixKey || ride.driverPixKey;
+    const pixKeySource = pix.pixKey
+      ? 'private_driver_data'
+      : driverProfile.pixKey
+        ? 'driver_profile_compat'
+        : ride.driverPixKey
+          ? 'ride_snapshot_compat'
+          : 'missing';
+    if (!pixKey) {
+      throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, {
+        internalMessage: `no verified pix key for driver ${driverId}`,
+        safeMetadata: { pixKeySource },
+      });
+    }
 
     const nowMs = clock.now();
     const finalFareCentavos = Number(ride.estimatedFareCentavos || 0);
@@ -118,7 +139,7 @@ async function finishRide({ db, request, context, clock }) {
     const payload = buildPixPayload({
       pixKey,
       amountCentavos: finalFareCentavos,
-      merchantName: pix.pixOwnerName || pix.fullName || 'DriveLocal',
+      merchantName: pix.pixOwnerName || pix.fullName || driverProfile.fullName || driverProfile.displayName || 'DriveLocal',
       city: 'Horizonte',
       txid: `DL${rideId}`.slice(0, 25),
     });
@@ -132,12 +153,24 @@ async function finishRide({ db, request, context, clock }) {
       paymentPixPayload: payload,
       updatedAt: ts(),
     }, { merge: true });
-    setDriverOfferStatusTx(tx, db, rideId, driverId, C.RIDE_STATUS.AWAITING_PAYMENT);
+    setDriverOfferStatusTx(tx, db, rideId, driverId, C.RIDE_STATUS.AWAITING_PAYMENT, {
+      awaitingPaymentAtMs: nowMs,
+      paymentAmountCentavos: finalFareCentavos,
+      paymentPixPayload: payload,
+    });
     clearActiveRideLocationTx(tx, db, rideId);
     enqueueEventTx(tx, db, buildNotificationEvent({ rideId, eventType: C.NOTIFICATION_EVENT.RIDE_AWAITING_PAYMENT, recipientUid: ride.passengerId, recipientRole: 'passenger', route: '/pix-payment', traceId: context?.traceId, nowMs }));
-    return { replay: false, ride, finalFareCentavos };
+    return { replay: false, ride, finalFareCentavos, pixKeySource };
   });
-  if (!out.replay) logInfo(context, 'ride.awaiting_payment', { operation: 'finish', rideId, fromStatus: 'in_progress', toStatus: 'awaiting_payment', callerRole: 'driver', amountCentavos: out.finalFareCentavos });
+  if (!out.replay) {
+    logInfo(context, 'ride.pix_charge_created', {
+      operation: 'finish',
+      rideId,
+      amountCentavos: out.finalFareCentavos,
+      pixKeySource: out.pixKeySource,
+    });
+    logInfo(context, 'ride.awaiting_payment', { operation: 'finish', rideId, fromStatus: 'in_progress', toStatus: 'awaiting_payment', callerRole: 'driver', amountCentavos: out.finalFareCentavos });
+  }
   return { rideId, status: C.RIDE_STATUS.AWAITING_PAYMENT };
 }
 
@@ -155,7 +188,9 @@ async function markPassengerPixSent({ db, request, context, clock }) {
     if (ride.status !== C.RIDE_STATUS.AWAITING_PAYMENT) throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, { internalMessage: `mark_paid from ${ride.status}` });
     const nowMs = clock.now();
     tx.set(rideRef, { status: C.RIDE_STATUS.PAYMENT_MARKED_SENT, passengerMarkedPaidAtMs: nowMs, updatedAt: ts() }, { merge: true });
-    setDriverOfferStatusTx(tx, db, rideId, ride.acceptedDriverId, C.RIDE_STATUS.PAYMENT_MARKED_SENT);
+    setDriverOfferStatusTx(tx, db, rideId, ride.acceptedDriverId, C.RIDE_STATUS.PAYMENT_MARKED_SENT, {
+      passengerMarkedPaidAtMs: nowMs,
+    });
     clearActiveRideLocationTx(tx, db, rideId);
     enqueueEventTx(tx, db, buildNotificationEvent({ rideId, eventType: C.NOTIFICATION_EVENT.RIDE_PAYMENT_MARKED_SENT, recipientUid: ride.acceptedDriverId, recipientRole: 'driver', route: '/active-ride', traceId: context?.traceId, nowMs }));
     return { replay: false };
@@ -212,13 +247,18 @@ async function confirmDriverPixReceived({ db, request, context, clock }) {
       holdReleasedCentavos: originalHold - captured,
       updatedAt: ts(),
     }, { merge: true });
-    setDriverOfferStatusTx(tx, db, rideId, driverId, C.RIDE_STATUS.COMPLETED);
+    setDriverOfferStatusTx(tx, db, rideId, driverId, C.RIDE_STATUS.COMPLETED, {
+      completedAtMs: nowMs,
+    });
     clearActiveRideLocationTx(tx, db, rideId);
     tx.set(holdRef, { status: 'settled', settledAtMs: nowMs }, { merge: true });
     tx.set(captureRef, { driverId, rideId, type: 'commission_capture', amountCentavos: captured, releasedCentavos: originalHold - captured, status: 'captured', createdAtMs: nowMs, createdAt: ts(), traceId: context?.traceId });
     if (ride.passengerId) tx.set(db.collection(C.PASSENGERS).doc(ride.passengerId), { activeRideId: null, updatedAt: ts() }, { merge: true });
-    enqueueEventTx(tx, db, buildNotificationEvent({ rideId, eventType: C.NOTIFICATION_EVENT.RIDE_COMPLETED, recipientUid: ride.passengerId, recipientRole: 'passenger', route: '/ride-completed', traceId: context?.traceId, nowMs }));
-    enqueueEventTx(tx, db, buildNotificationEvent({ rideId, eventType: C.NOTIFICATION_EVENT.RIDE_COMPLETED, recipientUid: driverId, recipientRole: 'driver', route: '/driver-home', traceId: context?.traceId, nowMs }));
+
+    // Both users land on the payment context first, see the same green success
+    // confirmation, then each app leaves that screen after five seconds.
+    enqueueEventTx(tx, db, buildNotificationEvent({ rideId, eventType: C.NOTIFICATION_EVENT.RIDE_COMPLETED, recipientUid: ride.passengerId, recipientRole: 'passenger', route: '/pix-payment', traceId: context?.traceId, nowMs }));
+    enqueueEventTx(tx, db, buildNotificationEvent({ rideId, eventType: C.NOTIFICATION_EVENT.RIDE_COMPLETED, recipientUid: driverId, recipientRole: 'driver', route: '/active-ride', traceId: context?.traceId, nowMs }));
     return { replay: false, captured, originalHold };
   });
 
@@ -301,7 +341,11 @@ async function reportRidePaymentIssue({ db, request, context, clock }) {
     }
     const nowMs = clock.now();
     if (ride.acceptedDriverId) tx.set(db.collection(C.DRIVERS).doc(ride.acceptedDriverId), { activeRideId: null, updatedAt: ts() }, { merge: true });
-    setDriverOfferStatusTx(tx, db, rideId, ride.acceptedDriverId, C.RIDE_STATUS.DISPUTED);
+    setDriverOfferStatusTx(tx, db, rideId, ride.acceptedDriverId, C.RIDE_STATUS.DISPUTED, {
+      disputedAtMs: nowMs,
+      disputedBy: isPassenger ? 'passenger' : 'driver',
+      disputeReasonCode: reasonCode,
+    });
     clearActiveRideLocationTx(tx, db, rideId);
     tx.set(rideRef, { status: C.RIDE_STATUS.DISPUTED, disputedAtMs: nowMs, disputedBy: isPassenger ? 'passenger' : 'driver', disputeReasonCode: reasonCode, updatedAt: ts() }, { merge: true });
     const otherUid = isPassenger ? ride.acceptedDriverId : ride.passengerId;
