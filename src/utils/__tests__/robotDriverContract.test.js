@@ -28,7 +28,7 @@ describe('DEV Robot Driver contracts', () => {
     expect(engine).toContain("doc(db, 'drivers', state.driverId)");
     expect(engine).toContain('publishDevSimulatedLocation');
     expect(engine).toContain('TRACKING_SESSION_KEY');
-    expect(engine).not.toMatch(/\battachActiveRideTracking\s*\(/);
+    expect(engine).not.toContain('attachActiveRideTracking(');
     expect(tracking).toContain("doc(db, 'activeRideLocations', session.rideId)");
   });
 
@@ -45,6 +45,16 @@ describe('DEV Robot Driver contracts', () => {
     expect(engine).toContain('Location.stopLocationUpdatesAsync');
     expect(engine).toContain('ride_bound_seed');
     expect(engine).toContain('restoreRealDriverTrackingAfterSimulation');
+  });
+
+  it('cleans stale native and robot sessions before login and logout', () => {
+    const auth = source('src/services/authService.js');
+
+    expect(auth).toContain("clearLocalDriverTracking('login_preflight')");
+    expect(auth).toContain("clearLocalDriverTracking('sign_out')");
+    expect(auth).toContain('await stopRobotDriver()');
+    expect(auth).toContain('await stopDriverOnlineTracking()');
+    expect(auth).toContain('[AUTH_TRACKING_CLEANUP]');
   });
 
   it('gates movement against the real ride lifecycle', () => {
