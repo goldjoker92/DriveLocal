@@ -1,5 +1,6 @@
 // Active driver ride screen (route "/active-ride"). Uses the driver's secured
 // winning offer and attaches the background location service to this ride.
+// Payment feedback stays on-screen: success closes after 5 seconds; failures remain.
 
 import { useEffect, useState } from 'react';
 import { Alert, ScrollView, Text, View } from 'react-native';
@@ -8,11 +9,14 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
+import PixPaymentSummary from '../../components/PixPaymentSummary';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
+import { formatBRL } from '../../utils/format';
+import { logRideClientEvent } from '../../utils/clientRideLog';
 import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 import {
   attachActiveRideTracking,
@@ -38,6 +42,8 @@ import {
 } from '../../services/ridesService';
 
 const TRACKED_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
+const PAYMENT_STATUSES = new Set(['awaiting_payment', 'payment_marked_sent', 'completed', 'disputed']);
+const SUCCESS_VISIBLE_MS = 5000;
 
 function statusFromEvent(eventType) {
   const map = {
@@ -110,6 +116,9 @@ export default function ActiveRide() {
   const [trackingStatus, setTrackingStatus] = useState('checking');
   const [devSimulation, setDevSimulation] = useState({ status: 'idle' });
 
+  const paymentAmount = offer?.paymentAmountCentavos;
+  const paymentPayload = offer?.paymentPixPayload;
+
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid || !rideId) return undefined;
@@ -125,6 +134,32 @@ export default function ActiveRide() {
       rideId
     );
   }, [rideId]);
+
+  useEffect(() => {
+    if (!rideId || !PAYMENT_STATUSES.has(status)) return;
+    logRideClientEvent('pix.driver.screen_status_changed', {
+      rideId,
+      status,
+      amountCentavos: paymentAmount,
+      hasPayload: !!paymentPayload,
+    });
+  }, [rideId, status, paymentAmount, paymentPayload]);
+
+  useEffect(() => {
+    if (!rideId || status !== 'completed') return undefined;
+
+    logRideClientEvent('pix.driver.success_feedback_started', {
+      rideId,
+      visibleForMs: SUCCESS_VISIBLE_MS,
+    });
+
+    const timeout = setTimeout(() => {
+      logRideClientEvent('pix.driver.success_feedback_finished', { rideId });
+      router.replace('/driver-home');
+    }, SUCCESS_VISIBLE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [rideId, status, router]);
 
   useEffect(() => {
     if (!DEV_RIDE_SIMULATOR_ENABLED || !rideId) return undefined;
@@ -222,11 +257,20 @@ export default function ActiveRide() {
       if (res && ['awaiting_payment', 'completed', 'cancelled', 'disputed'].includes(res.status)) {
         await cleanupTrackingAfterRide();
       }
-      if (res && ['completed', 'cancelled', 'disputed'].includes(res.status)) {
+      // Success and payment failure remain visible. Only cancellation leaves now.
+      if (res?.status === 'cancelled') {
         router.replace('/driver-home');
       }
     } catch (e) {
-      setError(e?.message || 'Não foi possível concluir. Tente novamente.');
+      const message = e?.message || 'Não foi possível concluir. Tente novamente.';
+      setError(message);
+      logRideClientEvent('pix.driver.ui_action_failed', {
+        rideId,
+        action: key,
+        status,
+        amountCentavos: paymentAmount,
+        error: e,
+      }, 'error');
     } finally {
       setBusy('');
     }
@@ -289,11 +333,15 @@ export default function ActiveRide() {
   const trackingActive = trackingStatus === 'active';
   const simulationRunning = devSimulation?.status === 'running';
   const simulationPaused = devSimulation?.status === 'paused';
+  const paymentOpen = status === 'awaiting_payment' || status === 'payment_marked_sent';
+  const paymentFailed = status === 'disputed';
+  const paymentCompleted = status === 'completed';
+  const headerTitle = PAYMENT_STATUSES.has(status) ? 'Pagamento Pix' : 'Corrida ativa';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Corrida ativa" onBack={() => router.back()} />
+        <Header title={headerTitle} onBack={() => router.back()} />
 
         {!rideId ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>Corrida inválida.</Text> : null}
 
@@ -405,14 +453,75 @@ export default function ActiveRide() {
           </AppCard>
         ) : null}
 
-        {status === 'awaiting_payment' || status === 'payment_marked_sent' ? (
+        {paymentCompleted ? (
+          <AppCard>
+            <View
+              style={{
+                width: 88,
+                height: 88,
+                borderRadius: 44,
+                alignSelf: 'center',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: colors.success,
+              }}
+            >
+              <Text style={{ fontFamily, color: '#FFFFFF', fontSize: 52, lineHeight: 58 }}>✓</Text>
+            </View>
+            <Text style={[{ fontFamily, color: colors.success, textAlign: 'center' }, typography.h3]}>
+              Pagamento confirmado
+            </Text>
+            <Text style={[{ fontFamily, color: colors.text, textAlign: 'center' }, typography.bodyBold]}>
+              {paymentAmount != null ? formatBRL(paymentAmount) : 'Valor registrado'}
+            </Text>
+            <Text style={[{ fontFamily, color: colors.textMuted, textAlign: 'center' }, typography.small]}>
+              Passageiro e motorista receberam a confirmação. Esta tela fechará em 5 segundos.
+            </Text>
+          </AppCard>
+        ) : null}
+
+        {paymentOpen || paymentFailed ? (
           <AppCard>
             <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Pagamento</Text>
-            <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
-              Confirme somente depois de verificar o Pix na sua conta.
-            </Text>
-            <AppButton title={busy === 'confirm' ? 'Enviando…' : 'Pagamento recebido'} onPress={() => act('confirm', confirmDriverPixReceived)} disabled={!!busy} />
-            <AppButton title="Problema no pagamento" variant="ghost" onPress={() => act('issue', (id) => reportPaymentIssue(id, 'motorista_reportou'))} disabled={!!busy} />
+            <PixPaymentSummary
+              amountCentavos={paymentAmount}
+              payload={paymentPayload}
+              instruction="Mostre este QR Code ao passageiro. Ele também pode usar o Pix copia e cola no próprio telefone."
+            />
+
+            {status === 'payment_marked_sent' ? (
+              <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>
+                O passageiro informou que pagou. Verifique sua conta antes de confirmar.
+              </Text>
+            ) : null}
+
+            {paymentFailed ? (
+              <>
+                <Text style={[{ fontFamily, color: colors.danger }, typography.bodyBold]}>
+                  Pagamento não confirmado
+                </Text>
+                <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+                  A tela permanece aberta e o valor continua registrado para conferência e suporte.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+                  Confirme somente depois de verificar o Pix na sua conta.
+                </Text>
+                <AppButton
+                  title={busy === 'confirm' ? 'Enviando…' : 'Pagamento recebido'}
+                  onPress={() => act('confirm', confirmDriverPixReceived)}
+                  disabled={!!busy || !paymentPayload}
+                />
+                <AppButton
+                  title="Problema no pagamento"
+                  variant="ghost"
+                  onPress={() => act('issue', (id) => reportPaymentIssue(id, 'motorista_reportou'))}
+                  disabled={!!busy}
+                />
+              </>
+            )}
           </AppCard>
         ) : null}
 
@@ -420,7 +529,16 @@ export default function ActiveRide() {
           <AppButton title="Cancelar corrida" variant="ghost" onPress={() => act('cancel', (id) => cancelRide(id, 'motorista_cancelou'))} disabled={!!busy} />
         ) : null}
 
-        {error ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text> : null}
+        {error ? (
+          <AppCard>
+            <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
+            {PAYMENT_STATUSES.has(status) ? (
+              <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>
+                Nenhum dado de pagamento foi apagado. Confira o valor e tente novamente.
+              </Text>
+            ) : null}
+          </AppCard>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
