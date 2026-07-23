@@ -218,7 +218,8 @@ export default function DriverAccepted() {
                   targetTitle={mapTargetTitle}
                   driverLocation={driverLocation}
                   vehicleType={driver.vehicleType || ride.vehicleType}
-                  showEta={ride.status === 'assigned'}
+                  showEta={ride.status === 'assigned' || ride.status === 'in_progress'}
+                  etaContext={ride.status === 'in_progress' ? 'destination' : 'pickup'}
                 />
               </AppCard>
             ) : null}
