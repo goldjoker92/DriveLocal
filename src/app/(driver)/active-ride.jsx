@@ -17,7 +17,7 @@ import { auth } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { formatBRL } from '../../utils/format';
 import { logRideClientEvent } from '../../utils/clientRideLog';
-import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
+import { openGoogleMapsRoute, openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 import {
   attachActiveRideTracking,
   detachActiveRideTracking,
@@ -25,6 +25,7 @@ import {
 } from '../../services/driverLocationTracking';
 import {
   getDevRideSimulationState,
+  getDevSimulatedCurrentPoint,
   pauseDevRideSimulation,
   resumeDevRideSimulation,
   startDevRideSimulation,
@@ -43,6 +44,7 @@ import {
 
 const TRACKED_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
 const PAYMENT_STATUSES = new Set(['awaiting_payment', 'payment_marked_sent', 'completed', 'disputed']);
+const ROBOT_NAVIGATION_STATUSES = new Set(['running', 'paused', 'completed']);
 const SUCCESS_VISIBLE_MS = 5000;
 
 function statusFromEvent(eventType) {
@@ -97,6 +99,20 @@ function confirmRideTrackingDisclosure() {
       [
         { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
         { text: 'Ativar', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) }
+    );
+  });
+}
+
+function confirmRobotWazeOpen() {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Modo Robot Driver',
+      'O Waze usará a localização real deste telefone. Para visualizar o trajeto a partir da posição simulada, use o Google Maps.',
+      [
+        { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Abrir Waze', onPress: () => resolve(true) },
       ],
       { cancelable: true, onDismiss: () => resolve(false) }
     );
@@ -315,12 +331,65 @@ export default function ActiveRide() {
     }
   }
 
-  async function openNav(point, which) {
+  async function openNav(point, which, targetKind) {
     if (!point) return;
     setError('');
+
+    const simulatedOrigin = DEV_RIDE_SIMULATOR_ENABLED
+      ? getDevSimulatedCurrentPoint(rideId)
+      : null;
+    const robotNavigationActive = DEV_RIDE_SIMULATOR_ENABLED
+      && (Boolean(simulatedOrigin) || ROBOT_NAVIGATION_STATUSES.has(devSimulation?.status))
+      && (!devSimulation?.rideId || devSimulation.rideId === rideId);
+    const provider = which === 'waze' ? 'waze' : 'google_maps';
+    const originMode = which === 'waze'
+      ? 'device_gps'
+      : simulatedOrigin
+        ? 'simulated_robot'
+        : robotNavigationActive
+          ? 'fallback_device_gps'
+          : 'device_gps';
+
     try {
-      if (which === 'waze') await openWazeToPoint(point, offer?.vehicleType);
-      else await openGoogleMapsToPoint(point, offer?.vehicleType);
+      if (which === 'waze' && robotNavigationActive) {
+        const confirmed = await confirmRobotWazeOpen();
+        if (!confirmed) {
+          logRideClientEvent('navigation.driver_open_cancelled', {
+            rideId,
+            rideStatus: status,
+            provider,
+            targetKind,
+            destination: point,
+            destinationLabel: point.label || null,
+            originMode,
+            simulatedOrigin,
+          });
+          return;
+        }
+      }
+
+      logRideClientEvent('navigation.driver_open', {
+        rideId,
+        rideStatus: status,
+        provider,
+        targetKind,
+        destination: point,
+        destinationLabel: point.label || null,
+        originMode,
+        simulatedOrigin,
+      });
+
+      if (which === 'waze') {
+        await openWazeToPoint(point, offer?.vehicleType);
+      } else if (simulatedOrigin) {
+        await openGoogleMapsRoute({
+          origin: simulatedOrigin,
+          destination: point,
+          vehicleType: offer?.vehicleType,
+        });
+      } else {
+        await openGoogleMapsToPoint(point, offer?.vehicleType);
+      }
     } catch (_e) {
       setError(which === 'waze'
         ? 'Não foi possível abrir o Waze. Tente o Google Maps.'
@@ -422,8 +491,8 @@ export default function ActiveRide() {
             <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Ir buscar o passageiro</Text>
             <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{pickup.label || 'Local de embarque'}</Text>
             <View style={{ gap: spacing.sm }}>
-              <AppButton title="Abrir no Waze" onPress={() => openNav(pickup, 'waze')} />
-              <AppButton title="Abrir no Google Maps" onPress={() => openNav(pickup, 'gmaps')} />
+              <AppButton title="Abrir no Waze" onPress={() => openNav(pickup, 'waze', 'pickup')} />
+              <AppButton title="Abrir no Google Maps" onPress={() => openNav(pickup, 'gmaps', 'pickup')} />
             </View>
           </AppCard>
         ) : null}
@@ -442,8 +511,8 @@ export default function ActiveRide() {
               <>
                 <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{destination.label || 'Destino da corrida'}</Text>
                 <View style={{ gap: spacing.sm }}>
-                  <AppButton title="Abrir no Waze" onPress={() => openNav(destination, 'waze')} />
-                  <AppButton title="Abrir no Google Maps" onPress={() => openNav(destination, 'gmaps')} />
+                  <AppButton title="Abrir no Waze" onPress={() => openNav(destination, 'waze', 'destination')} />
+                  <AppButton title="Abrir no Google Maps" onPress={() => openNav(destination, 'gmaps', 'destination')} />
                 </View>
               </>
             ) : (
