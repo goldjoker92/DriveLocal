@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
+import Constants from 'expo-constants';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import AppButton from './AppButton';
 import { colors } from '../constants/colors';
@@ -81,6 +82,7 @@ export default function RideTrackingMap({
   driverLocation,
   vehicleType = 'car',
   showEta = true,
+  etaContext = 'pickup',
 }) {
   const mapRef = useRef(null);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -90,6 +92,12 @@ export default function RideTrackingMap({
   const fresh = isTrackingLocationFresh(driverLocation, nowMs, DEFAULT_TRACKING_STALE_MS);
   const directDistanceKm = distanceKm(driverPoint, targetPoint);
   const eta = etaRange(directDistanceKm, vehicleType);
+  const distanceText = Number.isFinite(directDistanceKm)
+    ? directDistanceKm < 1
+      ? `${Math.max(50, Math.round(directDistanceKm * 1000))} m`
+      : `${directDistanceKm.toFixed(1)} km`
+    : null;
+  const googleMapsAndroidConfigured = Constants.expoConfig?.extra?.googleMapsAndroidConfigured === true;
 
   const initialRegion = useMemo(
     () => regionAround([targetPoint, driverPoint]),
@@ -106,13 +114,14 @@ export default function RideTrackingMap({
     logRideClientEvent('ride.map.tracking_state_changed', {
       rideId,
       mapReady,
+      googleMapsAndroidConfigured,
       hasTarget: !!targetPoint,
       hasDriverLocation: !!driverPoint,
       fresh,
       distanceKm: directDistanceKm,
       updatedAtMs: driverLocation?.updatedAtMs || null,
     });
-  }, [rideId, mapReady, !!targetPoint, !!driverPoint, fresh]);
+  }, [rideId, mapReady, googleMapsAndroidConfigured, !!targetPoint, !!driverPoint, fresh]);
 
   useEffect(() => {
     if (!mapRef.current || !targetPoint || !driverPoint) return;
@@ -158,7 +167,7 @@ export default function RideTrackingMap({
           moveOnMarkerPress={false}
           onMapReady={() => {
             setMapReady(true);
-            logRideClientEvent('ride.map.ready', { rideId });
+            logRideClientEvent('ride.map.ready', { rideId, googleMapsAndroidConfigured });
           }}
         >
           {targetPoint ? (
@@ -199,11 +208,11 @@ export default function RideTrackingMap({
         </MapView>
       </View>
 
-      {showEta && driverPoint && targetPoint && eta ? (
+      {showEta && driverPoint && targetPoint && eta && distanceText ? (
         <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
-          {directDistanceKm < 1
-            ? `${Math.max(50, Math.round(directDistanceKm * 1000))} m • chegada estimada em ${eta.min}–${eta.max} min`
-            : `${directDistanceKm.toFixed(1)} km • chegada estimada em ${eta.min}–${eta.max} min`}
+          {etaContext === 'destination'
+            ? `${distanceText} restantes • chegada estimada em ${eta.min}–${eta.max} min`
+            : `${distanceText} • chegada estimada em ${eta.min}–${eta.max} min`}
         </Text>
       ) : null}
 
@@ -223,9 +232,13 @@ export default function RideTrackingMap({
         <AppButton title="Centralizar" variant="ghost" onPress={recenter} />
       </View>
 
-      {!mapReady ? (
+      {!googleMapsAndroidConfigured ? (
+        <Text style={[{ fontFamily, color: colors.warning }, typography.caption]}>
+          Este build Android não contém uma chave Google Maps. Configure GOOGLE_MAPS_ANDROID_API_KEY e gere um novo build nativo.
+        </Text>
+      ) : !mapReady ? (
         <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>
-          Carregando o mapa… Se ele permanecer escuro, verifique a configuração da chave Google Maps deste build.
+          Carregando o mapa… Se ele permanecer escuro, verifique a chave, o package e o SHA-1 deste build.
         </Text>
       ) : null}
     </View>
