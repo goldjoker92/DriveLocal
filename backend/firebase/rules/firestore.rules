@@ -90,12 +90,10 @@ service cloud.firestore {
         request.resource.data.driverPhotoSubmittedAt == request.time &&
         request.resource.data.driverPhotoRejectionCode == null &&
         request.resource.data.driverPhotoRejectionReason == null &&
-        request.resource.data.updatedAt == request.time &&
-        // Client submission can never publish or approve a photo.
-        request.resource.data.driverPhotoPublicPath == resource.data.driverPhotoPublicPath &&
-        request.resource.data.driverPhotoPublicVersion == resource.data.driverPhotoPublicVersion &&
-        request.resource.data.driverPhotoApprovedAt == resource.data.driverPhotoApprovedAt &&
-        request.resource.data.driverPhotoApprovedBy == resource.data.driverPhotoApprovedBy;
+        request.resource.data.updatedAt == request.time;
+      // Public approval fields are intentionally absent from the allow-list above.
+      // This works for both first-time photos (where those fields do not exist) and
+      // replacements, while preventing the client from publishing or approving.
     }
 
     function newPhotoPackageSubmitted() {
@@ -112,7 +110,7 @@ service cloud.firestore {
     }
 
     // A driver may submit the package while the profile photo is pending. The
-    // secure approveDriver callable separately requires the public photo approval.
+    // secure approveDriver callable separately requires public photo approval.
     function requiredDriverDocumentsSubmitted() {
       return request.resource.data.profileStatus == 'complete' &&
         request.resource.data.vehicleStatus == 'complete' &&
@@ -306,6 +304,7 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // One current point per ride, never a route history.
     match /activeRideLocations/{rideId} {
       allow read: if isAdmin() || isAcceptedRideDriver(rideId) || isRidePassenger(rideId);
 
