@@ -1,23 +1,26 @@
 // Passenger active-ride screen (route "/driver-accepted").
-// The layout evolves with the server-authoritative ride status: approaching,
-// arrived, in progress and payment. No client-side status is invented.
+// The server-authoritative acceptedDriverPublic snapshot contains only approved,
+// passenger-safe identity fields. Private selfie/document paths never reach here.
 
 import { useEffect, useState } from 'react';
 import { Image, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import AdminTableRow from '../../components/AdminTableRow';
 import RideTrackingMap from '../../components/RideTrackingMap';
 import { colors } from '../../constants/colors';
-import { radius, spacing } from '../../constants/spacing';
+import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
+import { getDriverPhotoDownloadUrl } from '../../services/driverPhotoService';
+import { listenToRide, listenToRideLocation, cancelRide } from '../../services/ridesService';
+import { firstName } from '../../utils/driverPhoto';
+import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 import { formatBRL } from '../../utils/format';
 import { logRideClientEvent } from '../../utils/clientRideLog';
-import { listenToRide, listenToRideLocation, cancelRide } from '../../services/ridesService';
 
 const MAP_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
 
@@ -54,18 +57,12 @@ const PHASES = {
   },
 };
 
-function resolveDriverPhoto(driver) {
-  return driver.photoUrl
-    || driver.profilePhotoUrl
-    || driver.driverPhotoUrl
-    || driver.selfieUrl
-    || null;
-}
-
-function DriverIdentityCard({ driver, ride }) {
-  const photoUrl = resolveDriverPhoto(driver);
+function DriverIdentityCard({ driver, ride, photoUrl, onPhotoError }) {
   const vehicleType = driver.vehicleType || ride.vehicleType;
-  const model = [driver.vehicleMake, driver.vehicleModel, driver.vehicleColor].filter(Boolean).join(' ');
+  const model = [driver.vehicleMake, driver.vehicleModel, driver.vehicleColor]
+    .filter(Boolean)
+    .join(' • ');
+  const photoVerified = driver.photoVerified === true && Boolean(photoUrl);
 
   return (
     <AppCard>
@@ -74,15 +71,16 @@ function DriverIdentityCard({ driver, ride }) {
           <Image
             source={{ uri: photoUrl }}
             resizeMode="cover"
-            style={{ width: 76, height: 76, borderRadius: 38, backgroundColor: colors.card }}
-            onError={() => logRideClientEvent('ride.passenger.driver_photo_failed', { rideId: ride.rideId, hasPhotoUrl: true }, 'error')}
+            style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: colors.card }}
+            onError={onPhotoError}
+            accessibilityLabel="Foto verificada do motorista"
           />
         ) : (
           <View
             style={{
-              width: 76,
-              height: 76,
-              borderRadius: 38,
+              width: 88,
+              height: 88,
+              borderRadius: 44,
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: colors.card,
@@ -90,17 +88,26 @@ function DriverIdentityCard({ driver, ride }) {
               borderColor: colors.border,
             }}
           >
-            <Text style={{ fontSize: 34 }}>👤</Text>
+            <Text style={{ fontSize: 38 }}>👤</Text>
           </View>
         )}
 
         <View style={{ flex: 1, gap: 3 }}>
           <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>
-            {driver.name || 'Motorista DriveLocal'}
+            {firstName(driver.name)}
           </Text>
           <Text style={[{ fontFamily, color: colors.success }, typography.small]}>
             Motorista verificado ✓
           </Text>
+          {photoVerified ? (
+            <Text style={[{ fontFamily, color: colors.success }, typography.small]}>
+              Foto verificada ✓
+            </Text>
+          ) : (
+            <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>
+              Confira também o veículo e a placa.
+            </Text>
+          )}
           <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
             {VEHICLE_LABELS_PT_BR[vehicleType] || 'Veículo'}{model ? ` • ${model}` : ''}
           </Text>
@@ -109,6 +116,10 @@ function DriverIdentityCard({ driver, ride }) {
           </Text>
         </View>
       </View>
+
+      <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>
+        Confira o rosto, o veículo e a placa antes de embarcar.
+      </Text>
     </AppCard>
   );
 }
@@ -119,6 +130,7 @@ export default function DriverAccepted() {
   const rideId = typeof params.rideId === 'string' ? params.rideId : null;
   const [ride, setRide] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
+  const [driverPhotoUrl, setDriverPhotoUrl] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -133,6 +145,7 @@ export default function DriverAccepted() {
           rideId,
           status: nextRide.status,
           hasDriverPublic: !!nextRide.acceptedDriverPublic,
+          hasApprovedDriverPhoto: Boolean(nextRide.acceptedDriverPublic?.photoStoragePath),
         });
 
         if (nextRide.status === 'completed') {
@@ -162,6 +175,49 @@ export default function DriverAccepted() {
     );
   }, [rideId]);
 
+  const photoStoragePath = ride?.acceptedDriverPublic?.photoStoragePath;
+  const photoVerified = ride?.acceptedDriverPublic?.photoVerified === true;
+
+  useEffect(() => {
+    let active = true;
+    setDriverPhotoUrl(null);
+    if (!rideId || !photoVerified || !photoStoragePath) return undefined;
+
+    const startedAt = Date.now();
+    logDriverPhotoEvent('passenger.photo_load_started', {
+      status: 'approved',
+      hasApprovedPhoto: true,
+      action: 'ride_identity_card',
+    });
+
+    getDriverPhotoDownloadUrl(photoStoragePath)
+      .then((url) => {
+        if (!active) return;
+        setDriverPhotoUrl(url);
+        logDriverPhotoEvent('passenger.photo_load_succeeded', {
+          status: 'approved',
+          hasApprovedPhoto: true,
+          action: 'ride_identity_card',
+          durationMs: Date.now() - startedAt,
+        });
+      })
+      .catch((photoError) => {
+        if (active) setDriverPhotoUrl(null);
+        logDriverPhotoEvent('passenger.photo_load_failed', {
+          status: 'approved',
+          hasApprovedPhoto: true,
+          action: 'ride_identity_card',
+          code: photoError?.code,
+          message: photoError?.message,
+          durationMs: Date.now() - startedAt,
+        }, 'warn');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [rideId, photoStoragePath, photoVerified]);
+
   async function handleCancel() {
     if (!rideId || busy) return;
     setBusy(true);
@@ -169,9 +225,9 @@ export default function DriverAccepted() {
     try {
       await cancelRide(rideId, 'passageiro_cancelou');
       router.replace('/passenger-home');
-    } catch (e) {
-      setError(e?.message || 'Não foi possível cancelar a corrida.');
-      logRideClientEvent('ride.passenger.cancel_failed', { rideId, error: e }, 'error');
+    } catch (cancelError) {
+      setError(cancelError?.message || 'Não foi possível cancelar a corrida.');
+      logRideClientEvent('ride.passenger.cancel_failed', { rideId, error: cancelError }, 'error');
     } finally {
       setBusy(false);
     }
@@ -191,7 +247,10 @@ export default function DriverAccepted() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title={ride?.status === 'in_progress' ? 'Corrida em andamento' : 'Sua corrida'} onBack={() => router.back()} />
+        <Header
+          title={ride?.status === 'in_progress' ? 'Corrida em andamento' : 'Sua corrida'}
+          onBack={() => router.back()}
+        />
 
         {!rideId ? (
           <AppCard><Text style={[{ fontFamily, color: colors.danger }, typography.small]}>Corrida inválida.</Text></AppCard>
@@ -205,7 +264,19 @@ export default function DriverAccepted() {
               <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{phase.detail}</Text>
             </AppCard>
 
-            <DriverIdentityCard driver={driver} ride={ride} />
+            <DriverIdentityCard
+              driver={driver}
+              ride={ride}
+              photoUrl={driverPhotoUrl}
+              onPhotoError={() => {
+                setDriverPhotoUrl(null);
+                logDriverPhotoEvent('passenger.photo_render_failed', {
+                  status: 'approved',
+                  hasApprovedPhoto: true,
+                  action: 'ride_identity_card',
+                }, 'warn');
+              }}
+            />
 
             {showMap ? (
               <AppCard>
@@ -227,7 +298,10 @@ export default function DriverAccepted() {
             <AppCard>
               <AdminTableRow label="Origem" value={ride.pickup?.label || '—'} />
               <AdminTableRow label="Destino" value={ride.destination?.label || '—'} />
-              <AdminTableRow label="Preço estimado" value={formatBRL(ride.finalFareCentavos ?? ride.estimatedFareCentavos)} />
+              <AdminTableRow
+                label="Preço estimado"
+                value={formatBRL(ride.finalFareCentavos ?? ride.estimatedFareCentavos)}
+              />
             </AppCard>
 
             {ride.status === 'driver_arrived' ? (
@@ -242,7 +316,12 @@ export default function DriverAccepted() {
             ) : null}
 
             {canCancel ? (
-              <AppButton title={busy ? 'Cancelando…' : 'Cancelar corrida'} variant="ghost" onPress={handleCancel} disabled={busy} />
+              <AppButton
+                title={busy ? 'Cancelando…' : 'Cancelar corrida'}
+                variant="ghost"
+                onPress={handleCancel}
+                disabled={busy}
+              />
             ) : null}
           </>
         ) : rideId ? (
@@ -250,9 +329,7 @@ export default function DriverAccepted() {
         ) : null}
 
         {error ? (
-          <AppCard>
-            <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
-          </AppCard>
+          <AppCard><Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text></AppCard>
         ) : null}
       </ScrollView>
     </SafeAreaView>
