@@ -1,5 +1,5 @@
 // Driver profile-photo workflow constants shared by driver/admin screens.
-// The uploaded candidate stays private until an admin approves the public copy.
+// A pending/rejected replacement never disables the last approved public copy.
 
 export const DRIVER_PHOTO_STATUS = Object.freeze({
   MISSING: 'missing',
@@ -19,6 +19,8 @@ export const DRIVER_PHOTO_REJECTION_REASONS = Object.freeze([
   { code: 'other', label: 'Outro motivo' },
 ]);
 
+// Candidate review status. This may be pending/rejected while an older approved
+// public photo remains active for passengers.
 export function driverPhotoStatus(driver) {
   const status = driver?.driverPhotoReviewStatus;
   if (Object.values(DRIVER_PHOTO_STATUS).includes(status)) return status;
@@ -28,10 +30,14 @@ export function driverPhotoStatus(driver) {
   return DRIVER_PHOTO_STATUS.MISSING;
 }
 
+// Active passenger-facing photo is independent from the current candidate state.
+// This is the key replacement invariant: old approved photo stays visible until
+// a new candidate is approved and atomically becomes the active public path.
 export function hasApprovedDriverPhoto(driver) {
-  return driverPhotoStatus(driver) === DRIVER_PHOTO_STATUS.APPROVED
-    && typeof driver?.driverPhotoPublicPath === 'string'
-    && driver.driverPhotoPublicPath.length > 0;
+  return typeof driver?.driverPhotoPublicPath === 'string'
+    && driver.driverPhotoPublicPath.length > 0
+    && typeof driver?.driverPhotoPublicVersion === 'string'
+    && driver.driverPhotoPublicVersion.length > 0;
 }
 
 export function rejectionReasonLabel(code) {
