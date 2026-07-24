@@ -14,6 +14,15 @@ function pendingCandidate(overrides = {}) {
   };
 }
 
+function captureError(action) {
+  try {
+    action();
+    throw new Error('Expected action to throw');
+  } catch (error) {
+    return error;
+  }
+}
+
 describe('driver photo review guards', () => {
   it('accepts only exact private candidate paths', () => {
     expect(candidatePathsValid(
@@ -48,24 +57,22 @@ describe('driver photo review guards', () => {
   });
 
   it('rejects a stale admin decision after a replacement', () => {
-    expect(() => assertExpectedPendingCandidate(
+    const error = captureError(() => assertExpectedPendingCandidate(
       'driver-1',
       'photo_old',
       pendingCandidate({ driverPhotoCandidateVersion: 'photo_new' })
-    )).toThrow(expect.objectContaining({
-      code: 'INVALID_STATE_TRANSITION',
-      safeMetadata: { reason: 'PHOTO_CANDIDATE_CHANGED' },
-    }));
+    ));
+    expect(error.code).toBe('INVALID_STATE_TRANSITION');
+    expect(error.safeMetadata).toEqual({ reason: 'PHOTO_CANDIDATE_CHANGED' });
   });
 
   it('rejects decisions when the candidate is no longer pending', () => {
-    expect(() => assertExpectedPendingCandidate(
+    const error = captureError(() => assertExpectedPendingCandidate(
       'driver-1',
       'photo_1234_abcd',
       pendingCandidate({ driverPhotoReviewStatus: 'approved' })
-    )).toThrow(expect.objectContaining({
-      code: 'INVALID_STATE_TRANSITION',
-      safeMetadata: { reason: 'PHOTO_NOT_PENDING' },
-    }));
+    ));
+    expect(error.code).toBe('INVALID_STATE_TRANSITION');
+    expect(error.safeMetadata).toEqual({ reason: 'PHOTO_NOT_PENDING' });
   });
 });
