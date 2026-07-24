@@ -89,7 +89,6 @@ async function approveDriverPhoto({ db, request, context, clock }) {
   }
   const initial = initialSnap.data() || {};
 
-  // Idempotent replay after a successful previous approval.
   if (
     initial.driverPhotoReviewStatus === 'approved'
     && initial.driverPhotoPublicVersion === expectedVersion
@@ -118,8 +117,6 @@ async function approveDriverPhoto({ db, request, context, clock }) {
     version: expectedVersion,
   });
 
-  // Copy first, then atomically activate only if the same candidate is still
-  // pending. A concurrent replacement can never be accidentally approved.
   await source.copy(destination);
   await destination.setMetadata({
     contentType: 'image/jpeg',
@@ -167,8 +164,6 @@ async function approveDriverPhoto({ db, request, context, clock }) {
       return { replay: false, before, after: { ...before, ...update } };
     });
   } catch (error) {
-    // The public object is not referenced unless the transaction succeeds.
-    // Delete the orphan best-effort when the candidate changed mid-review.
     await destination.delete({ ignoreNotFound: true }).catch((cleanupError) => {
       logWarning(context, 'driver.photo.orphan_cleanup_failed', {
         operation: 'approve_driver_photo',
@@ -212,6 +207,7 @@ async function rejectDriverPhoto({ db, request, context, clock }) {
   const adminUid = await requireAdmin(db, request);
   const payload = assertShape(request?.data, {
     required: ['driverId', 'expectedVersion', 'reasonCode'],
+    optional: ['reason'],
   });
   const driverId = validateIdentifier(payload.driverId, 'driverId');
   const expectedVersion = validateIdentifier(payload.expectedVersion, 'expectedVersion');
@@ -256,7 +252,6 @@ async function rejectDriverPhoto({ db, request, context, clock }) {
       driverPhotoRejectedBy: adminUid,
       driverPhotoRejectionCode: reasonCode,
       driverPhotoRejectionReason: reason || null,
-      // Replacement rejection keeps the previously approved public photo active.
       selfieStatus: hasApprovedPhoto ? 'approved' : 'rejected',
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
