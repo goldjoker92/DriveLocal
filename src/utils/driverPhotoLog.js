@@ -1,8 +1,8 @@
 // Privacy-safe driver photo tracing. Never log local URIs, download URLs, image
-// bytes, CPF, document values or raw Firebase Storage paths.
+// bytes, raw user IDs, CPF, document values or Firebase Storage paths.
+// Candidate version + event + duration provide enough correlation for debugging.
 
 const ALLOWED_KEYS = new Set([
-  'driverId',
   'version',
   'status',
   'source',
