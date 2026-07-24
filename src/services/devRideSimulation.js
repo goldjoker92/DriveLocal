@@ -17,6 +17,7 @@ import { normalizeTrackingPoint } from '../utils/rideTracking';
 import { createDevTraceId, logDevTrace } from '../utils/devTrace';
 
 const DIAGNOSTIC_STATE_KEY = '@drivelocal/dev-ride-simulation-state-v1';
+const NAVIGATION_ORIGIN_STATUSES = new Set(['running', 'paused', 'completed']);
 
 let runtime = null;
 let currentState = null;
@@ -177,6 +178,18 @@ export function subscribeDevRideSimulation(listener) {
   listeners.add(listener);
   if (currentState) listener(publicState(currentState));
   return () => listeners.delete(listener);
+}
+
+export function getDevSimulatedCurrentPoint(rideId = null) {
+  if (!DEV_RIDE_SIMULATOR_ENABLED || !runtime || !currentState) return null;
+  if (rideId && currentState.rideId !== rideId) return null;
+  if (!NAVIGATION_ORIGIN_STATUSES.has(currentState.status)) return null;
+
+  const route = Array.isArray(runtime.route) ? runtime.route : [];
+  if (route.length === 0) return null;
+  const rawIndex = Number(currentState.stepIndex || 0);
+  const index = Math.max(0, Math.min(Number.isFinite(rawIndex) ? rawIndex : 0, route.length - 1));
+  return normalizeTrackingPoint(route[index]);
 }
 
 export async function getDevRideSimulationState() {

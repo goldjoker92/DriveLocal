@@ -1,7 +1,22 @@
 const appJson = require('./app.json');
 
 const expoConfig = appJson.expo ?? {};
-const googleMapsAndroidApiKey = process.env.GOOGLE_MAPS_ANDROID_API_KEY || '';
+const googleMapsAndroidApiKey = String(process.env.GOOGLE_MAPS_ANDROID_API_KEY || '').trim();
+const easBuildActive = ['1', 'true'].includes(
+  String(process.env.EAS_BUILD || '').trim().toLowerCase()
+);
+
+if (!googleMapsAndroidApiKey) {
+  const message =
+    '[app.config] GOOGLE_MAPS_ANDROID_API_KEY is empty. Android Google Maps tiles '
+    + 'will remain black until the key is provided and a new native Android build is created.';
+
+  // Never publish an EAS binary that is known to contain an unusable Google map.
+  // Local config commands keep working so the developer can add the variable and rebuild.
+  if (easBuildActive) throw new Error(message);
+  console.warn(message);
+}
+
 const normalizedAppEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
 // Only an explicit development value may enable development behavior. Missing,
 // misspelled or unknown environments are treated as production (fail closed).

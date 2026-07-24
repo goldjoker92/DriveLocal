@@ -3,6 +3,7 @@
 // links open the installed app when available and otherwise fall back to the web.
 
 import { Linking } from 'react-native';
+import { logRideClientEvent } from './clientRideLog';
 
 export function isValidMapPoint(point) {
   const lat = Number(point?.lat);
@@ -61,16 +62,43 @@ export function buildWazePointUrl(point, vehicleType = 'car') {
   return `https://waze.com/ul?${params.toString()}`;
 }
 
+async function openTracedNavigation(provider, url, point, vehicleType) {
+  const destination = assertPoint(point);
+  logRideClientEvent('navigation.external_open_started', {
+    provider,
+    vehicleType,
+    destination,
+  });
+  try {
+    await Linking.openURL(url);
+    logRideClientEvent('navigation.external_open_succeeded', {
+      provider,
+      vehicleType,
+      destination,
+    });
+  } catch (error) {
+    logRideClientEvent('navigation.external_open_failed', {
+      provider,
+      vehicleType,
+      destination,
+      error,
+    }, 'error');
+    throw error;
+  }
+}
+
 export function openGoogleMapsRoute(input) {
-  return Linking.openURL(buildGoogleMapsRouteUrl(input));
+  const destination = assertPoint(input.destination);
+  const url = buildGoogleMapsRouteUrl(input);
+  return openTracedNavigation('google_maps_route', url, destination, input.vehicleType || 'car');
 }
 
 export function openGoogleMapsToPoint(point, vehicleType = 'car') {
-  return Linking.openURL(buildGoogleMapsPointUrl(point, vehicleType));
+  return openTracedNavigation('google_maps', buildGoogleMapsPointUrl(point, vehicleType), point, vehicleType);
 }
 
 export function openWazeToPoint(point, vehicleType = 'car') {
-  return Linking.openURL(buildWazePointUrl(point, vehicleType));
+  return openTracedNavigation('waze', buildWazePointUrl(point, vehicleType), point, vehicleType);
 }
 
 export function openWazeRoute({ lat, lng, vehicleType = 'car' }) {

@@ -151,11 +151,28 @@ export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
       if (rideId && data.rideId !== rideId) return;
       const candidate = { offerId: d.id, ...data };
       if (data.status === 'accepted') {
-        if (!TERMINAL_DRIVER_RIDE_STATUSES.has(data.driverRideStatus)) accepted = newer(accepted, candidate);
+        // Driver home ignores historical terminal offers. An explicitly opened ride,
+        // however, keeps receiving its final status so success/error feedback can be
+        // shown before the payment screen closes.
+        if (rideId || !TERMINAL_DRIVER_RIDE_STATUSES.has(data.driverRideStatus)) {
+          accepted = newer(accepted, candidate);
+        }
       } else if (data.status === 'offered' && Number(data.expiresAtMs || 0) > nowMs) {
         offered = newer(offered, candidate);
       }
     });
-    onData(accepted || offered);
-  }, (err) => onError && onError(err));
+
+    const selected = accepted || offered;
+    logRideClientEvent('ride.driver_offer.snapshot_received', {
+      rideId: selected?.rideId || rideId,
+      offerStatus: selected?.status || 'missing',
+      driverRideStatus: selected?.driverRideStatus || null,
+      hasPaymentAmount: selected?.paymentAmountCentavos != null,
+      hasPaymentPayload: !!selected?.paymentPixPayload,
+    });
+    onData(selected);
+  }, (err) => {
+    logRideClientEvent('ride.driver_offer.listener_failed', { rideId, error: err }, 'error');
+    if (onError) onError(err);
+  });
 }

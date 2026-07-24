@@ -19,6 +19,7 @@ import { typography, fontFamily } from '../../constants/typography';
 import { FOUNDER_LABEL_PT_BR } from '../../constants/founderOfferRules';
 import { WALLET_FALLBACK_LOW_THRESHOLD_CENTS } from '../../constants/walletRules';
 import { auth } from '../../config/firebase';
+import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { getDriver, setDriverAvailability } from '../../services/driverService';
 import { isFounderCommissionFreeActive } from '../../services/founderService';
 import {
@@ -27,6 +28,7 @@ import {
   startDriverOnlineTracking,
   stopDriverOnlineTracking,
 } from '../../services/driverLocationTracking';
+import { getRobotDriverState, stopRobotDriver } from '../../services/robotDriverEngine';
 import {
   AVAILABILITY,
   formatDateBR,
@@ -82,6 +84,10 @@ function trackingErrorLabel(status) {
   return labels[status] || 'Não foi possível iniciar a localização do motorista.';
 }
 
+function robotSimulationActive() {
+  return DEV_RIDE_SIMULATOR_ENABLED && getRobotDriverState().enabled;
+}
+
 export default function DriverHome() {
   const router = useRouter();
   const [driver, setDriver] = useState(null);
@@ -121,11 +127,20 @@ export default function DriverHome() {
         setAvailability(online ? AVAILABILITY.ONLINE : AVAILABILITY.OFFLINE);
 
         if (online) {
-          const restored = await restoreDriverOnlineTracking({
-            driverId: uid,
-            vehicleType: data?.vehicleType,
-          });
-          if (active) setTrackingActive(restored.status === 'active');
+          if (robotSimulationActive()) {
+            console.log('[ROBOT_DRIVER] online_restore.native_tracking_skipped', {
+              reason: 'robot_simulation_active',
+              driverId: uid,
+              atMs: Date.now(),
+            });
+            if (active) setTrackingActive(true);
+          } else {
+            const restored = await restoreDriverOnlineTracking({
+              driverId: uid,
+              vehicleType: data?.vehicleType,
+            });
+            if (active) setTrackingActive(restored.status === 'active');
+          }
         }
       })
       .catch(() => {
@@ -165,23 +180,34 @@ export default function DriverHome() {
 
     setSavingAvailability(true);
     try {
-      const permission = await getDriverTrackingPermissionState();
-      if (permission.status !== 'granted') {
-        const consented = await confirmTrackingDisclosure();
-        if (!consented) {
-          setAvailabilityError('A localização em segundo plano é necessária para receber corridas.');
+      const robotActive = robotSimulationActive();
+      if (robotActive) {
+        // Robot Driver already owns the authoritative dispatch position. Starting
+        // the native task here would briefly overwrite it with the phone GPS.
+        console.log('[ROBOT_DRIVER] go_online.native_tracking_skipped', {
+          reason: 'robot_simulation_active',
+          driverId: uid,
+          atMs: Date.now(),
+        });
+      } else {
+        const permission = await getDriverTrackingPermissionState();
+        if (permission.status !== 'granted') {
+          const consented = await confirmTrackingDisclosure();
+          if (!consented) {
+            setAvailabilityError('A localização em segundo plano é necessária para receber corridas.');
+            return;
+          }
+        }
+
+        const tracking = await startDriverOnlineTracking({
+          driverId: uid,
+          vehicleType: driver?.vehicleType,
+          requestPermissions: permission.status !== 'granted',
+        });
+        if (tracking.status !== 'active') {
+          setAvailabilityError(trackingErrorLabel(tracking.status));
           return;
         }
-      }
-
-      const tracking = await startDriverOnlineTracking({
-        driverId: uid,
-        vehicleType: driver?.vehicleType,
-        requestPermissions: permission.status !== 'granted',
-      });
-      if (tracking.status !== 'active') {
-        setAvailabilityError(trackingErrorLabel(tracking.status));
-        return;
       }
 
       await setDriverAvailability(uid, AVAILABILITY.ONLINE);
@@ -189,7 +215,9 @@ export default function DriverHome() {
       setTrackingActive(true);
       setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.ONLINE } : current);
     } catch (_error) {
-      await stopDriverOnlineTracking().catch(() => undefined);
+      if (!robotSimulationActive()) {
+        await stopDriverOnlineTracking().catch(() => undefined);
+      }
       setTrackingActive(false);
       setAvailability(AVAILABILITY.OFFLINE);
       setAvailabilityError('Não foi possível ativar sua disponibilidade e localização.');
@@ -208,7 +236,11 @@ export default function DriverHome() {
     setSavingAvailability(true);
     try {
       await setDriverAvailability(uid, AVAILABILITY.OFFLINE);
-      await stopDriverOnlineTracking();
+      if (robotSimulationActive()) {
+        await stopRobotDriver();
+      } else {
+        await stopDriverOnlineTracking();
+      }
       setAvailability(AVAILABILITY.OFFLINE);
       setTrackingActive(false);
       setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.OFFLINE } : current);
@@ -298,7 +330,9 @@ export default function DriverHome() {
               </View>
               {isAvailable ? (
                 <Line tone={trackingActive ? 'success' : 'warning'}>
-                  {trackingActive ? 'Localização de trabalho ativa.' : 'Verificando localização de trabalho…'}
+                  {trackingActive
+                    ? (robotSimulationActive() ? 'Localização simulada ativa.' : 'Localização de trabalho ativa.')
+                    : 'Verificando localização de trabalho…'}
                 </Line>
               ) : null}
               {!eligibility.eligible ? (
