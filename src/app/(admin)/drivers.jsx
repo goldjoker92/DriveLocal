@@ -1,24 +1,18 @@
-// ============================================================
 // Admin drivers list (route "/(admin)/drivers").
-// Iteration 1C — filterable list of drivers by verificationStatus.
-//
-// Accepts an optional ?status= param (from the dashboard KPI tiles) to preselect
-// a tab. "all" (or missing) shows every driver. Data is fetched once with
-// getAllDrivers() (admin-only per Firestore rules) and filtered client-side, so
-// no composite index is required. Errors are shown as UI, never a red screen.
-// ============================================================
+// Filterable, bounded admin view with direct access to profile-photo review.
 
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, View, Text, Pressable } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppBadge from '../../components/AppBadge';
 import { colors } from '../../constants/colors';
-import { spacing, radius } from '../../constants/spacing';
+import { radius, spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
+import { driverPhotoStatus } from '../../constants/driverPhoto';
 import { auth, db } from '../../config/firebase';
 import { getAllDrivers } from '../../services/driverService';
 import {
@@ -28,8 +22,8 @@ import {
   documentsLabel,
 } from '../../constants/driverStatuses';
 import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
+import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 
-// Filter tabs. "all" is a virtual value (no status filter).
 const TABS = [
   { key: VERIFICATION_STATUS.PENDING_REVIEW, label: 'Em análise' },
   { key: VERIFICATION_STATUS.APPROVED, label: 'Aprovados' },
@@ -39,26 +33,42 @@ const TABS = [
   { key: 'all', label: 'Todos' },
 ];
 
-// Formats a Firestore Timestamp/Date as "28/06/2026".
 function formatDate(value) {
   if (!value) return null;
-  const date =
-    typeof value.toDate === 'function' ? value.toDate() : value instanceof Date ? value : null;
+  const date = typeof value.toDate === 'function'
+    ? value.toDate()
+    : value instanceof Date
+      ? value
+      : null;
   if (!date) return null;
-  const pad = (n) => String(n).padStart(2, '0');
+  const pad = (number) => String(number).padStart(2, '0');
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
-function driverName(d) {
-  return d.fullName || d.displayName || d.email || d.id;
+function driverName(driver) {
+  return driver.fullName || driver.displayName || driver.email || driver.id;
 }
 
-// One driver card in the list.
-function DriverCard({ driver, onPress }) {
-  const vehicle = driver.vehicleType ? VEHICLE_LABELS_PT_BR[driver.vehicleType] || driver.vehicleType : '—';
+function photoBadge(status) {
+  const map = {
+    approved: { label: 'Foto aprovada', tone: 'success' },
+    pending: { label: 'Foto em análise', tone: 'warning' },
+    rejected: { label: 'Foto a corrigir', tone: 'danger' },
+    missing: { label: 'Sem foto', tone: 'neutral' },
+  };
+  return map[status] || map.missing;
+}
+
+function DriverCard({ driver, onPress, onPhotoPress }) {
+  const vehicle = driver.vehicleType
+    ? VEHICLE_LABELS_PT_BR[driver.vehicleType] || driver.vehicleType
+    : '—';
   const brandModel = [driver.vehicleBrand, driver.vehicleModel].filter(Boolean).join(' ') || '—';
   const plate = driver.vehiclePlate || driver.plate || '—';
   const submitted = formatDate(driver.submittedAt);
+  const photoStatus = driverPhotoStatus(driver);
+  const photo = photoBadge(photoStatus);
+  const photoNeedsAction = photoStatus === 'pending' || photoStatus === 'rejected';
 
   return (
     <AppCard>
@@ -72,12 +82,15 @@ function DriverCard({ driver, onPress }) {
         />
       </View>
 
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs }}>
+        <AppBadge label={photo.label} tone={photo.tone} />
+        {photoNeedsAction ? <AppBadge label="Ação necessária" tone="warning" /> : null}
+      </View>
+
       <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
         {vehicle} · {brandModel}
       </Text>
-      <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
-        Placa: {plate}
-      </Text>
+      <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Placa: {plate}</Text>
       <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
         {documentsLabel(driver.documentsStatus)}
       </Text>
@@ -87,9 +100,21 @@ function DriverCard({ driver, onPress }) {
         </Text>
       ) : null}
 
-      <Pressable onPress={onPress} hitSlop={8} style={{ alignSelf: 'flex-start', marginTop: spacing.xs }}>
-        <Text style={[{ fontFamily, color: colors.primary }, typography.bodyBold]}>Ver cadastro ›</Text>
-      </Pressable>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xs }}>
+        <Pressable onPress={onPress} hitSlop={8}>
+          <Text style={[{ fontFamily, color: colors.primary }, typography.bodyBold]}>Ver cadastro ›</Text>
+        </Pressable>
+        <Pressable onPress={onPhotoPress} hitSlop={8}>
+          <Text
+            style={[
+              { fontFamily, color: photoNeedsAction ? colors.warning : colors.primary },
+              typography.bodyBold,
+            ]}
+          >
+            {photoStatus === 'pending' ? 'Revisar foto ›' : 'Ver foto ›'}
+          </Text>
+        </Pressable>
+      </View>
     </AppCard>
   );
 }
@@ -98,28 +123,22 @@ export default function DriversList() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const initialStatus = typeof params.status === 'string' ? params.status : 'all';
-
   const [activeTab, setActiveTab] = useState(initialStatus);
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Garde admin : l'utilisateur courant doit exister dans admins/{uid}.
   useEffect(() => {
     let active = true;
-    const uid = auth.currentUser && auth.currentUser.uid;
+    const uid = auth.currentUser?.uid;
     console.log('[ADMIN] guard check drivers uid=', uid);
     if (!uid) {
       router.replace('/(auth)/login');
       return undefined;
     }
     getDoc(doc(db, 'admins', uid))
-      .then((snap) => {
-        if (!active) return;
-        if (!snap.exists()) {
-          console.log('[ADMIN] guard failed drivers -> /(auth)/login');
-          router.replace('/(auth)/login');
-        }
+      .then((snapshot) => {
+        if (active && !snapshot.exists()) router.replace('/(auth)/login');
       })
       .catch(() => {
         if (active) router.replace('/(auth)/login');
@@ -127,21 +146,19 @@ export default function DriversList() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [router]);
 
-  // Fetch all drivers once; filter client-side by tab.
   useEffect(() => {
     let active = true;
     setLoading(true);
     getAllDrivers()
       .then((list) => {
-        if (active) {
-          setDrivers(list);
-          setError('');
-        }
+        if (!active) return;
+        setDrivers(list);
+        setError('');
       })
-      .catch((e) => {
-        console.log('[ADMIN] drivers list error', e.message);
+      .catch((loadError) => {
+        console.log('[ADMIN] drivers list error', loadError?.message || 'unknown');
         if (active) setError('Não foi possível carregar os motoristas.');
       })
       .finally(() => {
@@ -154,7 +171,7 @@ export default function DriversList() {
 
   const filtered = useMemo(() => {
     if (activeTab === 'all') return drivers;
-    return drivers.filter((d) => d.verificationStatus === activeTab);
+    return drivers.filter((driver) => driver.verificationStatus === activeTab);
   }, [drivers, activeTab]);
 
   function openDetail(driverId) {
@@ -162,15 +179,24 @@ export default function DriversList() {
     router.push({ pathname: '/(admin)/driver-detail', params: { driverId } });
   }
 
+  function openPhoto(driver) {
+    logDriverPhotoEvent('admin.list_open_review', {
+      driverId: driver.id,
+      status: driverPhotoStatus(driver),
+      hasCandidate: Boolean(driver.driverPhotoCandidatePublicPath),
+      hasApprovedPhoto: Boolean(driver.driverPhotoPublicPath),
+    });
+    router.push({ pathname: '/(admin)/driver-photo-review', params: { driverId: driver.id } });
+  }
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
         <Header title="Motoristas" subtitle="Horizonte / CE" onBack={() => router.back()} />
 
-        {/* Filter tabs */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
           {TABS.map((tab) => {
-            const active = activeTab === tab.key;
+            const selected = activeTab === tab.key;
             return (
               <Pressable
                 key={tab.key}
@@ -180,13 +206,13 @@ export default function DriversList() {
                   paddingHorizontal: spacing.md,
                   borderRadius: radius.pill,
                   borderWidth: 1,
-                  borderColor: active ? colors.primary : colors.border,
-                  backgroundColor: active ? colors.primary : colors.background,
+                  borderColor: selected ? colors.primary : colors.border,
+                  backgroundColor: selected ? colors.primary : colors.background,
                 }}
               >
                 <Text
                   style={[
-                    { fontFamily, color: active ? colors.white : colors.textMuted },
+                    { fontFamily, color: selected ? colors.white : colors.textMuted },
                     typography.small,
                   ]}
                 >
@@ -206,7 +232,14 @@ export default function DriversList() {
             Nenhum motorista nesta categoria.
           </Text>
         ) : (
-          filtered.map((d) => <DriverCard key={d.id} driver={d} onPress={() => openDetail(d.id)} />)
+          filtered.map((driver) => (
+            <DriverCard
+              key={driver.id}
+              driver={driver}
+              onPress={() => openDetail(driver.id)}
+              onPhotoPress={() => openPhoto(driver)}
+            />
+          ))
         )}
       </ScrollView>
     </SafeAreaView>
