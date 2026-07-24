@@ -18,6 +18,11 @@ import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { FOUNDER_LABEL_PT_BR } from '../../constants/founderOfferRules';
 import { WALLET_FALLBACK_LOW_THRESHOLD_CENTS } from '../../constants/walletRules';
+import {
+  driverPhotoStatus,
+  hasApprovedDriverPhoto,
+  rejectionReasonLabel,
+} from '../../constants/driverPhoto';
 import { auth } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { getDriver, setDriverAvailability } from '../../services/driverService';
@@ -42,6 +47,7 @@ import {
   subscriptionDisplay,
   commissionDisplay,
 } from '../../utils/driverCockpit';
+import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 
 function SectionTitle({ children }) {
   return (
@@ -88,6 +94,13 @@ function robotSimulationActive() {
   return DEV_RIDE_SIMULATOR_ENABLED && getRobotDriverState().enabled;
 }
 
+function photoBadge(status, activePublicPhoto) {
+  if (status === 'pending') return { label: 'Nova foto em análise', tone: 'warning' };
+  if (status === 'rejected') return { label: 'Nova foto recusada', tone: 'danger' };
+  if (activePublicPhoto) return { label: 'Foto aprovada', tone: 'success' };
+  return { label: 'Foto necessária', tone: 'neutral' };
+}
+
 export default function DriverHome() {
   const router = useRouter();
   const [driver, setDriver] = useState(null);
@@ -111,8 +124,7 @@ export default function DriverHome() {
         if (!active) return;
         setDriver(data);
 
-        // Old builds wrote "available", but the secure dispatch accepts only
-        // "online". Fail closed and require a fresh explicit GPS activation.
+        // Old builds wrote "available", but secure dispatch accepts only "online".
         if (data?.availabilityStatus === 'available') {
           await setDriverAvailability(uid, AVAILABILITY.OFFLINE).catch(() => undefined);
           if (active) {
@@ -165,6 +177,19 @@ export default function DriverHome() {
   const subscription = subscriptionDisplay(driver, nowMs);
   const commission = commissionDisplay(driver, nowMs);
   const isAvailable = availability === AVAILABILITY.ONLINE;
+  const photoStatus = driverPhotoStatus(driver);
+  const activePublicPhoto = hasApprovedDriverPhoto(driver);
+  const photo = photoBadge(photoStatus, activePublicPhoto);
+
+  function openDriverPhoto() {
+    logDriverPhotoEvent('cockpit.open_photo', {
+      driverId: uid,
+      status: photoStatus,
+      hasApprovedPhoto: activePublicPhoto,
+      action: activePublicPhoto ? 'manage_or_replace' : 'initial',
+    });
+    router.push({ pathname: '/(driver)/driver-photo', params: { returnTo: 'home' } });
+  }
 
   async function goAvailable() {
     setAvailabilityError('');
@@ -182,8 +207,6 @@ export default function DriverHome() {
     try {
       const robotActive = robotSimulationActive();
       if (robotActive) {
-        // Robot Driver already owns the authoritative dispatch position. Starting
-        // the native task here would briefly overwrite it with the phone GPS.
         console.log('[ROBOT_DRIVER] go_online.native_tracking_skipped', {
           reason: 'robot_simulation_active',
           driverId: uid,
@@ -288,6 +311,32 @@ export default function DriverHome() {
               {driver.approvalNumber ? (
                 <AdminTableRow label="Número de aprovação" value={`#${driver.approvalNumber}`} />
               ) : null}
+            </AppCard>
+
+            <AppCard>
+              <SectionTitle>FOTO DO MOTORISTA</SectionTitle>
+              <AppBadge label={photo.label} tone={photo.tone} />
+              {activePublicPhoto ? (
+                <Line tone="success">Sua foto aprovada continua visível aos passageiros.</Line>
+              ) : (
+                <Line>Envie uma foto clara para o passageiro reconhecer você.</Line>
+              )}
+              {photoStatus === 'pending' ? (
+                <Line tone="warning">
+                  A nova candidata está em análise. A foto aprovada anterior, se existir, permanece ativa.
+                </Line>
+              ) : null}
+              {photoStatus === 'rejected' ? (
+                <Line tone="warning">
+                  {driver.driverPhotoRejectionReason
+                    || rejectionReasonLabel(driver.driverPhotoRejectionCode)}
+                </Line>
+              ) : null}
+              <AppButton
+                title={activePublicPhoto ? 'Ver ou trocar minha foto' : 'Enviar minha foto'}
+                variant="secondary"
+                onPress={openDriverPhoto}
+              />
             </AppCard>
 
             <AppCard>

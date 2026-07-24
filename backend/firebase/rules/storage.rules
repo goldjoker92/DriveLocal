@@ -2,18 +2,66 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Documents chauffeur
-    // Écriture : uniquement le chauffeur lui-même (auth.uid == driverId)
-    // Lecture : uniquement les admins (vérifiée via Firestore)
-    match /drivers/{driverId}/{document=**} {
-      allow write: if request.auth != null
-                   && request.auth.uid == driverId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-      allow read: if request.auth != null;
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Tout le reste : fermé
+    function isAdmin() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    function isOwner(driverId) {
+      return isSignedIn() && request.auth.uid == driverId;
+    }
+
+    function validDriverImageWrite() {
+      return request.resource != null &&
+        request.resource.size > 0 &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+    }
+
+    function validProfilePhotoWrite() {
+      return request.resource != null &&
+        request.resource.size > 0 &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/(jpeg|jpg)');
+    }
+
+    // Once a version is registered in drivers/{uid}, its source files become
+    // immutable. A malicious/old client cannot replace the bytes after the admin
+    // has opened the candidate. A replacement always receives a new version path.
+    function candidateVersionRegistered(driverId, version) {
+      return firestore.exists(/databases/(default)/documents/drivers/$(driverId)) &&
+        firestore.get(/databases/(default)/documents/drivers/$(driverId))
+          .data.get('driverPhotoCandidateVersion', '') == version;
+    }
+
+    // Dedicated private profile-photo package. The backend later publishes it as
+    // JPEG, so mismatched PNG/WebP bytes with a .jpg name are rejected here.
+    match /drivers/{driverId}/profile-photo/{version}/{fileName} {
+      allow write: if isOwner(driverId) &&
+        fileName in ['original.jpg', 'public-candidate.jpg'] &&
+        validProfilePhotoWrite() &&
+        !candidateVersionRegistered(driverId, version);
+      allow read: if isOwner(driverId) || isAdmin();
+    }
+
+    // Legacy/root driver documents (CNH, CRLV, vehicle photo, etc.). This match is
+    // intentionally one level deep so it cannot bypass the profile-photo lock.
+    match /drivers/{driverId}/{fileName} {
+      allow write: if isOwner(driverId) && validDriverImageWrite();
+      allow read: if isOwner(driverId) || isAdmin();
+    }
+
+    // Versioned, admin-approved passenger profile photos. Client writes are
+    // forbidden; Cloud Functions Admin SDK copies the sanitized candidate here.
+    match /publicDriverPhotos/{driverId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

@@ -67,9 +67,7 @@ export default function DriverLayout() {
 
       if (offer.status === 'accepted') {
         // Do not steal navigation from tools/screens that intentionally coexist
-        // with an active ride. Re-subscribing on a segment change immediately
-        // replays the accepted offer snapshot, which previously made Robot Driver
-        // appear for a split second and then jump back to the active ride screen.
+        // with an active ride. Re-subscribing replays the accepted snapshot.
         if (onRobotScreen || onActiveRideScreen) return;
 
         try {
