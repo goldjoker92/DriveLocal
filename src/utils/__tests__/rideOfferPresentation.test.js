@@ -82,11 +82,40 @@ describe('driver ride-offer presentation', () => {
     expect(estimatePickupMinutes(80, 'car')).toBe(0);
   });
 
+  it('never displays a provisional commission before the driver context is loaded', () => {
+    const screen = source('src/app/(driver)/ride-request.jsx');
+
+    expect(screen).toContain("const [driverContextStatus, setDriverContextStatus] = useState('loading')");
+    expect(screen).toContain("offer && driverContextStatus === 'ready' && driver");
+    expect(screen).toContain('Carregando comissão e benefícios…');
+    expect(screen).toContain('Nenhum percentual provisório é exibido.');
+    expect(screen).toContain('Tempo estimado até o embarque');
+  });
+
+  it('keeps plan activation and reset independent from the approval-based commission window', () => {
+    const driverService = source('src/services/driverService.js');
+    const activation = driverService.slice(
+      driverService.indexOf('export async function activateDriverSubscription'),
+      driverService.indexOf('export async function resetDriverSubscription')
+    );
+    const reset = driverService.slice(
+      driverService.indexOf('export async function resetDriverSubscription'),
+      driverService.indexOf('export async function extendDriverSubscription')
+    );
+
+    expect(activation).not.toContain('commissionFreeUntil');
+    expect(activation).not.toContain('commissionRateBps');
+    expect(activation).not.toContain('walletStatus');
+    expect(reset).not.toContain('commissionFreeUntil');
+    expect(reset).not.toContain('commissionRateBps');
+    expect(reset).not.toContain('walletStatus');
+  });
+
   it('keeps the offer flow traceable and the destination private', () => {
     const screen = source('src/app/(driver)/ride-request.jsx');
     const button = source('src/components/AnimatedAcceptRideButton.jsx');
 
-    expect(screen).toContain('Tempo até embarque');
+    expect(screen).toContain('Tempo estimado até o embarque');
     expect(screen).toContain('Pix direto ao motorista');
     expect(screen).toContain('Promo Fundador');
     expect(screen).toContain('corridas restantes');
