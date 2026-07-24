@@ -16,7 +16,9 @@ import { typography, fontFamily } from '../../constants/typography';
 import { formatBRL, formatDistanceKm } from '../../utils/format';
 import {
   deriveRideOfferPresentation,
+  estimatePickupMinutes,
   formatPickupEta,
+  vehicleLabel,
 } from '../../utils/rideOfferPresentation';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { auth } from '../../config/firebase';
@@ -63,12 +65,33 @@ function StatusItem({ icon, title, detail, tone = 'default' }) {
   );
 }
 
+function BusinessContextPlaceholder({ failed = false }) {
+  return (
+    <AppCard style={failed ? styles.contextWarningCard : styles.statusCard}>
+      <View style={styles.contextRow}>
+        {!failed ? <ActivityIndicator size="small" color={colors.primary} /> : null}
+        <View style={styles.flex}>
+          <Text style={failed ? styles.contextWarningTitle : styles.statusTitle}>
+            {failed ? 'Comissão e benefícios indisponíveis' : 'Carregando comissão e benefícios…'}
+          </Text>
+          <Text style={styles.statusDetail}>
+            {failed
+              ? 'A oferta continua válida. O servidor verificará seu plano, sua promoção e sua carteira ao aceitar.'
+              : 'A oferta pode ser aceita enquanto essas informações são carregadas.'}
+          </Text>
+        </View>
+      </View>
+    </AppCard>
+  );
+}
+
 export default function RideRequest() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const requestedOfferId = typeof params.offerId === 'string' ? params.offerId : null;
   const [offer, setOffer] = useState(null);
   const [driver, setDriver] = useState(null);
+  const [driverContextStatus, setDriverContextStatus] = useState('loading');
   const [accepting, setAccepting] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [acceptError, setAcceptError] = useState('');
@@ -80,10 +103,20 @@ export default function RideRequest() {
     const uid = auth.currentUser?.uid;
     if (!uid) return undefined;
 
+    let active = true;
+    setDriverContextStatus('loading');
     const profileStartedAt = Date.now();
+
     getDriver(uid)
       .then((data) => {
-        setDriver(data);
+        if (!active) return;
+        if (data) {
+          setDriver(data);
+          setDriverContextStatus('ready');
+        } else {
+          setDriver(null);
+          setDriverContextStatus('failed');
+        }
         logRideClientEvent('ride.offer.business_context_loaded', {
           action: 'load_driver_context',
           status: data ? 'available' : 'missing',
@@ -92,8 +125,9 @@ export default function RideRequest() {
         });
       })
       .catch((error) => {
-        // Financial/status details are optional presentation; accepting still uses
-        // the backend's authoritative validation if this self-profile read fails.
+        if (!active) return;
+        setDriver(null);
+        setDriverContextStatus('failed');
         logRideClientEvent('ride.offer.business_context_failed', {
           action: 'load_driver_context',
           durationMs: Date.now() - profileStartedAt,
@@ -101,7 +135,7 @@ export default function RideRequest() {
         }, 'warning');
       });
 
-    return listenToMyOffer(uid, (nextOffer) => {
+    const unsubscribe = listenToMyOffer(uid, (nextOffer) => {
       if (
         requestedOfferId
         && nextOffer?.offerId !== requestedOfferId
@@ -132,6 +166,11 @@ export default function RideRequest() {
       }, 'warning');
       setOffer(null);
     });
+
+    return () => {
+      active = false;
+      if (unsubscribe) unsubscribe();
+    };
   }, [requestedOfferId]);
 
   useEffect(() => {
@@ -242,9 +281,16 @@ export default function RideRequest() {
     }
   }
 
-  const presentation = offer ? deriveRideOfferPresentation(driver, offer, Date.now()) : null;
+  const presentation = offer && driverContextStatus === 'ready' && driver
+    ? deriveRideOfferPresentation(driver, offer, Date.now())
+    : null;
+  const offerVehicleName = presentation?.vehicleName || vehicleLabel(offer?.vehicleType);
+  const pickupEtaMinutes = presentation?.pickupEtaMinutes
+    ?? estimatePickupMinutes(offer?.distanceToPickupMeters, offer?.vehicleType);
   const urgent = secondsLeft <= 5;
   const acceptDisabled = accepting || declining || secondsLeft <= 0;
+  const contextLoading = driverContextStatus === 'loading';
+  const contextFailed = driverContextStatus === 'failed';
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
@@ -272,12 +318,12 @@ export default function RideRequest() {
                 })}
               />
             </AppCard>
-          ) : offer && presentation ? (
+          ) : offer ? (
             <>
               <AppCard style={styles.offerCard}>
                 <View style={styles.offerHeader}>
                   <View style={styles.offerHeading}>
-                    <Text style={styles.eyebrow}>OFERTA PARA {presentation.vehicleName.toUpperCase()}</Text>
+                    <Text style={styles.eyebrow}>OFERTA PARA {offerVehicleName.toUpperCase()}</Text>
                     <Text style={styles.offerTitle}>Corrida disponível</Text>
                   </View>
                   <View style={[styles.countdown, urgent && styles.countdownUrgent]}>
@@ -303,21 +349,30 @@ export default function RideRequest() {
                 <View style={styles.moneyRow}>
                   <View style={styles.moneyBox}>
                     <Text style={styles.label}>Valor estimado</Text>
-                    <Text style={styles.moneyValue}>{formatBRL(presentation.fareCentavos)}</Text>
+                    <Text style={styles.moneyValue}>{formatBRL(offer.estimatedFareCentavos)}</Text>
                   </View>
-                  <View style={[styles.moneyBox, styles.netBox]}>
+                  <View style={[styles.moneyBox, presentation ? styles.netBox : null]}>
                     <Text style={styles.label}>Você recebe</Text>
-                    <Text style={[styles.moneyValue, styles.successText]}>
-                      {formatBRL(presentation.driverNetCentavos)}
+                    <Text style={[styles.moneyValue, presentation ? styles.successText : styles.pendingText]}>
+                      {presentation
+                        ? formatBRL(presentation.driverNetCentavos)
+                        : contextLoading
+                          ? 'Calculando…'
+                          : '—'}
                     </Text>
+                    {!presentation ? (
+                      <Text style={styles.moneyDetail}>
+                        {contextFailed ? 'Validado ao aceitar' : 'Comissão em carregamento'}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
 
                 <View style={styles.infoList}>
                   <InfoRow
                     icon="⏱"
-                    label="Tempo até embarque"
-                    value={formatPickupEta(presentation.pickupEtaMinutes)}
+                    label="Tempo estimado até o embarque"
+                    value={formatPickupEta(pickupEtaMinutes)}
                   />
                   <InfoRow
                     icon="↔"
@@ -327,13 +382,19 @@ export default function RideRequest() {
                   <InfoRow
                     icon="%"
                     label="Comissão desta corrida"
-                    value={presentation.commissionPercentLabel}
-                    detail={presentation.commissionFree
-                      ? 'Promo de 0% ativa'
-                      : presentation.minimumGuaranteeApplied
-                        ? 'Ajustada pela garantia mínima do motorista'
-                        : `Taxa para ${presentation.vehicleName.toLowerCase()}`}
-                    tone={presentation.commissionFree ? 'success' : 'default'}
+                    value={presentation
+                      ? presentation.commissionPercentLabel
+                      : contextLoading
+                        ? 'Carregando…'
+                        : 'Validada ao aceitar'}
+                    detail={presentation
+                      ? presentation.commissionFree
+                        ? 'Promo de 0% ativa'
+                        : presentation.minimumGuaranteeApplied
+                          ? 'Ajustada pela garantia mínima do motorista'
+                          : `Taxa para ${presentation.vehicleName.toLowerCase()}`
+                      : 'Nenhum percentual provisório é exibido.'}
+                    tone={presentation?.commissionFree ? 'success' : 'default'}
                   />
                   <InfoRow
                     icon="PIX"
@@ -348,7 +409,7 @@ export default function RideRequest() {
                   />
                 </View>
 
-                {presentation.acceptanceRate != null ? (
+                {presentation?.acceptanceRate != null ? (
                   <View style={styles.acceptanceChip}>
                     <Text style={styles.acceptanceLabel}>Taxa de aceitação</Text>
                     <Text style={styles.acceptanceValue}>{presentation.acceptanceRate}%</Text>
@@ -356,7 +417,10 @@ export default function RideRequest() {
                 ) : null}
               </AppCard>
 
-              {driver ? (
+              {contextLoading ? <BusinessContextPlaceholder /> : null}
+              {contextFailed ? <BusinessContextPlaceholder failed /> : null}
+
+              {presentation ? (
                 <AppCard style={styles.statusCard}>
                   <Text style={styles.sectionTitle}>SEU STATUS NESTA OFERTA</Text>
 
@@ -404,7 +468,7 @@ export default function RideRequest() {
                 </AppCard>
               ) : null}
 
-              {driver ? (
+              {presentation ? (
                 <AppCard style={presentation.walletLow ? styles.walletLowCard : styles.walletCard}>
                   <InfoRow
                     icon="👛"
@@ -490,7 +554,9 @@ const styles = StyleSheet.create({
   moneyBox: { flex: 1, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   netBox: { backgroundColor: colors.successBg, borderColor: colors.accentTint },
   moneyValue: { fontFamily, color: colors.text, marginTop: spacing.sm, ...typography.h3 },
+  moneyDetail: { fontFamily, color: colors.textMuted, marginTop: spacing.xs, ...typography.caption },
   successText: { color: colors.success },
+  pendingText: { color: colors.textMuted },
   infoList: { gap: spacing.xs },
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, paddingVertical: spacing.sm },
   infoIcon: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md, backgroundColor: colors.primaryTint },
@@ -510,6 +576,9 @@ const styles = StyleSheet.create({
   statusCopy: { flex: 1 },
   statusTitle: { fontFamily, color: colors.text, ...typography.bodyBold },
   statusDetail: { fontFamily, color: colors.textMuted, marginTop: spacing.xs, ...typography.small },
+  contextRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  contextWarningCard: { backgroundColor: colors.warningBg, borderColor: colors.warning },
+  contextWarningTitle: { fontFamily, color: colors.warning, ...typography.bodyBold },
   walletCard: { backgroundColor: colors.background },
   walletLowCard: { backgroundColor: colors.warningBg, borderColor: colors.warning },
   noDebitBox: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.successBg },
