@@ -33,7 +33,15 @@ describe('secure driver profile-photo workflow', () => {
     expect(hasApprovedDriverPhoto({ ...base, driverPhotoReviewStatus: 'rejected' })).toBe(true);
     expect(driverPhotoStatus({ ...base, driverPhotoReviewStatus: 'pending' })).toBe('pending');
     expect(driverPhotoStatus({ ...base, driverPhotoReviewStatus: 'rejected' })).toBe('rejected');
+  });
+
+  it('fails closed when an approved flag has no public path and version', () => {
     expect(hasApprovedDriverPhoto({ driverPhotoReviewStatus: 'approved' })).toBe(false);
+    expect(driverPhotoStatus({ driverPhotoReviewStatus: 'approved' })).toBe('missing');
+    expect(driverPhotoStatus({
+      driverPhotoReviewStatus: 'approved',
+      driverPhotoPublicPath: 'publicDriverPhotos/driver-1/photo_123_abcd.jpg',
+    })).toBe('missing');
   });
 
   it('creates deterministic safe versions and a top-biased square passenger crop', () => {
@@ -110,7 +118,7 @@ describe('secure driver profile-photo workflow', () => {
     expect(adminScreen).toContain('selectedReason');
   });
 
-  it('prevents the client from publishing and isolates private storage', () => {
+  it('prevents the client from publishing and isolates immutable JPEG candidates', () => {
     const firestoreRules = source('backend/firebase/rules/firestore.rules');
     const candidateRule = section(
       firestoreRules,
@@ -121,6 +129,9 @@ describe('secure driver profile-photo workflow', () => {
 
     expect(candidateRule).toContain('changed.hasOnly(driverPhotoCandidateFields())');
     expect(candidateRule).not.toContain('request.resource.data.driverPhotoPublicPath == resource.data.driverPhotoPublicPath');
+    expect(storageRules).toContain('validProfilePhotoWrite()');
+    expect(storageRules).toContain("request.resource.contentType.matches('image/(jpeg|jpg)')");
+    expect(storageRules).toContain('!candidateVersionRegistered(driverId, version)');
     expect(storageRules).toContain('allow read: if isOwner(driverId) || isAdmin()');
     expect(storageRules).toContain('match /publicDriverPhotos/{driverId}/{fileName}');
     expect(storageRules).toContain('allow write: if false');
