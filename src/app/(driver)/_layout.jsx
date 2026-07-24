@@ -20,8 +20,6 @@ export default function DriverLayout() {
   const lastOfferId = useRef(null);
   const onRobotScreen = segments.includes('robot-driver');
   const onActiveRideScreen = segments.includes('active-ride');
-  const onDriverHomeScreen = segments.includes('driver-home');
-  const onDriverPhotoScreen = segments.includes('driver-photo');
 
   useEffect(() => {
     let active = true;
@@ -69,8 +67,7 @@ export default function DriverLayout() {
 
       if (offer.status === 'accepted') {
         // Do not steal navigation from tools/screens that intentionally coexist
-        // with an active ride. Re-subscribing on a segment change immediately
-        // replays the accepted offer snapshot.
+        // with an active ride. Re-subscribing replays the accepted snapshot.
         if (onRobotScreen || onActiveRideScreen) return;
 
         try {
@@ -95,21 +92,6 @@ export default function DriverLayout() {
   return (
     <View style={styles.container}>
       <Stack screenOptions={{ headerShown: false }} />
-
-      {onDriverHomeScreen && !onDriverPhotoScreen ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Gerenciar foto do motorista"
-          onPress={() => router.push({
-            pathname: '/(driver)/driver-photo',
-            params: { returnTo: 'home' },
-          })}
-          style={({ pressed }) => [styles.photoButton, pressed && styles.photoButtonPressed]}
-        >
-          <Text style={styles.photoButtonText}>📷 MINHA FOTO</Text>
-        </Pressable>
-      ) : null}
-
       {DEV_RIDE_SIMULATOR_ENABLED && !onRobotScreen ? (
         <Pressable
           accessibilityRole="button"
@@ -126,26 +108,6 @@ export default function DriverLayout() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  photoButton: {
-    position: 'absolute',
-    right: 14,
-    bottom: DEV_RIDE_SIMULATOR_ENABLED ? 80 : 24,
-    minHeight: 44,
-    paddingHorizontal: 15,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.primary,
-    borderWidth: 2,
-    borderColor: colors.white,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 7,
-  },
-  photoButtonPressed: { transform: [{ scale: 0.98 }], opacity: 0.92 },
-  photoButtonText: { color: colors.white, fontWeight: '900', fontSize: 12, letterSpacing: 0.4 },
   robotButton: {
     position: 'absolute',
     right: 14,
