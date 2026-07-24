@@ -19,17 +19,6 @@ export const DRIVER_PHOTO_REJECTION_REASONS = Object.freeze([
   { code: 'other', label: 'Outro motivo' },
 ]);
 
-// Candidate review status. This may be pending/rejected while an older approved
-// public photo remains active for passengers.
-export function driverPhotoStatus(driver) {
-  const status = driver?.driverPhotoReviewStatus;
-  if (Object.values(DRIVER_PHOTO_STATUS).includes(status)) return status;
-  if (driver?.driverPhotoPublicPath) return DRIVER_PHOTO_STATUS.APPROVED;
-  if (driver?.selfieStatus === 'submitted') return DRIVER_PHOTO_STATUS.PENDING;
-  if (driver?.selfieStatus === 'rejected') return DRIVER_PHOTO_STATUS.REJECTED;
-  return DRIVER_PHOTO_STATUS.MISSING;
-}
-
 // Active passenger-facing photo is independent from the current candidate state.
 // This is the key replacement invariant: old approved photo stays visible until
 // a new candidate is approved and atomically becomes the active public path.
@@ -38,6 +27,26 @@ export function hasApprovedDriverPhoto(driver) {
     && driver.driverPhotoPublicPath.length > 0
     && typeof driver?.driverPhotoPublicVersion === 'string'
     && driver.driverPhotoPublicVersion.length > 0;
+}
+
+// Candidate review status. This may be pending/rejected while an older approved
+// public photo remains active for passengers. An inconsistent "approved" flag
+// without a public path/version fails closed instead of letting onboarding appear
+// complete when the server would later reject driver approval.
+export function driverPhotoStatus(driver) {
+  const status = driver?.driverPhotoReviewStatus;
+  if (status === DRIVER_PHOTO_STATUS.APPROVED) {
+    return hasApprovedDriverPhoto(driver)
+      ? DRIVER_PHOTO_STATUS.APPROVED
+      : DRIVER_PHOTO_STATUS.MISSING;
+  }
+  if (status === DRIVER_PHOTO_STATUS.PENDING || status === DRIVER_PHOTO_STATUS.REJECTED) {
+    return status;
+  }
+  if (hasApprovedDriverPhoto(driver)) return DRIVER_PHOTO_STATUS.APPROVED;
+  if (driver?.selfieStatus === 'submitted') return DRIVER_PHOTO_STATUS.PENDING;
+  if (driver?.selfieStatus === 'rejected') return DRIVER_PHOTO_STATUS.REJECTED;
+  return DRIVER_PHOTO_STATUS.MISSING;
 }
 
 export function rejectionReasonLabel(code) {
