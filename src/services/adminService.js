@@ -26,9 +26,17 @@ export const suspendDriver = (driverId, reason) => call('suspendDriverSecure', {
 export const reactivateDriver = (driverId, reason) => call('reactivateDriverSecure', { driverId, reason });
 
 // --- Driver photo review ----------------------------------------------------
-export const approveDriverPhoto = (driverId) => call('approveDriverPhotoSecure', { driverId });
-export const rejectDriverPhoto = (driverId, reasonCode, reason) =>
-  call('rejectDriverPhotoSecure', { driverId, reasonCode, reason: reason || null });
+// expectedVersion prevents an admin action on an older screen from approving or
+// rejecting a newer candidate submitted in the meantime.
+export const approveDriverPhoto = (driverId, expectedVersion) =>
+  call('approveDriverPhotoSecure', { driverId, expectedVersion });
+export const rejectDriverPhoto = (driverId, expectedVersion, reasonCode, reason) =>
+  call('rejectDriverPhotoSecure', {
+    driverId,
+    expectedVersion,
+    reasonCode,
+    reason: reason || null,
+  });
 
 // --- Ride dispute resolution -----------------------------------------------
 export const resolveRideDispute = (rideId, outcome, reason, note) =>
