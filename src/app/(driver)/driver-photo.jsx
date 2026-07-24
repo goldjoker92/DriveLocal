@@ -1,13 +1,12 @@
 // Guided driver profile-photo capture.
-// Camera-only, front-facing capture -> passenger preview -> private candidate upload.
-// The currently approved public photo is never replaced until an admin approves
-// the new candidate.
+// Camera-only, front-facing capture -> exact passenger preview -> private upload.
+// The currently approved public photo stays active until an admin approves a new
+// candidate.
 
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,14 +22,21 @@ import { colors } from '../../constants/colors';
 import { radius, spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
-import { driverPhotoStatus, hasApprovedDriverPhoto, rejectionReasonLabel } from '../../constants/driverPhoto';
+import {
+  driverPhotoStatus,
+  hasApprovedDriverPhoto,
+  rejectionReasonLabel,
+} from '../../constants/driverPhoto';
 import { auth } from '../../config/firebase';
 import { getDriver } from '../../services/driverService';
 import {
   getDriverPhotoDownloadUrl,
   submitDriverPhotoCandidate,
 } from '../../services/driverPhotoService';
-import { uploadDriverPhotoCandidate } from '../../services/storageService';
+import {
+  prepareDriverPhotoVariants,
+  uploadDriverPhotoCandidate,
+} from '../../services/storageService';
 import {
   createDriverPhotoVersion,
   firstName,
@@ -66,10 +72,16 @@ function PassengerPreview({ uri, driver }) {
     <View style={styles.passengerCard}>
       <Image source={{ uri }} style={styles.previewAvatar} resizeMode="cover" />
       <View style={styles.previewCopy}>
-        <Text style={styles.previewName}>{firstName(driver?.fullName || driver?.displayName)}</Text>
+        <Text style={styles.previewName}>
+          {firstName(driver?.fullName || driver?.displayName)}
+        </Text>
         <Text style={styles.previewVerified}>Foto em análise</Text>
-        <Text style={styles.previewVehicle}>{vehicle}{vehicleLine ? ` • ${vehicleLine}` : ''}</Text>
-        <Text style={styles.previewPlate}>Placa {driver?.vehiclePlate || driver?.plate || '—'}</Text>
+        <Text style={styles.previewVehicle}>
+          {vehicle}{vehicleLine ? ` • ${vehicleLine}` : ''}
+        </Text>
+        <Text style={styles.previewPlate}>
+          Placa {driver?.vehiclePlate || driver?.plate || '—'}
+        </Text>
       </View>
     </View>
   );
@@ -84,7 +96,9 @@ export default function DriverPhoto() {
   const [driver, setDriver] = useState(null);
   const [currentPhotoUrl, setCurrentPhotoUrl] = useState(null);
   const [asset, setAsset] = useState(null);
+  const [preparedVariants, setPreparedVariants] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [preparingPreview, setPreparingPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [submitted, setSubmitted] = useState(false);
@@ -140,16 +154,24 @@ export default function DriverPhoto() {
   }, [uid]);
 
   async function takePhoto() {
-    if (busy) return;
+    if (busy || preparingPreview) return;
     setError('');
+    setAsset(null);
+    setPreparedVariants(null);
     const startedAt = Date.now();
-    logDriverPhotoEvent('camera.permission_requested', { driverId: uid, source: 'front_camera' });
+    logDriverPhotoEvent('camera.permission_requested', {
+      driverId: uid,
+      source: 'front_camera',
+    });
 
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
         setError('Autorize a câmera para tirar sua foto de motorista.');
-        logDriverPhotoEvent('camera.permission_denied', { driverId: uid, source: 'front_camera' }, 'warn');
+        logDriverPhotoEvent('camera.permission_denied', {
+          driverId: uid,
+          source: 'front_camera',
+        }, 'warn');
         return;
       }
 
@@ -180,7 +202,17 @@ export default function DriverPhoto() {
         return;
       }
 
+      // Prepare before showing the confirmation screen. The driver sees the exact
+      // square JPEG that will be uploaded as the passenger-facing candidate.
+      setPreparingPreview(true);
+      logDriverPhotoEvent('preview.prepare_started', {
+        driverId: uid,
+        width: validation.width,
+        height: validation.height,
+      });
+      const variants = await prepareDriverPhotoVariants(candidate);
       setAsset(candidate);
+      setPreparedVariants(variants);
       logDriverPhotoEvent('capture.ready_for_preview', {
         driverId: uid,
         source: 'front_camera',
@@ -189,18 +221,20 @@ export default function DriverPhoto() {
         durationMs: Date.now() - startedAt,
       });
     } catch (cameraError) {
-      setError('Não foi possível abrir a câmera. Tente novamente.');
+      setError(cameraError?.message || 'Não foi possível preparar a foto. Tente novamente.');
       logDriverPhotoEvent('camera.failed', {
         driverId: uid,
         source: 'front_camera',
         code: cameraError?.code,
         message: cameraError?.message,
       }, 'error');
+    } finally {
+      setPreparingPreview(false);
     }
   }
 
   async function usePhoto() {
-    if (!uid || !asset || busy) return;
+    if (!uid || !asset || !preparedVariants || busy) return;
     setBusy(true);
     setProgress(0);
     setError('');
@@ -218,6 +252,7 @@ export default function DriverPhoto() {
         driverId: uid,
         version,
         asset,
+        preparedVariants,
         onProgress: setProgress,
       });
       await submitDriverPhotoCandidate({
@@ -265,6 +300,7 @@ export default function DriverPhoto() {
 
   const status = driverPhotoStatus(driver);
   const replacing = hasApprovedDriverPhoto(driver);
+  const previewUri = preparedVariants?.publicCandidateUri || null;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
@@ -275,10 +311,12 @@ export default function DriverPhoto() {
           onBack={() => router.back()}
         />
 
-        {loading ? (
+        {loading || preparingPreview ? (
           <AppCard style={styles.centerCard}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={styles.muted}>Carregando sua foto…</Text>
+            <Text style={styles.muted}>
+              {preparingPreview ? 'Preparando a prévia segura…' : 'Carregando sua foto…'}
+            </Text>
           </AppCard>
         ) : submitted ? (
           <AppCard style={styles.successCard}>
@@ -291,13 +329,13 @@ export default function DriverPhoto() {
             </Text>
             <AppButton title="Continuar" onPress={finish} />
           </AppCard>
-        ) : asset ? (
+        ) : asset && previewUri ? (
           <>
             <AppCard>
-              <Text style={styles.sectionTitle}>CONFIRA O RENDIMENTO PARA O PASSAGEIRO</Text>
-              <PassengerPreview uri={asset.uri} driver={driver} />
+              <Text style={styles.sectionTitle}>EXATAMENTE COMO O PASSAGEIRO VERÁ</Text>
+              <PassengerPreview uri={previewUri} driver={driver} />
               <Text style={styles.muted}>
-                O recorte público será quadrado, sem metadados da câmera. A foto original ficará privada para análise.
+                Esta cópia quadrada, sem metadados da câmera, será publicada somente após aprovação. A imagem original permanece privada para análise.
               </Text>
             </AppCard>
 
@@ -311,15 +349,15 @@ export default function DriverPhoto() {
             ) : null}
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
-            <AppButton title={busy ? 'Enviando…' : 'Usar esta foto'} onPress={usePhoto} disabled={busy} />
+            <AppButton
+              title={busy ? 'Enviando…' : 'Usar esta foto'}
+              onPress={usePhoto}
+              disabled={busy}
+            />
             <AppButton
               title="Tirar outra"
               variant="secondary"
-              onPress={() => {
-                setAsset(null);
-                setError('');
-                takePhoto();
-              }}
+              onPress={takePhoto}
               disabled={busy}
             />
           </>
@@ -329,13 +367,17 @@ export default function DriverPhoto() {
               <AppCard>
                 <Text style={styles.sectionTitle}>FOTO ATUAL APROVADA</Text>
                 <Image source={{ uri: currentPhotoUrl }} style={styles.currentPhoto} resizeMode="cover" />
-                <Text style={styles.successText}>Esta foto continua ativa até uma substituta ser aprovada.</Text>
+                <Text style={styles.successText}>
+                  Esta foto continua ativa até uma substituta ser aprovada.
+                </Text>
               </AppCard>
             ) : null}
 
             <AppCard>
               <GuideFrame />
-              <Text style={styles.guideTitle}>{replacing ? 'Tirar uma nova foto' : 'Como tirar uma boa foto'}</Text>
+              <Text style={styles.guideTitle}>
+                {replacing ? 'Tirar uma nova foto' : 'Como tirar uma boa foto'}
+              </Text>
               {GUIDE_ITEMS.map((item) => (
                 <View key={item} style={styles.guideRow}>
                   <Text style={styles.check}>✓</Text>
@@ -353,7 +395,9 @@ export default function DriverPhoto() {
             {status === 'pending' ? (
               <AppCard style={styles.pendingCard}>
                 <Text style={styles.pendingTitle}>Nova foto em análise</Text>
-                <Text style={styles.muted}>Você pode enviar outra foto; a mais recente será analisada.</Text>
+                <Text style={styles.muted}>
+                  Você pode substituí-la. A decisão do admin sempre será vinculada à versão correta.
+                </Text>
               </AppCard>
             ) : null}
 
@@ -369,7 +413,9 @@ export default function DriverPhoto() {
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <AppButton title="Abrir câmera frontal" onPress={takePhoto} disabled={busy} />
-            <Text style={styles.cameraOnly}>Por segurança, a galeria não está disponível para esta foto.</Text>
+            <Text style={styles.cameraOnly}>
+              Por segurança, a galeria não está disponível para esta foto.
+            </Text>
           </>
         )}
       </ScrollView>
