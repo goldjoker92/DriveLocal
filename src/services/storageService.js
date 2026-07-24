@@ -116,6 +116,8 @@ export async function uploadDriverDocument({ driverId, docType, uri, mime, onPro
   return { url, path, contentType };
 }
 
+// Generates both private review source and the exact square passenger image.
+// Saving as JPEG strips camera metadata from the public candidate.
 export async function prepareDriverPhotoVariants(asset) {
   const validation = validateDriverPhotoAsset(asset);
   if (!validation.valid) {
@@ -169,6 +171,7 @@ export async function uploadDriverPhotoCandidate({
   driverId,
   version,
   asset,
+  preparedVariants,
   onProgress,
 }) {
   if (!driverId) throw new Error('uploadDriverPhotoCandidate: driverId manquant');
@@ -179,10 +182,16 @@ export async function uploadDriverPhotoCandidate({
   logDriverPhotoEvent('upload.started', {
     driverId,
     version,
-    stage: 'prepare',
+    stage: preparedVariants ? 'reuse_preview' : 'prepare',
   });
 
-  const variants = await prepareDriverPhotoVariants(asset);
+  // Reuse the exact preview the driver accepted. This avoids a second crop and
+  // guarantees that the uploaded public candidate matches the UI preview.
+  const variants = preparedVariants || await prepareDriverPhotoVariants(asset);
+  if (!variants?.originalUri || !variants?.publicCandidateUri) {
+    throw new Error('Variantes da foto indisponíveis. Tire a foto novamente.');
+  }
+
   const base = `drivers/${driverId}/profile-photo/${version}`;
   const originalPath = `${base}/original.jpg`;
   const publicCandidatePath = `${base}/public-candidate.jpg`;
