@@ -1,6 +1,6 @@
-// Admin review for the driver's passenger-facing profile photo.
-// Displays the private sanitized candidate, never the private original download
-// URL in logs or Firestore. Approval/rejection is server-authoritative.
+// Admin review for the passenger-facing driver photo.
+// Only the sanitized private candidate is displayed. Approval/rejection is bound
+// to the exact candidate version loaded on this screen.
 
 import { useEffect, useState } from 'react';
 import {
@@ -40,31 +40,52 @@ import { showConfirmAlert } from '../../utils/alertUtils';
 
 function PassengerCard({ uri, driver, approved = false }) {
   const vehicle = VEHICLE_LABELS_PT_BR[driver?.vehicleType] || 'Veículo';
-  const detail = [driver?.vehicleBrand, driver?.vehicleModel, driver?.vehicleColor]
+  const details = [driver?.vehicleBrand, driver?.vehicleModel, driver?.vehicleColor]
     .filter(Boolean)
     .join(' • ');
+
   return (
     <View style={styles.passengerCard}>
       {uri ? (
         <Image source={{ uri }} style={styles.avatar} resizeMode="cover" />
       ) : (
-        <View style={[styles.avatar, styles.avatarPlaceholder]}><Text style={{ fontSize: 36 }}>👤</Text></View>
+        <View style={[styles.avatar, styles.avatarPlaceholder]}>
+          <Text style={{ fontSize: 36 }}>👤</Text>
+        </View>
       )}
       <View style={{ flex: 1, gap: 3 }}>
-        <Text style={styles.driverName}>{firstName(driver?.fullName || driver?.displayName)}</Text>
+        <Text style={styles.driverName}>
+          {firstName(driver?.fullName || driver?.displayName)}
+        </Text>
         <Text style={approved ? styles.approved : styles.pending}>
           {approved ? 'Foto verificada ✓' : 'Candidata à aprovação'}
         </Text>
-        <Text style={styles.muted}>{vehicle}{detail ? ` • ${detail}` : ''}</Text>
+        <Text style={styles.muted}>{vehicle}{details ? ` • ${details}` : ''}</Text>
         <Text style={styles.plate}>Placa {driver?.vehiclePlate || driver?.plate || '—'}</Text>
       </View>
     </View>
   );
 }
 
+function statusBadge(status) {
+  if (status === 'approved') return { label: 'Foto aprovada', tone: 'success' };
+  if (status === 'pending') return { label: 'Em análise', tone: 'warning' };
+  if (status === 'rejected') return { label: 'Recusada', tone: 'danger' };
+  return { label: 'Sem foto', tone: 'neutral' };
+}
+
+function staleActionMessage(error) {
+  const reason = error?.details?.metadata?.reason || error?.metadata?.reason;
+  if (reason === 'PHOTO_CANDIDATE_CHANGED' || reason === 'PHOTO_NOT_PENDING') {
+    return 'A foto mudou desde que esta tela foi aberta. Atualize antes de decidir.';
+  }
+  return null;
+}
+
 export default function DriverPhotoReview() {
   const router = useRouter();
-  const { driverId } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const driverId = typeof params.driverId === 'string' ? params.driverId : null;
   const [driver, setDriver] = useState(null);
   const [candidateUrl, setCandidateUrl] = useState(null);
   const [currentUrl, setCurrentUrl] = useState(null);
@@ -109,17 +130,19 @@ export default function DriverPhotoReview() {
       const loads = [];
       if (data?.driverPhotoCandidatePublicPath) {
         loads.push(
-          getDriverPhotoDownloadUrl(data.driverPhotoCandidatePublicPath, { allowPrivateCandidate: true })
-            .then(setCandidateUrl)
+          getDriverPhotoDownloadUrl(data.driverPhotoCandidatePublicPath, {
+            allowPrivateCandidate: true,
+          }).then(setCandidateUrl)
         );
       }
-      if (data?.driverPhotoPublicPath) {
+      if (hasApprovedDriverPhoto(data)) {
         loads.push(getDriverPhotoDownloadUrl(data.driverPhotoPublicPath).then(setCurrentUrl));
       }
       await Promise.all(loads);
 
       logDriverPhotoEvent('admin.review_loaded', {
         driverId,
+        version: data?.driverPhotoCandidateVersion,
         status: driverPhotoStatus(data),
         hasApprovedPhoto: hasApprovedDriverPhoto(data),
         hasCandidate: Boolean(data?.driverPhotoCandidatePublicPath),
@@ -142,9 +165,14 @@ export default function DriverPhotoReview() {
   }, [driverId]);
 
   function approve() {
+    const version = driver?.driverPhotoCandidateVersion;
+    if (!version) {
+      setError('Versão da foto indisponível. Atualize a tela.');
+      return;
+    }
     showConfirmAlert({
       title: 'Aprovar esta foto?',
-      message: 'A cópia recortada será liberada para os passageiros nas próximas corridas aceitas.',
+      message: 'A cópia recortada será liberada aos passageiros nas próximas corridas aceitas.',
       confirmText: 'Aprovar foto',
       onConfirm: async () => {
         setBusy(true);
@@ -152,16 +180,17 @@ export default function DriverPhotoReview() {
         try {
           logDriverPhotoEvent('admin.approve_pressed', {
             driverId,
-            version: driver?.driverPhotoCandidateVersion,
+            version,
             status: driver?.driverPhotoReviewStatus,
           });
-          await approveDriverPhoto(driverId);
+          await approveDriverPhoto(driverId, version);
           await load();
         } catch (approveError) {
-          setError('Não foi possível aprovar a foto. Ela continua privada e sem alteração.');
+          setError(staleActionMessage(approveError)
+            || 'Não foi possível aprovar a foto. Ela continua privada e sem alteração.');
           logDriverPhotoEvent('admin.approve_failed', {
             driverId,
-            version: driver?.driverPhotoCandidateVersion,
+            version,
             code: approveError?.code,
             message: approveError?.message,
           }, 'error');
@@ -173,10 +202,16 @@ export default function DriverPhotoReview() {
   }
 
   function reject() {
+    const version = driver?.driverPhotoCandidateVersion;
+    if (!version) {
+      setError('Versão da foto indisponível. Atualize a tela.');
+      return;
+    }
     if (!selectedReason) {
       setError('Escolha o motivo da recusa da foto.');
       return;
     }
+
     showConfirmAlert({
       title: 'Solicitar nova foto?',
       message: hasApprovedDriverPhoto(driver)
@@ -190,17 +225,24 @@ export default function DriverPhotoReview() {
         try {
           logDriverPhotoEvent('admin.reject_pressed', {
             driverId,
-            version: driver?.driverPhotoCandidateVersion,
+            version,
             reasonCode: selectedReason,
           });
-          await rejectDriverPhoto(driverId, selectedReason, reasonDetail.trim());
+          await rejectDriverPhoto(
+            driverId,
+            version,
+            selectedReason,
+            reasonDetail.trim()
+          );
           setSelectedReason('');
           setReasonDetail('');
           await load();
         } catch (rejectError) {
-          setError('Não foi possível registrar a recusa. Nenhuma foto foi alterada.');
+          setError(staleActionMessage(rejectError)
+            || 'Não foi possível registrar a recusa. Nenhuma foto foi alterada.');
           logDriverPhotoEvent('admin.reject_failed', {
             driverId,
+            version,
             reasonCode: selectedReason,
             code: rejectError?.code,
             message: rejectError?.message,
@@ -214,6 +256,7 @@ export default function DriverPhotoReview() {
 
   const status = driverPhotoStatus(driver);
   const pendingReview = status === 'pending';
+  const badge = statusBadge(status);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
@@ -232,12 +275,11 @@ export default function DriverPhotoReview() {
             <AppCard>
               <View style={styles.titleRow}>
                 <Text style={styles.title}>{driver.fullName || driver.displayName || 'Motorista'}</Text>
-                <AppBadge
-                  label={status === 'approved' ? 'Foto aprovada' : status === 'pending' ? 'Em análise' : status === 'rejected' ? 'Recusada' : 'Sem foto'}
-                  tone={status === 'approved' ? 'success' : status === 'rejected' ? 'danger' : 'warning'}
-                />
+                <AppBadge label={badge.label} tone={badge.tone} />
               </View>
-              <Text style={styles.muted}>Analise apenas o rosto, a clareza e a correspondência com o cadastro.</Text>
+              <Text style={styles.muted}>
+                Analise o rosto, a clareza e a correspondência com o cadastro. A imagem original não é publicada.
+              </Text>
             </AppCard>
 
             {hasApprovedDriverPhoto(driver) && currentUrl ? (
@@ -260,7 +302,8 @@ export default function DriverPhotoReview() {
               <AppCard style={styles.rejectedCard}>
                 <Text style={styles.rejectedTitle}>Última candidata recusada</Text>
                 <Text style={styles.muted}>
-                  {driver.driverPhotoRejectionReason || rejectionReasonLabel(driver.driverPhotoRejectionCode)}
+                  {driver.driverPhotoRejectionReason
+                    || rejectionReasonLabel(driver.driverPhotoRejectionCode)}
                 </Text>
               </AppCard>
             ) : null}
@@ -278,7 +321,9 @@ export default function DriverPhotoReview() {
                           onPress={() => setSelectedReason(item.code)}
                           style={[styles.reasonChip, selected && styles.reasonChipSelected]}
                         >
-                          <Text style={[styles.reasonText, selected && styles.reasonTextSelected]}>{item.label}</Text>
+                          <Text style={[styles.reasonText, selected && styles.reasonTextSelected]}>
+                            {item.label}
+                          </Text>
                         </Pressable>
                       );
                     })}
@@ -292,7 +337,11 @@ export default function DriverPhotoReview() {
                 </AppCard>
 
                 {error ? <Text style={styles.error}>{error}</Text> : null}
-                <AppButton title={busy ? 'Processando…' : 'Aprovar foto'} onPress={approve} disabled={busy || !candidateUrl} />
+                <AppButton
+                  title={busy ? 'Processando…' : 'Aprovar foto'}
+                  onPress={approve}
+                  disabled={busy || !candidateUrl}
+                />
                 <AppButton
                   title={busy ? 'Processando…' : 'Solicitar nova foto'}
                   variant="secondary"
@@ -330,10 +379,10 @@ const styles = StyleSheet.create({
   muted: { fontFamily, color: colors.textMuted, ...typography.small },
   error: { fontFamily, color: colors.danger, ...typography.small },
   reasonWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  reasonChip: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
-  reasonChipSelected: { borderColor: colors.danger, backgroundColor: colors.dangerBg },
+  reasonChip: { paddingVertical: spacing.sm, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border },
+  reasonChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   reasonText: { fontFamily, color: colors.textMuted, ...typography.small },
-  reasonTextSelected: { color: colors.danger, fontWeight: '700' },
+  reasonTextSelected: { color: colors.white },
   rejectedCard: { backgroundColor: colors.dangerBg, borderColor: colors.danger },
   rejectedTitle: { fontFamily, color: colors.danger, ...typography.bodyBold },
 });
