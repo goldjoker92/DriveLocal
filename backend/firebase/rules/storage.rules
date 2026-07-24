@@ -2,18 +2,39 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Documents chauffeur
-    // Écriture : uniquement le chauffeur lui-même (auth.uid == driverId)
-    // Lecture : uniquement les admins (vérifiée via Firestore)
-    match /drivers/{driverId}/{document=**} {
-      allow write: if request.auth != null
-                   && request.auth.uid == driverId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-      allow read: if request.auth != null;
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Tout le reste : fermé
+    function isAdmin() {
+      return isSignedIn() &&
+        firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid));
+    }
+
+    function isOwner(driverId) {
+      return isSignedIn() && request.auth.uid == driverId;
+    }
+
+    function validDriverImageWrite() {
+      return request.resource != null &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+    }
+
+    // Private driver documents and photo candidates.
+    // Owner: upload/read own files. Admin: review read. Nobody else can read.
+    match /drivers/{driverId}/{document=**} {
+      allow write: if isOwner(driverId) && validDriverImageWrite();
+      allow read: if isOwner(driverId) || isAdmin();
+    }
+
+    // Versioned, admin-approved passenger profile photos. Client writes are
+    // forbidden; Cloud Functions Admin SDK copies the sanitized candidate here.
+    match /publicDriverPhotos/{driverId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }
