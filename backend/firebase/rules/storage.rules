@@ -17,8 +17,16 @@ service firebase.storage {
 
     function validDriverImageWrite() {
       return request.resource != null &&
+        request.resource.size > 0 &&
         request.resource.size < 5 * 1024 * 1024 &&
         request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+    }
+
+    function validProfilePhotoWrite() {
+      return request.resource != null &&
+        request.resource.size > 0 &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/(jpeg|jpg)');
     }
 
     // Once a version is registered in drivers/{uid}, its source files become
@@ -30,12 +38,12 @@ service firebase.storage {
           .data.get('driverPhotoCandidateVersion', '') == version;
     }
 
-    // Dedicated private profile-photo package. Only the expected two JPEG files
-    // may be uploaded, and only before that exact version is submitted.
+    // Dedicated private profile-photo package. The backend later publishes it as
+    // JPEG, so mismatched PNG/WebP bytes with a .jpg name are rejected here.
     match /drivers/{driverId}/profile-photo/{version}/{fileName} {
       allow write: if isOwner(driverId) &&
         fileName in ['original.jpg', 'public-candidate.jpg'] &&
-        validDriverImageWrite() &&
+        validProfilePhotoWrite() &&
         !candidateVersionRegistered(driverId, version);
       allow read: if isOwner(driverId) || isAdmin();
     }
