@@ -221,12 +221,12 @@ describe('any-hour moto customer experience', () => {
     expect(allEvents).toHaveLength(8);
     expect(allEvents.map((e) => `${e.recipientRole}:${e.eventType}:${e.route}`).sort()).toEqual([
       'driver:offer_created:/ride-request',
-      'driver:ride_completed:/driver-home',
+      'driver:ride_completed:/active-ride',
       'driver:ride_payment_marked_sent:/active-ride',
       'passenger:ride_arrived:/driver-accepted',
       'passenger:ride_assigned:/driver-accepted',
       'passenger:ride_awaiting_payment:/pix-payment',
-      'passenger:ride_completed:/ride-completed',
+      'passenger:ride_completed:/pix-payment',
       'passenger:ride_started:/driver-accepted',
     ].sort());
 
