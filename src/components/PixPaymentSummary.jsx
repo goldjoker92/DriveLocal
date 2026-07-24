@@ -12,6 +12,8 @@ export default function PixPaymentSummary({
   amountCentavos,
   payload,
   instruction,
+  primaryAction = null,
+  qrInstruction = null,
   showPayload = false,
 }) {
   const hasAmount = amountCentavos != null && Number.isFinite(Number(amountCentavos));
@@ -25,6 +27,14 @@ export default function PixPaymentSummary({
       {instruction ? (
         <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
           {instruction}
+        </Text>
+      ) : null}
+
+      {primaryAction}
+
+      {qrInstruction ? (
+        <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>
+          {qrInstruction}
         </Text>
       ) : null}
 
