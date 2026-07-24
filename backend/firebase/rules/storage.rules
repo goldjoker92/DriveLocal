@@ -21,9 +21,29 @@ service firebase.storage {
         request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
     }
 
-    // Private driver documents and photo candidates.
-    // Owner: upload/read own files. Admin: review read. Nobody else can read.
-    match /drivers/{driverId}/{document=**} {
+    // Once a version is registered in drivers/{uid}, its source files become
+    // immutable. A malicious/old client cannot replace the bytes after the admin
+    // has opened the candidate. A replacement always receives a new version path.
+    function candidateVersionRegistered(driverId, version) {
+      let driverPath = /databases/(default)/documents/drivers/$(driverId);
+      return firestore.exists(driverPath) &&
+        firestore.get(driverPath).data.keys().hasAny(['driverPhotoCandidateVersion']) &&
+        firestore.get(driverPath).data.driverPhotoCandidateVersion == version;
+    }
+
+    // Dedicated private profile-photo package. Only the expected two JPEG files
+    // may be uploaded, and only before that exact version is submitted.
+    match /drivers/{driverId}/profile-photo/{version}/{fileName} {
+      allow write: if isOwner(driverId) &&
+        fileName in ['original.jpg', 'public-candidate.jpg'] &&
+        validDriverImageWrite() &&
+        !candidateVersionRegistered(driverId, version);
+      allow read: if isOwner(driverId) || isAdmin();
+    }
+
+    // Legacy/root driver documents (CNH, CRLV, vehicle photo, etc.). This match is
+    // intentionally one level deep so it cannot bypass the profile-photo lock.
+    match /drivers/{driverId}/{fileName} {
       allow write: if isOwner(driverId) && validDriverImageWrite();
       allow read: if isOwner(driverId) || isAdmin();
     }
