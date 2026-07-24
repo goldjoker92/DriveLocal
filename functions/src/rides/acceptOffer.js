@@ -23,13 +23,19 @@ function safeText(value, fallback, max = 80) {
   return (text || fallback).slice(0, max);
 }
 
+// The active public copy is independent from the candidate review status. A new
+// replacement may be pending/rejected while the last approved version remains the
+// passenger-facing source of truth.
 function approvedPhotoPath(driver, driverId) {
   const path = typeof driver?.driverPhotoPublicPath === 'string'
     ? driver.driverPhotoPublicPath.trim()
     : '';
+  const version = typeof driver?.driverPhotoPublicVersion === 'string'
+    ? driver.driverPhotoPublicVersion.trim()
+    : '';
   const expectedPrefix = `publicDriverPhotos/${driverId}/`;
-  if (driver?.driverPhotoReviewStatus !== 'approved') return null;
-  if (!path.startsWith(expectedPrefix) || !path.endsWith('.jpg')) return null;
+  if (!version) return null;
+  if (path !== `${expectedPrefix}${version}.jpg`) return null;
   return path.slice(0, 240);
 }
 
