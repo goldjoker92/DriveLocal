@@ -14,6 +14,10 @@ function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
+function withoutLineComments(text) {
+  return text.replace(/\/\/.*$/gm, '');
+}
+
 describe('driver ride-offer presentation', () => {
   it('keeps #101+ commission-free while counting down the five rides before the plan', () => {
     const view = deriveRideOfferPresentation({
@@ -94,14 +98,14 @@ describe('driver ride-offer presentation', () => {
 
   it('keeps plan activation and reset independent from the approval-based commission window', () => {
     const driverService = source('src/services/driverService.js');
-    const activation = driverService.slice(
+    const activation = withoutLineComments(driverService.slice(
       driverService.indexOf('export async function activateDriverSubscription'),
       driverService.indexOf('export async function resetDriverSubscription')
-    );
-    const reset = driverService.slice(
+    ));
+    const reset = withoutLineComments(driverService.slice(
       driverService.indexOf('export async function resetDriverSubscription'),
       driverService.indexOf('export async function extendDriverSubscription')
-    );
+    ));
 
     expect(activation).not.toContain('commissionFreeUntil');
     expect(activation).not.toContain('commissionRateBps');
