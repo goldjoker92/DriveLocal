@@ -141,12 +141,15 @@ export default function PixPayment() {
               amountCentavos={amount}
               payload={payload}
               showPayload
-              instruction="Escaneie o QR exibido pelo motorista ou use o Pix copia e cola abaixo."
-            />
-            <AppButton
-              title={copied ? 'Código copiado' : 'Copiar código Pix'}
-              onPress={onCopy}
-              disabled={!payload}
+              instruction="Pague neste telefone usando o Pix copia e cola. O valor da corrida já está preenchido."
+              primaryAction={(
+                <AppButton
+                  title={copied ? 'Código copiado' : 'Copiar código Pix'}
+                  onPress={onCopy}
+                  disabled={!payload}
+                />
+              )}
+              qrInstruction="O QR Code abaixo pode ser escaneado por outro aparelho."
             />
           </AppCard>
         )}
