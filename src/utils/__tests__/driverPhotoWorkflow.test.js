@@ -99,13 +99,15 @@ describe('secure driver profile-photo workflow', () => {
 
     expect(backend).toContain("required: ['driverId', 'expectedVersion']");
     expect(backend).toContain("required: ['driverId', 'expectedVersion', 'reasonCode']");
+    expect(backend).toContain("optional: ['reason']");
     expect(backend).toContain('db.runTransaction');
     expect(backend).toContain('PHOTO_CANDIDATE_CHANGED');
     expect(backend).toContain('orphan_cleanup_failed');
     expect(adminClient).toContain('approveDriverPhoto = (driverId, expectedVersion)');
     expect(adminClient).toContain('rejectDriverPhoto = (driverId, expectedVersion, reasonCode, reason)');
     expect(adminScreen).toContain('approveDriverPhoto(driverId, version)');
-    expect(adminScreen).toContain('driverId,\n            version,\n            selectedReason');
+    expect(adminScreen).toContain('rejectDriverPhoto(');
+    expect(adminScreen).toContain('selectedReason');
   });
 
   it('prevents the client from publishing and isolates private storage', () => {
@@ -124,13 +126,14 @@ describe('secure driver profile-photo workflow', () => {
     expect(storageRules).toContain('allow write: if false');
   });
 
-  it('keeps photo operations traceable without tokenized URLs in logs', () => {
+  it('keeps photo operations traceable without tokenized URLs or raw IDs in client logs', () => {
     const log = source('src/utils/driverPhotoLog.js');
     const storage = source('src/services/storageService.js');
     const backend = source('functions/src/drivers/photoReview.js');
 
     expect(log).toContain('[DRIVER_PHOTO]');
-    expect(log).toContain('ALLOWED_FIELDS');
+    expect(log).toContain('ALLOWED_KEYS');
+    expect(log).not.toContain("'driverId',");
     expect(storage).not.toContain('success url=');
     expect(backend).toContain('driver_photo_approved');
     expect(backend).toContain('driver_photo_rejected');
