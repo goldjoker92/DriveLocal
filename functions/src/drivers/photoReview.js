@@ -44,49 +44,66 @@ function safePhotoView(driverId, data) {
   };
 }
 
-async function approveDriverPhoto({ db, request, context, clock }) {
-  const adminUid = await requireAdmin(db, request);
-  const payload = assertShape(request?.data, { required: ['driverId'] });
-  const driverId = validateIdentifier(payload.driverId, 'driverId');
-  const driverRef = db.collection(C.DRIVERS).doc(driverId);
-  const snap = await driverRef.get();
-  if (!snap.exists) {
-    throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
-      internalMessage: `driver not found: ${driverId}`,
-      safeMetadata: { field: 'driverId' },
-    });
+function candidateChangedError(driverId, expectedVersion, actualVersion) {
+  return new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+    internalMessage: `photo candidate changed for ${driverId}: expected ${expectedVersion}, got ${actualVersion || 'none'}`,
+    safeMetadata: { reason: 'PHOTO_CANDIDATE_CHANGED' },
+  });
+}
+
+function assertExpectedPendingCandidate(driverId, expectedVersion, data) {
+  if (data.driverPhotoCandidateVersion !== expectedVersion) {
+    throw candidateChangedError(driverId, expectedVersion, data.driverPhotoCandidateVersion);
   }
-
-  const before = snap.data() || {};
-  const version = validateIdentifier(before.driverPhotoCandidateVersion, 'driverPhotoCandidateVersion');
-  const originalPath = String(before.driverPhotoCandidateOriginalPath || '');
-  const candidatePath = String(before.driverPhotoCandidatePublicPath || '');
-
-  if (before.driverPhotoReviewStatus !== 'pending') {
-    if (
-      before.driverPhotoReviewStatus === 'approved'
-      && before.driverPhotoPublicVersion === version
-      && before.driverPhotoPublicPath
-    ) {
-      return safePhotoView(driverId, before);
-    }
+  if (data.driverPhotoReviewStatus !== 'pending') {
     throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      internalMessage: `photo review status is ${before.driverPhotoReviewStatus}`,
+      internalMessage: `photo review status is ${data.driverPhotoReviewStatus}`,
       safeMetadata: { reason: 'PHOTO_NOT_PENDING' },
     });
   }
 
-  if (!candidatePathsValid(driverId, version, originalPath, candidatePath)) {
+  const originalPath = String(data.driverPhotoCandidateOriginalPath || '');
+  const candidatePath = String(data.driverPhotoCandidatePublicPath || '');
+  if (!candidatePathsValid(driverId, expectedVersion, originalPath, candidatePath)) {
     throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
       internalMessage: 'driver photo candidate paths are invalid',
       safeMetadata: { reason: 'PHOTO_PATH_INVALID' },
     });
   }
+  return { originalPath, candidatePath };
+}
 
+async function approveDriverPhoto({ db, request, context, clock }) {
+  const adminUid = await requireAdmin(db, request);
+  const payload = assertShape(request?.data, { required: ['driverId', 'expectedVersion'] });
+  const driverId = validateIdentifier(payload.driverId, 'driverId');
+  const expectedVersion = validateIdentifier(payload.expectedVersion, 'expectedVersion');
+  const driverRef = db.collection(C.DRIVERS).doc(driverId);
+
+  const initialSnap = await driverRef.get();
+  if (!initialSnap.exists) {
+    throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
+      internalMessage: `driver not found: ${driverId}`,
+      safeMetadata: { field: 'driverId' },
+    });
+  }
+  const initial = initialSnap.data() || {};
+
+  // Idempotent replay after a successful previous approval.
+  if (
+    initial.driverPhotoReviewStatus === 'approved'
+    && initial.driverPhotoPublicVersion === expectedVersion
+    && initial.driverPhotoPublicPath === publicPath(driverId, expectedVersion)
+  ) {
+    return safePhotoView(driverId, initial);
+  }
+
+  const { candidatePath } = assertExpectedPendingCandidate(driverId, expectedVersion, initial);
   const nowMs = clock.now();
-  const destinationPath = publicPath(driverId, version);
+  const destinationPath = publicPath(driverId, expectedVersion);
   const bucket = admin.storage().bucket();
   const source = bucket.file(candidatePath);
+  const destination = bucket.file(destinationPath);
   const [exists] = await source.exists();
   if (!exists) {
     throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, {
@@ -98,38 +115,73 @@ async function approveDriverPhoto({ db, request, context, clock }) {
   logInfo(context, 'driver.photo.approval_started', {
     operation: 'approve_driver_photo',
     driverId,
-    version,
+    version: expectedVersion,
   });
 
-  const downloadToken = randomUUID();
-  await source.copy(bucket.file(destinationPath));
-  await bucket.file(destinationPath).setMetadata({
+  // Copy first, then atomically activate only if the same candidate is still
+  // pending. A concurrent replacement can never be accidentally approved.
+  await source.copy(destination);
+  await destination.setMetadata({
     contentType: 'image/jpeg',
     cacheControl: 'private,max-age=3600',
     metadata: {
-      firebaseStorageDownloadTokens: downloadToken,
-      approvedVersion: version,
+      firebaseStorageDownloadTokens: randomUUID(),
+      approvedVersion: expectedVersion,
       approvedAtMs: String(nowMs),
     },
   });
 
-  const update = {
-    driverPhotoPublicPath: destinationPath,
-    driverPhotoPublicVersion: version,
-    driverPhotoReviewStatus: 'approved',
-    driverPhotoApprovedAt: admin.firestore.FieldValue.serverTimestamp(),
-    driverPhotoApprovedAtMs: nowMs,
-    driverPhotoApprovedBy: adminUid,
-    driverPhotoRejectionCode: null,
-    driverPhotoRejectionReason: null,
-    selfieStatus: 'approved',
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
-  await driverRef.set(update, { merge: true });
+  let outcome;
+  try {
+    outcome = await db.runTransaction(async (tx) => {
+      const currentSnap = await tx.get(driverRef);
+      if (!currentSnap.exists) {
+        throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
+          internalMessage: `driver not found during photo approval: ${driverId}`,
+          safeMetadata: { field: 'driverId' },
+        });
+      }
+      const before = currentSnap.data() || {};
+      if (
+        before.driverPhotoReviewStatus === 'approved'
+        && before.driverPhotoPublicVersion === expectedVersion
+        && before.driverPhotoPublicPath === destinationPath
+      ) {
+        return { replay: true, before, after: before };
+      }
 
-  await writeAuditLog(
-    db,
-    {
+      assertExpectedPendingCandidate(driverId, expectedVersion, before);
+      const update = {
+        driverPhotoPublicPath: destinationPath,
+        driverPhotoPublicVersion: expectedVersion,
+        driverPhotoReviewStatus: 'approved',
+        driverPhotoApprovedAt: admin.firestore.FieldValue.serverTimestamp(),
+        driverPhotoApprovedAtMs: nowMs,
+        driverPhotoApprovedBy: adminUid,
+        driverPhotoRejectionCode: null,
+        driverPhotoRejectionReason: null,
+        selfieStatus: 'approved',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      tx.set(driverRef, update, { merge: true });
+      return { replay: false, before, after: { ...before, ...update } };
+    });
+  } catch (error) {
+    // The public object is not referenced unless the transaction succeeds.
+    // Delete the orphan best-effort when the candidate changed mid-review.
+    await destination.delete({ ignoreNotFound: true }).catch((cleanupError) => {
+      logWarning(context, 'driver.photo.orphan_cleanup_failed', {
+        operation: 'approve_driver_photo',
+        driverId,
+        version: expectedVersion,
+        internalMessage: cleanupError && cleanupError.message,
+      });
+    });
+    throw error;
+  }
+
+  if (!outcome.replay) {
+    await writeAuditLog(db, {
       actorUid: adminUid,
       actorType: 'admin',
       action: 'driver_photo_approved',
@@ -137,29 +189,32 @@ async function approveDriverPhoto({ db, request, context, clock }) {
       targetId: driverId,
       traceId: context?.traceId,
       beforeSummary: {
-        driverPhotoReviewStatus: before.driverPhotoReviewStatus || null,
-        driverPhotoPublicVersion: before.driverPhotoPublicVersion || null,
+        driverPhotoReviewStatus: outcome.before.driverPhotoReviewStatus || null,
+        driverPhotoPublicVersion: outcome.before.driverPhotoPublicVersion || null,
       },
       afterSummary: {
         driverPhotoReviewStatus: 'approved',
-        driverPhotoPublicVersion: version,
+        driverPhotoPublicVersion: expectedVersion,
       },
-    },
-    clock
-  );
+    }, clock);
+  }
 
   logInfo(context, 'driver.photo.approval_succeeded', {
     operation: 'approve_driver_photo',
     driverId,
-    version,
+    version: expectedVersion,
+    reasonCode: outcome.replay ? 'IDEMPOTENT_REPLAY' : null,
   });
-  return safePhotoView(driverId, { ...before, ...update });
+  return safePhotoView(driverId, outcome.after);
 }
 
 async function rejectDriverPhoto({ db, request, context, clock }) {
   const adminUid = await requireAdmin(db, request);
-  const payload = assertShape(request?.data, { required: ['driverId', 'reasonCode'] });
+  const payload = assertShape(request?.data, {
+    required: ['driverId', 'expectedVersion', 'reasonCode'],
+  });
   const driverId = validateIdentifier(payload.driverId, 'driverId');
+  const expectedVersion = validateIdentifier(payload.expectedVersion, 'expectedVersion');
   const reasonCode = String(payload.reasonCode || '').trim();
   const reason = payload.reason == null ? '' : String(payload.reason).trim().slice(0, 300);
 
@@ -171,72 +226,83 @@ async function rejectDriverPhoto({ db, request, context, clock }) {
   }
 
   const driverRef = db.collection(C.DRIVERS).doc(driverId);
-  const snap = await driverRef.get();
-  if (!snap.exists) {
-    throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
-      internalMessage: `driver not found: ${driverId}`,
-      safeMetadata: { field: 'driverId' },
-    });
-  }
-  const before = snap.data() || {};
-  if (before.driverPhotoReviewStatus !== 'pending') {
-    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      internalMessage: `photo review status is ${before.driverPhotoReviewStatus}`,
-      safeMetadata: { reason: 'PHOTO_NOT_PENDING' },
-    });
-  }
-
-  const hasApprovedPhoto = typeof before.driverPhotoPublicPath === 'string'
-    && before.driverPhotoPublicPath.length > 0;
-  const initialOnboarding = before.verificationStatus !== 'approved' && !hasApprovedPhoto;
   const nowMs = clock.now();
-  const update = {
-    driverPhotoReviewStatus: 'rejected',
-    driverPhotoRejectedAt: admin.firestore.FieldValue.serverTimestamp(),
-    driverPhotoRejectedAtMs: nowMs,
-    driverPhotoRejectedBy: adminUid,
-    driverPhotoRejectionCode: reasonCode,
-    driverPhotoRejectionReason: reason || null,
-    // Existing approved drivers keep their public image and approved document
-    // package. Initial onboarding must return to correction before approval.
-    selfieStatus: hasApprovedPhoto ? 'approved' : 'rejected',
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
-  if (initialOnboarding) {
-    update.verificationStatus = 'correction_requested';
-    update.documentsStatus = 'incomplete';
-    update.correctionReason = reason || 'A foto de motorista precisa ser refeita.';
-    update.correctionRequestedAt = admin.firestore.FieldValue.serverTimestamp();
-  }
+  const outcome = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(driverRef);
+    if (!snap.exists) {
+      throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
+        internalMessage: `driver not found: ${driverId}`,
+        safeMetadata: { field: 'driverId' },
+      });
+    }
+    const before = snap.data() || {};
 
-  await driverRef.set(update, { merge: true });
-  await writeAuditLog(
-    db,
-    {
+    if (
+      before.driverPhotoReviewStatus === 'rejected'
+      && before.driverPhotoCandidateVersion === expectedVersion
+      && before.driverPhotoRejectionCode === reasonCode
+    ) {
+      return { replay: true, before, after: before, retainedApprovedPhoto: Boolean(before.driverPhotoPublicPath) };
+    }
+
+    assertExpectedPendingCandidate(driverId, expectedVersion, before);
+    const hasApprovedPhoto = typeof before.driverPhotoPublicPath === 'string'
+      && before.driverPhotoPublicPath.length > 0;
+    const initialOnboarding = before.verificationStatus !== 'approved' && !hasApprovedPhoto;
+    const update = {
+      driverPhotoReviewStatus: 'rejected',
+      driverPhotoRejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      driverPhotoRejectedAtMs: nowMs,
+      driverPhotoRejectedBy: adminUid,
+      driverPhotoRejectionCode: reasonCode,
+      driverPhotoRejectionReason: reason || null,
+      // Replacement rejection keeps the previously approved public photo active.
+      selfieStatus: hasApprovedPhoto ? 'approved' : 'rejected',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (initialOnboarding) {
+      update.verificationStatus = 'correction_requested';
+      update.documentsStatus = 'incomplete';
+      update.correctionReason = reason || 'A foto de motorista precisa ser refeita.';
+      update.correctionRequestedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    tx.set(driverRef, update, { merge: true });
+    return {
+      replay: false,
+      before,
+      after: { ...before, ...update },
+      retainedApprovedPhoto: hasApprovedPhoto,
+    };
+  });
+
+  if (!outcome.replay) {
+    await writeAuditLog(db, {
       actorUid: adminUid,
       actorType: 'admin',
       action: 'driver_photo_rejected',
       targetType: 'driver',
       targetId: driverId,
       traceId: context?.traceId,
-      beforeSummary: { driverPhotoReviewStatus: before.driverPhotoReviewStatus || null },
+      beforeSummary: {
+        driverPhotoReviewStatus: outcome.before.driverPhotoReviewStatus || null,
+        driverPhotoCandidateVersion: expectedVersion,
+      },
       afterSummary: {
         driverPhotoReviewStatus: 'rejected',
         reasonCode,
-        retainedApprovedPhoto: hasApprovedPhoto,
+        retainedApprovedPhoto: outcome.retainedApprovedPhoto,
       },
-    },
-    clock
-  );
+    }, clock);
+  }
 
   logWarning(context, 'driver.photo.rejected', {
     operation: 'reject_driver_photo',
     driverId,
-    version: before.driverPhotoCandidateVersion || null,
+    version: expectedVersion,
     reasonCode,
-    retainedApprovedPhoto: hasApprovedPhoto,
+    retainedApprovedPhoto: outcome.retainedApprovedPhoto,
   });
-  return safePhotoView(driverId, { ...before, ...update });
+  return safePhotoView(driverId, outcome.after);
 }
 
 module.exports = {
@@ -244,4 +310,5 @@ module.exports = {
   rejectDriverPhoto,
   candidatePathsValid,
   publicPath,
+  assertExpectedPendingCandidate,
 };
