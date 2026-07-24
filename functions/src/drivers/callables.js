@@ -1,8 +1,6 @@
 // @ts-check
 // Callable bindings for the secure driver domain. Each is a thin v2 onCall
-// wrapped by the single error boundary; all real logic lives in the pure,
-// clock-injected handlers so tests stay deterministic. Firestore is resolved
-// lazily inside the handler (Admin app is initialized in index.js).
+// wrapped by the single error boundary; all real logic lives in handlers.
 
 const { onCall } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
@@ -11,6 +9,7 @@ const { systemClock } = require('../time/clock');
 const { approveDriver } = require('./approveDriver');
 const { rejectDriver, blockDriver, unblockDriver, suspendDriver, reactivateDriver } = require('./moderateDriver');
 const { activateSubscription } = require('./activateSubscription');
+const { approveDriverPhoto, rejectDriverPhoto } = require('./photoReview');
 
 const REGION = 'southamerica-east1';
 
@@ -31,4 +30,6 @@ module.exports = {
   suspendDriverSecure: bind('suspendDriverSecure', suspendDriver),
   reactivateDriverSecure: bind('reactivateDriverSecure', reactivateDriver),
   activateSubscriptionSecure: bind('activateSubscriptionSecure', activateSubscription),
+  approveDriverPhotoSecure: bind('approveDriverPhotoSecure', approveDriverPhoto),
+  rejectDriverPhotoSecure: bind('rejectDriverPhotoSecure', rejectDriverPhoto),
 };
