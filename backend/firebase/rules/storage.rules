@@ -25,10 +25,9 @@ service firebase.storage {
     // immutable. A malicious/old client cannot replace the bytes after the admin
     // has opened the candidate. A replacement always receives a new version path.
     function candidateVersionRegistered(driverId, version) {
-      let driverPath = /databases/(default)/documents/drivers/$(driverId);
-      return firestore.exists(driverPath) &&
-        firestore.get(driverPath).data.keys().hasAny(['driverPhotoCandidateVersion']) &&
-        firestore.get(driverPath).data.driverPhotoCandidateVersion == version;
+      return firestore.exists(/databases/(default)/documents/drivers/$(driverId)) &&
+        firestore.get(/databases/(default)/documents/drivers/$(driverId))
+          .data.get('driverPhotoCandidateVersion', '') == version;
     }
 
     // Dedicated private profile-photo package. Only the expected two JPEG files
