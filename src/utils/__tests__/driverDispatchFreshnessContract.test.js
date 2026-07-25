@@ -30,13 +30,16 @@ describe('driver dispatch freshness contract', () => {
     expect(policy).toContain('minDistanceMeters: 20');
     expect(policy).toContain('shouldPublishDriverLocation');
 
-    expect(tracking).toContain('ONLINE_NATIVE_INTERVAL_MS = 30_000');
+    expect(tracking).toContain('ONLINE_NATIVE_INTERVAL_MS = 60_000');
     expect(tracking).toContain('ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000');
-    expect(tracking).toContain('distanceInterval: activeRide ? 10 : 25');
+    expect(tracking).toContain('distanceInterval: activeRide ? 10 : 0');
+    expect(tracking).toContain('deferredUpdatesDistance: activeRide ? 10 : 0');
     expect(tracking).toContain('stale_session_publish_dropped');
     expect(tracking).toContain('locationAvailabilitySessionId: session.availabilitySessionId');
     expect(tracking).toContain('availabilityUpdatedAtMs: nowMs');
     expect(tracking).toContain('let publishQueue = Promise.resolve()');
+    expect(tracking).toContain('DRIVER_INITIAL_LOCATION_NOT_PUBLISHED');
+    expect(tracking).toContain('restorePreviousSessionAfterStartFailure');
   });
 
   it('keeps a foreground pulse that repairs a stopped native task', () => {
@@ -49,6 +52,8 @@ describe('driver dispatch freshness contract', () => {
     expect(layout).toContain('const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000');
     expect(layout).toContain('refreshDriverOnlineHeartbeat');
     expect(layout).toContain("state === 'active'");
+    expect(layout).toContain('foreground_heartbeat_error');
+    expect(layout).toContain('layout.remote_session_revoked');
   });
 
   it('normalizes Firestore Timestamp dates in backend driver eligibility', () => {
