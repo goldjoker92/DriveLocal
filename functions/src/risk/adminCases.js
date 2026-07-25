@@ -16,6 +16,7 @@ const { requireAdmin } = require('../auth/adminAuth');
 const { writeAuditLog } = require('../audit/auditLog');
 const { logInfo, shortHash } = require('../logging/logger');
 const {
+  normalizedRestrictions,
   addTemporaryRestriction,
   removeTemporaryRestriction,
   restrictionSummary,
@@ -84,7 +85,9 @@ async function listAdminRiskCases({ db, request, context }) {
   // Query the requested status before applying the cap. Reading an arbitrary first
   // page and filtering afterwards could hide open cases behind resolved documents.
   const base = db.collection(C.COLLECTIONS.FRAUD_CASES);
-  const query = status === 'all' ? base.limit(MAX_CASES) : base.where('status', '==', status).limit(MAX_CASES);
+  const query = status === 'all'
+    ? base.limit(MAX_CASES)
+    : base.where('status', '==', status).limit(MAX_CASES);
   const snapshot = await query.get();
   const cases = snapshot.docs
     .map(safeCase)
@@ -208,16 +211,20 @@ async function decideAdminRiskCase({ db, request, context, clock }) {
           profileUpdate.riskBlockedFromNewRides = true;
         }
       } else if (outcome === 'close_no_evidence') {
-        const restrictions = removeTemporaryRestriction(profile, caseId, nowMs);
-        const summary = restrictionSummary(restrictions);
-        profileUpdate.riskRestrictions = restrictions;
-        profileUpdate.riskRestrictionCaseId = summary.caseId;
-        profileUpdate.riskRestrictionUntilMs = summary.untilMs;
-        profileUpdate.riskRestrictionUntil = summary.untilMs ? new Date(summary.untilMs) : null;
-        if (before.actorType === C.ACTOR_TYPE.DRIVER) {
-          profileUpdate.riskBlockedFromNewAcceptances = restrictions.length > 0 || profile.isBlocked === true;
-        } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
-          profileUpdate.riskBlockedFromNewRides = restrictions.length > 0 || profile.isBlocked === true;
+        const ownedRestriction = normalizedRestrictions(profile, 0, true)
+          .some((entry) => entry.caseId === caseId);
+        if (ownedRestriction) {
+          const restrictions = removeTemporaryRestriction(profile, caseId, nowMs);
+          const summary = restrictionSummary(restrictions);
+          profileUpdate.riskRestrictions = restrictions;
+          profileUpdate.riskRestrictionCaseId = summary.caseId;
+          profileUpdate.riskRestrictionUntilMs = summary.untilMs;
+          profileUpdate.riskRestrictionUntil = summary.untilMs ? new Date(summary.untilMs) : null;
+          if (before.actorType === C.ACTOR_TYPE.DRIVER) {
+            profileUpdate.riskBlockedFromNewAcceptances = restrictions.length > 0 || profile.isBlocked === true;
+          } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
+            profileUpdate.riskBlockedFromNewRides = restrictions.length > 0 || profile.isBlocked === true;
+          }
         }
       }
       tx.set(profileRef, profileUpdate, { merge: true });
