@@ -1,7 +1,7 @@
 rules_version = '2';
 
-// DriveLocal Firestore security — server-authoritative ride, financial and
-// driver-photo approval state.
+// DriveLocal Firestore security — server-authoritative ride, financial,
+// availability-session and driver-photo approval state.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -26,6 +26,7 @@ service cloud.firestore {
         'vehiclePlate', 'vehicleYear', 'profilePhotoUrl',
         'verificationStatus', 'profileStatus', 'vehicleStatus',
         'documentsStatus', 'selfieStatus', 'duplicateCheckStatus',
+        'availabilityStatus', 'availabilitySessionId', 'availabilityUpdatedAt',
         'createdAt', 'updatedAt'
       ];
     }
@@ -40,6 +41,9 @@ service cloud.firestore {
         request.resource.data.documentsStatus == 'missing' &&
         request.resource.data.selfieStatus == 'missing' &&
         request.resource.data.duplicateCheckStatus == 'clear' &&
+        request.resource.data.availabilityStatus == 'offline' &&
+        request.resource.data.availabilitySessionId == null &&
+        request.resource.data.availabilityUpdatedAt == request.time &&
         request.resource.data.createdAt == request.time &&
         request.resource.data.updatedAt == request.time;
     }
@@ -56,9 +60,12 @@ service cloud.firestore {
         'cnhFrenteUrl', 'cnhFrenteStatus', 'cnhVersoUrl', 'cnhVersoStatus',
         'crlvUrl', 'crlvStatus', 'vehiclePhotoUrl', 'vehiclePhotoStatus',
         'motofreteUrl', 'motofreteStatus',
-        'availabilityStatus', 'availabilityUpdatedAt',
+        // Availability itself is server-owned. The client may only renew the lease
+        // while publishing a point bound to the existing server session.
         'location', 'locationAccuracyMeters', 'locationHeadingDegrees',
         'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt',
+        'locationAvailabilitySessionId',
+        'availabilityUpdatedAtMs', 'availabilityUpdatedAt',
         'updatedAt'
       ];
     }
@@ -184,27 +191,30 @@ service cloud.firestore {
     function driverLocationFields() {
       return [
         'location', 'locationAccuracyMeters', 'locationHeadingDegrees',
-        'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt'
+        'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt',
+        'locationAvailabilitySessionId',
+        'availabilityUpdatedAtMs', 'availabilityUpdatedAt'
       ];
     }
 
     function driverOperationalUpdateValid() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let locationChanged = changed.hasAny(driverLocationFields());
-      let availabilityChanged = changed.hasAny(['availabilityStatus', 'availabilityUpdatedAt']);
 
       return (!locationChanged || (
+          resource.data.availabilityStatus == 'online' &&
+          resource.data.availabilitySessionId is string &&
+          resource.data.availabilitySessionId.size() >= 16 &&
+          request.resource.data.locationAvailabilitySessionId == resource.data.availabilitySessionId &&
           request.resource.data.keys().hasAll(driverLocationFields()) &&
           pointValid(request.resource.data.location) &&
           request.resource.data.locationUpdatedAtMs is int &&
           request.resource.data.locationUpdatedAt == request.time &&
+          request.resource.data.availabilityUpdatedAtMs is int &&
+          request.resource.data.availabilityUpdatedAt == request.time &&
           (request.resource.data.locationAccuracyMeters == null || request.resource.data.locationAccuracyMeters is number) &&
           (request.resource.data.locationHeadingDegrees == null || request.resource.data.locationHeadingDegrees is number) &&
           (request.resource.data.locationSpeedMps == null || request.resource.data.locationSpeedMps is number)
-        )) &&
-        (!availabilityChanged || (
-          request.resource.data.availabilityStatus in ['online', 'offline'] &&
-          request.resource.data.availabilityUpdatedAt == request.time
         )) &&
         request.resource.data.updatedAt == request.time;
     }
