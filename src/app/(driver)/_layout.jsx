@@ -8,7 +8,10 @@ import { auth } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
 import { getDriver } from '../../services/driverService';
-import { refreshDriverOnlineHeartbeat } from '../../services/driverLocationTracking';
+import {
+  refreshDriverOnlineHeartbeat,
+  updateActiveRideTrackingStatus,
+} from '../../services/driverLocationTracking';
 import { getRobotDriverState } from '../../services/robotDriverEngine';
 import { listenToMyOffer } from '../../services/ridesService';
 
@@ -66,6 +69,10 @@ export default function DriverLayout() {
       if (!offer?.offerId) return;
 
       if (offer.status === 'accepted') {
+        if (offer.driverRideStatus) {
+          await updateActiveRideTrackingStatus(offer.driverRideStatus).catch(() => undefined);
+        }
+
         // Do not steal navigation from tools/screens that intentionally coexist
         // with an active ride. Re-subscribing replays the accepted snapshot.
         if (onRobotScreen || onActiveRideScreen) return;
