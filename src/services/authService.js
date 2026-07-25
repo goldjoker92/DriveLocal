@@ -28,6 +28,12 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
+function shortId(value) {
+  const text = typeof value === 'string' ? value : '';
+  if (!text) return null;
+  return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
+}
+
 function activeRideAccountChangeError(reason) {
   const error = new Error('Finalize ou cancele a corrida ativa antes de trocar de conta.');
   error.code = 'auth/active-ride-in-progress';
@@ -35,32 +41,84 @@ function activeRideAccountChangeError(reason) {
   return error;
 }
 
+async function readAuthenticatedDriverState() {
+  const uid = auth.currentUser?.uid || null;
+  if (!uid) return null;
+  try {
+    const snapshot = await getDoc(doc(db, 'drivers', uid));
+    return snapshot.exists() ? { uid, ...snapshot.data() } : null;
+  } catch (error) {
+    console.warn('[AUTH_TRACKING_CLEANUP] remote driver read failed', {
+      scope: 'auth_tracking_cleanup',
+      event: 'remote_driver_read_failed',
+      authenticatedUid: shortId(uid),
+      reason: error?.code || error?.message || 'unknown',
+      atMs: Date.now(),
+    });
+    return null;
+  }
+}
+
 async function activeTrackingState() {
   const session = await getDriverTrackingSession();
   const robot = getRobotDriverState();
+  const localRideId = session?.rideId || robot?.rideId || null;
+  const localDriverId = session?.driverId || robot?.driverId || null;
+
+  if (localRideId) {
+    return {
+      session,
+      remoteDriver: null,
+      hasActiveRide: true,
+      activeRideId: localRideId,
+      driverId: localDriverId,
+      source: session?.rideId ? 'native_tracking_session' : 'robot_driver',
+    };
+  }
+
+  // AsyncStorage can be removed by Android or by a previous failed transition.
+  // Firestore remains authoritative for an already assigned ride.
+  const remoteDriver = await readAuthenticatedDriverState();
   return {
     session,
-    hasActiveRide: Boolean(session?.rideId || robot?.rideId),
-    driverId: session?.driverId || robot?.driverId || null,
+    remoteDriver,
+    hasActiveRide: Boolean(remoteDriver?.activeRideId),
+    activeRideId: remoteDriver?.activeRideId || null,
+    driverId: localDriverId || remoteDriver?.uid || null,
+    source: remoteDriver?.activeRideId ? 'firestore_driver' : 'none',
   };
 }
 
 async function assertNoActiveRideAccountChange(reason) {
   const tracking = await activeTrackingState();
-  if (!tracking.hasActiveRide) return tracking.session;
+  if (!tracking.hasActiveRide) return tracking;
+  console.warn('[AUTH_TRACKING_CLEANUP] account change blocked by active ride', {
+    scope: 'auth_tracking_cleanup',
+    event: 'account_change_blocked',
+    reason,
+    source: tracking.source,
+    driverId: shortId(tracking.driverId),
+    rideId: shortId(tracking.activeRideId),
+    atMs: Date.now(),
+  });
   throw activeRideAccountChangeError(reason);
 }
 
 async function clearLocalDriverTracking(reason) {
   const trackingSession = await getDriverTrackingSession();
   const robot = getRobotDriverState();
+  const remoteDriver = await readAuthenticatedDriverState();
   console.log('[AUTH_TRACKING_CLEANUP] started', {
+    scope: 'auth_tracking_cleanup',
+    event: 'cleanup_started',
     reason,
-    authenticatedUid: auth.currentUser?.uid || null,
+    authenticatedUid: shortId(auth.currentUser?.uid),
     robotEnabled: Boolean(robot?.enabled),
-    robotDriverId: robot?.driverId || null,
-    robotRideId: robot?.rideId || null,
-    trackingRideId: trackingSession?.rideId || null,
+    robotDriverId: shortId(robot?.driverId),
+    robotRideId: shortId(robot?.rideId),
+    trackingRideId: shortId(trackingSession?.rideId),
+    localSessionId: shortId(trackingSession?.availabilitySessionId),
+    remoteSessionId: shortId(remoteDriver?.availabilitySessionId),
     atMs: Date.now(),
   });
 
@@ -72,6 +130,8 @@ async function clearLocalDriverTracking(reason) {
     }
   } catch (error) {
     console.warn('[AUTH_TRACKING_CLEANUP] robot stop failed', {
+      scope: 'auth_tracking_cleanup',
+      event: 'robot_stop_failed',
       reason,
       code: error?.code,
       message: error?.message,
@@ -85,6 +145,8 @@ async function clearLocalDriverTracking(reason) {
     await stopDriverOnlineTracking();
   } catch (error) {
     console.warn('[AUTH_TRACKING_CLEANUP] native stop failed', {
+      scope: 'auth_tracking_cleanup',
+      event: 'native_stop_failed',
       reason,
       code: error?.code,
       message: error?.message,
@@ -92,17 +154,24 @@ async function clearLocalDriverTracking(reason) {
     });
   }
 
-  if (
-    trackingSession?.availabilitySessionId
-    && trackingSession.driverId === auth.currentUser?.uid
-  ) {
+  const remoteSessionId = trackingSession?.availabilitySessionId
+    || remoteDriver?.availabilitySessionId
+    || null;
+  const authenticatedUid = auth.currentUser?.uid || null;
+  const sessionOwnerMatches = !trackingSession?.driverId
+    || trackingSession.driverId === authenticatedUid;
+
+  if (remoteSessionId && authenticatedUid && sessionOwnerMatches && !remoteDriver?.activeRideId) {
     try {
-      await stopDriverWorkSession(trackingSession.availabilitySessionId);
+      await stopDriverWorkSession(remoteSessionId);
     } catch (error) {
       // The short server lease still removes a disconnected ghost driver. Account
       // changes must not be blocked solely by a temporary network failure.
       console.warn('[AUTH_TRACKING_CLEANUP] remote availability stop failed', {
+        scope: 'auth_tracking_cleanup',
+        event: 'remote_availability_stop_failed',
         reason,
+        availabilitySessionId: shortId(remoteSessionId),
         code: error?.code,
         message: error?.message,
         atMs: Date.now(),
@@ -110,7 +179,13 @@ async function clearLocalDriverTracking(reason) {
     }
   }
 
-  console.log('[AUTH_TRACKING_CLEANUP] completed', { reason, atMs: Date.now() });
+  console.log('[AUTH_TRACKING_CLEANUP] completed', {
+    scope: 'auth_tracking_cleanup',
+    event: 'cleanup_completed',
+    reason,
+    authenticatedUid: shortId(auth.currentUser?.uid),
+    atMs: Date.now(),
+  });
 }
 
 async function clearAuthenticatedSession() {
@@ -351,7 +426,7 @@ export async function loginUser(email, password) {
 
     const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
     if (credential.user.uid !== tracking.driverId) {
-      // Keep the local ride session so the correct account can be entered next.
+      // Keep the local/remote ride ownership so the correct account can be entered next.
       // The wrong account is immediately signed out and never inherits the ride.
       await signOut(auth);
       throw activeRideAccountChangeError('login_uid_mismatch');
