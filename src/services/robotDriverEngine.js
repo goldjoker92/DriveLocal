@@ -59,6 +59,10 @@ let unsubscribeRide = null;
 let currentRide = null;
 let movementBusy = false;
 let simulationId = null;
+// Every ride binding owns one generation. Incrementing it invalidates callbacks
+// and async continuations from the previous ride, even if Firestore had already
+// queued a final snapshot before unsubscribe completed.
+let rideBindingGeneration = 0;
 
 function trace(event, details = {}, level = 'log') {
   const payload = {
@@ -262,8 +266,71 @@ async function movementTick() {
   }
 }
 
-function processRideOffer(nextOffer, rideId) {
+function bindingIsCurrent(rideId, generation) {
+  return generation === rideBindingGeneration && state.rideId === rideId;
+}
+
+function closeRideListener() {
+  if (unsubscribeRide) unsubscribeRide();
+  unsubscribeRide = null;
+}
+
+async function returnRobotToWaiting(terminalRideId, terminalStatus, generation) {
+  if (!bindingIsCurrent(terminalRideId, generation)) return;
+
+  stopMovementTimer();
+  closeRideListener();
+  currentRide = null;
+  rideBindingGeneration += 1;
+
+  await writeTrackingSession({
+    rideId: null,
+    rideStatus: null,
+    trackingPaused: false,
+  }).catch((error) => {
+    trace('tracking_session.update_failed', {
+      terminalRideId,
+      message: error?.message,
+    }, 'warn');
+  });
+
+  emit({
+    rideId: null,
+    rideStatus: null,
+    phase: 'waiting_request',
+    targetPoint: null,
+    targetKind: null,
+    routeProgress: 0,
+    errorCode: null,
+  }, 'robot.ride_terminal');
+  trace('ride.terminal', {
+    terminalRideId,
+    status: terminalStatus,
+    result: 'waiting_for_next_request',
+  });
+
+  if (state.currentPoint) {
+    publishWaitingPoint(state.currentPoint, 'ride_terminal')
+      .catch((error) => trace('terminal_waiting_publish.failed', {
+        terminalRideId,
+        message: error?.message,
+      }, 'warn'));
+  }
+}
+
+function processRideOffer(nextOffer, rideId, generation) {
   if (!nextOffer || nextOffer.rideId !== rideId) return;
+  if (!bindingIsCurrent(rideId, generation)) {
+    trace('ride.snapshot_ignored', {
+      snapshotRideId: nextOffer.rideId,
+      bindingRideId: rideId,
+      generation,
+      currentGeneration: rideBindingGeneration,
+      reason: 'stale_binding',
+    });
+    return;
+  }
+
   currentRide = nextOffer;
   const nextStatus = offerRideStatus(nextOffer);
   trace('ride.snapshot', {
@@ -275,15 +342,13 @@ function processRideOffer(nextOffer, rideId) {
     hasDestination: Boolean(ridePoint('destination')),
   });
 
-  writeTrackingSession({ rideId, rideStatus: nextStatus || 'assigned', trackingPaused: false })
-    .catch((error) => trace('tracking_session.update_failed', { message: error?.message }, 'warn'));
-
   if (TERMINAL_RIDE_STATUSES.has(nextStatus)) {
-    stopMovementTimer();
-    emit({ rideStatus: nextStatus, phase: 'terminal', targetPoint: null, targetKind: null }, 'robot.ride_terminal');
-    trace('ride.terminal', { status: nextStatus });
+    void returnRobotToWaiting(rideId, nextStatus, generation);
     return;
   }
+
+  writeTrackingSession({ rideId, rideStatus: nextStatus || 'assigned', trackingPaused: false })
+    .catch((error) => trace('tracking_session.update_failed', { message: error?.message }, 'warn'));
 
   if (state.phase === 'moving' && !movementAllowed(state.targetKind, nextStatus)) {
     stopMovementTimer();
@@ -292,25 +357,52 @@ function processRideOffer(nextOffer, rideId) {
     return;
   }
 
-  emit({ rideStatus: nextStatus, errorCode: null }, 'robot.ride_snapshot_received');
+  emit({
+    rideStatus: nextStatus,
+    phase: state.phase === 'terminal' ? 'ride_bound' : state.phase,
+    errorCode: null,
+  }, 'robot.ride_snapshot_received');
 }
 
 async function bindRide(rideId) {
   if (!rideId || rideId === state.rideId) return;
-  trace('ride.binding_started', { nextRideId: rideId });
-  emit({ rideId, rideStatus: 'assigned', phase: 'ride_bound' }, 'robot.ride_detected');
+
+  const generation = ++rideBindingGeneration;
+  const previousRideId = state.rideId;
+  trace('ride.binding_started', { nextRideId: rideId, previousRideId, generation });
+
+  // Invalidate the old ride before the first await. Firestore can still deliver a
+  // callback that was already queued, but processRideOffer will reject its older
+  // generation and it cannot mutate the new ride state.
+  closeRideListener();
+  stopMovementTimer();
+  currentRide = null;
+  emit({
+    rideId,
+    rideStatus: 'assigned',
+    phase: 'ride_bound',
+    targetPoint: null,
+    targetKind: null,
+    routeProgress: 0,
+    errorCode: null,
+  }, 'robot.ride_detected');
 
   await stopNativeTask();
+  if (!bindingIsCurrent(rideId, generation)) return;
+
   await writeTrackingSession({
     rideId,
     rideStatus: 'assigned',
     trackingPaused: false,
   });
+  if (!bindingIsCurrent(rideId, generation)) return;
+
   const simulation = await beginDevLocationSimulation({
     driverId: state.driverId,
     vehicleType: state.vehicleType,
     rideId,
   });
+  if (!bindingIsCurrent(rideId, generation)) return;
   if (simulation?.status !== 'active') {
     const error = new Error(simulation?.errorCode || 'ROBOT_RIDE_OVERRIDE_FAILED');
     error.code = simulation?.errorCode || 'ROBOT_RIDE_OVERRIDE_FAILED';
@@ -318,12 +410,13 @@ async function bindRide(rideId) {
   }
 
   await publishRidePoint(state.currentPoint, 'ride_bound_seed');
+  if (!bindingIsCurrent(rideId, generation)) return;
 
-  if (unsubscribeRide) unsubscribeRide();
   unsubscribeRide = listenToMyOffer(
     state.driverId,
-    (nextOffer) => processRideOffer(nextOffer, rideId),
+    (nextOffer) => processRideOffer(nextOffer, rideId, generation),
     (error) => {
+      if (!bindingIsCurrent(rideId, generation)) return;
       trace('ride.listener_failed', {
         source: 'driverOffers',
         code: error?.code,
@@ -333,7 +426,7 @@ async function bindRide(rideId) {
     },
     rideId
   );
-  trace('ride.binding_succeeded', { rideId, source: 'driverOffers' });
+  trace('ride.binding_succeeded', { rideId, source: 'driverOffers', generation });
 }
 
 function startDriverListener() {
@@ -398,6 +491,10 @@ export async function activateRobotDriver({ vehicleType, speedKmh, startPoint })
 
   let workSession = null;
   simulationId = `robot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  rideBindingGeneration += 1;
+  closeRideListener();
+  stopMovementTimer();
+  currentRide = null;
   try {
     workSession = await startDriverWorkSession();
     state = {
@@ -484,13 +581,13 @@ export function resumeRobotDriver() {
 export async function stopRobotDriver(options = {}) {
   const restoreRealTracking = options.restoreRealTracking !== false;
   trace('stop.started', { restoreRealTracking });
+  rideBindingGeneration += 1;
   stopMovementTimer();
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = null;
   if (unsubscribeDriver) unsubscribeDriver();
-  if (unsubscribeRide) unsubscribeRide();
+  closeRideListener();
   unsubscribeDriver = null;
-  unsubscribeRide = null;
   currentRide = null;
 
   try {
