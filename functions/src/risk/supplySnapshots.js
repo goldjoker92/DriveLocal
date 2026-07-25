@@ -5,6 +5,13 @@
 const admin = require('firebase-admin');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { createLoggerContext, logInfo, logWarning } = require('../logging/logger');
+const { evaluateRideEligibility } = require('../drivers/eligibility');
+const {
+  driverLocation,
+  locationAgeMs,
+  availabilityAgeMs,
+  ONLINE_STALE_FALLBACK_MAX_AGE_MS,
+} = require('../rides/candidates');
 const rideC = require('../rides/constants');
 const riskC = require('./constants');
 
@@ -14,6 +21,26 @@ const DRIVER_LIMIT = 1500;
 
 function vehicle(driver) {
   return driver?.vehicleType === 'moto' ? 'moto' : 'car';
+}
+
+function hasUsableDispatchLocation(driver, timestampMs) {
+  if (!driverLocation(driver)) return false;
+  const ageMs = locationAgeMs(driver, timestampMs);
+  if (ageMs <= rideC.LOCATION_MAX_AGE_MS) return true;
+  return ageMs <= ONLINE_STALE_FALLBACK_MAX_AGE_MS
+    && availabilityAgeMs(driver, timestampMs) <= ONLINE_STALE_FALLBACK_MAX_AGE_MS;
+}
+
+function canReceiveGenericLaunchRide(driver, timestampMs) {
+  if (driver?.availabilityStatus !== 'online' || driver?.activeRideId) return false;
+  const eligibility = evaluateRideEligibility(driver, { now: () => timestampMs });
+  if (!eligibility.canReceiveRides) return false;
+
+  // Standard-commission drivers need a usable wallet. Commission-free drivers may
+  // remain dispatchable with R$ 0 because acceptOffer intentionally skips the hold.
+  const walletUsable = eligibility.commissionFree
+    || Number(driver?.walletAvailableCentavos || 0) > rideC.MIN_WALLET_BALANCE_CENTAVOS;
+  return walletUsable && hasUsableDispatchLocation(driver, timestampMs);
 }
 
 function buildSupplySnapshot(drivers = [], timestampMs = Date.now()) {
@@ -26,17 +53,21 @@ function buildSupplySnapshot(drivers = [], timestampMs = Date.now()) {
   };
   drivers.forEach((driver) => {
     const type = vehicle(driver);
-    if (driver?.verificationStatus === 'approved' && driver?.isBlocked !== true) {
+    const approved = driver?.verificationStatus === 'approved' && driver?.isBlocked !== true;
+    if (approved) {
       result.approved[type] += 1;
       result.approved.total += 1;
     }
-    if (driver?.availabilityStatus !== 'online' || driver?.isBlocked === true) return;
+
+    // Supply metrics represent drivers that could realistically participate in
+    // dispatch, not draft/suspended accounts that merely wrote "online".
+    if (!approved || driver?.availabilityStatus !== 'online') return;
     result.online[type] += 1;
     result.online.total += 1;
     if (driver?.activeRideId) {
       result.busy[type] += 1;
       result.busy.total += 1;
-    } else {
+    } else if (canReceiveGenericLaunchRide(driver, timestampMs)) {
       result.available[type] += 1;
       result.available.total += 1;
     }
@@ -73,6 +104,7 @@ async function recordSupplySnapshot({ db, clock, context }) {
     operation: 'supply_snapshot',
     result: snapshot.size >= DRIVER_LIMIT ? 'truncated' : 'recorded',
     count: aggregate.online.total,
+    availableCount: aggregate.available.total,
   });
   return { snapshotId, ...aggregate, truncated: snapshot.size >= DRIVER_LIMIT };
 }
@@ -99,6 +131,8 @@ const supplySnapshotTask = onSchedule(
 
 module.exports = {
   DRIVER_LIMIT,
+  hasUsableDispatchLocation,
+  canReceiveGenericLaunchRide,
   buildSupplySnapshot,
   hourSnapshotId,
   recordSupplySnapshot,
