@@ -20,6 +20,7 @@ exports.suspendDriverSecure = driverCallables.suspendDriverSecure;
 exports.reactivateDriverSecure = driverCallables.reactivateDriverSecure;
 exports.approveDriverPhotoSecure = driverCallables.approveDriverPhotoSecure;
 exports.rejectDriverPhotoSecure = driverCallables.rejectDriverPhotoSecure;
+exports.setDriverAvailabilitySecure = driverCallables.setDriverAvailabilitySecure;
 
 const paymentCallables = require('./payments/callables');
 exports.createDriverPixPayment = paymentCallables.createDriverPixPayment;
