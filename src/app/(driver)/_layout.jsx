@@ -20,6 +20,10 @@ import { listenToMyOffer } from '../../services/ridesService';
 
 const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000;
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
+// Firestore may replay a cached pre-transition document immediately after a JS
+// reload. Never let that stale snapshot cancel a work session whose local GPS
+// transition has only just started.
+const REMOTE_RECONCILIATION_GRACE_MS = 12_000;
 
 function shortId(value) {
   const text = typeof value === 'string' ? value : '';
@@ -43,6 +47,17 @@ function remoteSessionFresh(driver, nowMs = Date.now()) {
   return serverUpdatedAtMs > 0 && nowMs - serverUpdatedAtMs <= WORK_SESSION_MAX_AGE_MS;
 }
 
+function localSessionInTransition(session, nowMs = Date.now()) {
+  const updatedAtMs = Number(session?.updatedAtMs || 0);
+  if (!(updatedAtMs > 0)) return false;
+  const ageMs = nowMs - updatedAtMs;
+  return ageMs >= 0 && ageMs < REMOTE_RECONCILIATION_GRACE_MS;
+}
+
+function snapshotNeedsServerConfirmation(metadata = {}) {
+  return metadata.fromCache === true || metadata.hasPendingWrites === true;
+}
+
 export default function DriverLayout() {
   const router = useRouter();
   const segments = useSegments();
@@ -51,7 +66,7 @@ export default function DriverLayout() {
   const onRobotScreen = segments.includes('robot-driver');
   const onActiveRideScreen = segments.includes('active-ride');
 
-  async function reconcileRemoteDriver(remote, source) {
+  async function reconcileRemoteDriver(remote, source, metadata = {}) {
     if (reconciliationBusy.current) return;
     const local = await getDriverTrackingSession();
     if (!local || local.rideId || remote?.activeRideId) return;
@@ -63,6 +78,40 @@ export default function DriverLayout() {
       && remoteSessionFresh(remote)
     );
     if (sessionMatches) return;
+
+    // A cache replay is useful for rendering but not authoritative enough to stop
+    // an Android foreground service. Wait for a server-confirmed snapshot.
+    if (snapshotNeedsServerConfirmation(metadata)) {
+      console.log('[DRIVER_AVAILABILITY] layout.reconciliation_deferred', {
+        scope: 'driver_availability',
+        event: 'layout.reconciliation_deferred',
+        source,
+        driverId: shortId(local.driverId),
+        localSessionId: shortId(local.availabilitySessionId),
+        remoteSessionId: shortId(remote?.availabilitySessionId),
+        reason: metadata.hasPendingWrites ? 'pending_writes' : 'snapshot_from_cache',
+        result: 'waiting_for_server',
+        atMs: Date.now(),
+      });
+      return;
+    }
+
+    // Also protect the short interval between writing the local session and the
+    // callable/server snapshot reaching every listener after reload or fast refresh.
+    if (localSessionInTransition(local)) {
+      console.log('[DRIVER_AVAILABILITY] layout.reconciliation_deferred', {
+        scope: 'driver_availability',
+        event: 'layout.reconciliation_deferred',
+        source,
+        driverId: shortId(local.driverId),
+        localSessionId: shortId(local.availabilitySessionId),
+        remoteSessionId: shortId(remote?.availabilitySessionId),
+        reason: 'local_transition_grace',
+        result: 'waiting_for_stable_state',
+        atMs: Date.now(),
+      });
+      return;
+    }
 
     reconciliationBusy.current = true;
     console.warn('[DRIVER_AVAILABILITY] layout.remote_session_revoked', {
@@ -120,7 +169,7 @@ export default function DriverLayout() {
 
         // A temporary network error alone does not immediately end work. Re-read
         // the authoritative driver document and stop only when the remote lease or
-        // session is genuinely invalid.
+        // session is genuinely invalid. The transition grace still applies here.
         const uid = auth.currentUser?.uid;
         if (uid) {
           try {
@@ -151,26 +200,35 @@ export default function DriverLayout() {
     const uid = auth.currentUser?.uid;
     if (!uid) return undefined;
 
-    return onSnapshot(doc(db, 'drivers', uid), (snapshot) => {
-      if (!snapshot.exists()) return;
-      reconcileRemoteDriver(snapshot.data(), 'driver_snapshot').catch((error) => {
-        console.warn('[DRIVER_AVAILABILITY] layout.reconciliation_failed', {
+    return onSnapshot(
+      doc(db, 'drivers', uid),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        if (!snapshot.exists()) return;
+        reconcileRemoteDriver(
+          snapshot.data(),
+          'driver_snapshot',
+          snapshot.metadata || {}
+        ).catch((error) => {
+          console.warn('[DRIVER_AVAILABILITY] layout.reconciliation_failed', {
+            scope: 'driver_availability',
+            event: 'layout.reconciliation_failed',
+            driverId: shortId(uid),
+            reason: error?.code || error?.message || 'unknown',
+            atMs: Date.now(),
+          });
+        });
+      },
+      (error) => {
+        console.warn('[DRIVER_AVAILABILITY] layout.driver_listener_failed', {
           scope: 'driver_availability',
-          event: 'layout.reconciliation_failed',
+          event: 'layout.driver_listener_failed',
           driverId: shortId(uid),
           reason: error?.code || error?.message || 'unknown',
           atMs: Date.now(),
         });
-      });
-    }, (error) => {
-      console.warn('[DRIVER_AVAILABILITY] layout.driver_listener_failed', {
-        scope: 'driver_availability',
-        event: 'layout.driver_listener_failed',
-        driverId: shortId(uid),
-        reason: error?.code || error?.message || 'unknown',
-        atMs: Date.now(),
-      });
-    });
+      }
+    );
   }, [onActiveRideScreen, router]);
 
   useEffect(() => {
