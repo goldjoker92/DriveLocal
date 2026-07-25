@@ -3,6 +3,10 @@
 // transaction validates the offer/ride/driver/eligibility/wallet and atomically
 // assigns the ride, marks the offer, places the commission hold and starts the
 // single-current-point live-location document consumed by the passenger map.
+//
+// Financial invariant: commission eligibility is frozen at acceptance. A later
+// subscription/promotion change can never turn an already-held commission into a
+// free ride or increase what was reserved.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -13,6 +17,8 @@ const { buildNotificationEvent, enqueueEventTx } = require('../notifications/eve
 const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
 const { safeAcceptanceView } = require('./safeViews');
 const C = require('./constants');
+
+const COMMISSION_POLICY_VERSION = 'commission-hold-v1';
 
 function ts() {
   return admin.firestore.FieldValue.serverTimestamp();
@@ -57,6 +63,17 @@ function resolveHold(driver, ride, nowMs) {
   const commissionFree = toMillis(driver.commissionFreeUntil) > nowMs;
   if (commissionFree) return { holdAmount: 0, commissionFree: true };
   return { holdAmount: Number(ride.estimatedCommissionCentavos || 0), commissionFree: false };
+}
+
+function buildCommissionPolicySnapshot(ride, holdAmount, commissionFree, nowMs) {
+  return {
+    policyVersion: COMMISSION_POLICY_VERSION,
+    pricingConfigVersion: ride.pricingConfigVersion || null,
+    estimatedCommissionCentavos: Number(ride.estimatedCommissionCentavos || 0),
+    holdAmountCentavos: holdAmount,
+    commissionFreeAtAcceptance: commissionFree,
+    acceptedAtMs: nowMs,
+  };
 }
 
 function trackingLocationFromDriver(driver) {
@@ -162,8 +179,21 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
           internalMessage: `wallet ${available} < commission ${holdAmount} for ${driverId}`,
         });
       }
+      if (holdAmount > 0 && holdSnap.exists) {
+        throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+          internalMessage: `orphan/duplicate hold exists before ride assignment: ${offer.rideId}`,
+          safeMetadata: { reason: 'COMMISSION_HOLD_ALREADY_EXISTS' },
+        });
+      }
     }
 
+    const commissionPolicySnapshot = buildCommissionPolicySnapshot(
+      ride,
+      holdAmount,
+      commissionFree,
+      nowMs
+    );
+    const commissionSettlementStatus = holdAmount > 0 ? 'held' : 'free';
     const acceptedDriverPublic = publicDriverSummary(driver, ride.vehicleType, driverId);
     tx.set(rideRef, {
       status: C.RIDE_STATUS.ASSIGNED,
@@ -172,6 +202,8 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       acceptedAtMs: nowMs,
       acceptedAt: ts(),
       commissionHoldCentavos: holdAmount,
+      commissionPolicySnapshot,
+      commissionSettlementStatus,
       reasonCode: null,
       updatedAt: ts(),
     }, { merge: true });
@@ -212,12 +244,15 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       }, { merge: true });
     }
 
-    if (holdAmount > 0 && !holdSnap.exists) {
+    if (holdAmount > 0) {
       tx.set(holdRef, {
         driverId,
         rideId: offer.rideId,
         type: 'commission_hold',
         amountCentavos: holdAmount,
+        expectedCommissionCentavos: commissionPolicySnapshot.estimatedCommissionCentavos,
+        pricingConfigVersion: commissionPolicySnapshot.pricingConfigVersion,
+        policyVersion: COMMISSION_POLICY_VERSION,
         status: 'held',
         createdAtMs: nowMs,
         createdAt: ts(),
@@ -245,9 +280,13 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
         status: C.RIDE_STATUS.ASSIGNED,
         acceptedDriverId: driverId,
         acceptedDriverPublic,
+        commissionHoldCentavos: holdAmount,
+        commissionPolicySnapshot,
+        commissionSettlementStatus,
       },
       holdAmount,
-      holdAlreadyExisted: holdSnap.exists,
+      commissionFree,
+      holdAlreadyExisted: false,
     };
   });
 
@@ -273,16 +312,20 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     afterSummary: {
       acceptedDriverId: driverId,
       commissionHoldCentavos: result.holdAmount,
+      commissionFreeAtAcceptance: result.commissionFree,
+      commissionPolicyVersion: COMMISSION_POLICY_VERSION,
       hasApprovedDriverPhoto: Boolean(result.ride.acceptedDriverPublic?.photoStoragePath),
     },
   }, clock);
 
-  if (result.holdAmount > 0 && !result.holdAlreadyExisted) {
+  if (result.holdAmount > 0) {
     logInfo(context, 'wallet.hold.created', {
       operation: 'accept', rideId, offerId, amountCentavos: result.holdAmount,
     });
-  } else if (result.holdAmount > 0) {
-    logInfo(context, 'wallet.hold.duplicate_ignored', { operation: 'accept', rideId, offerId });
+  } else {
+    logInfo(context, 'wallet.hold.not_required', {
+      operation: 'accept', rideId, offerId, reasonCode: 'COMMISSION_FREE_AT_ACCEPTANCE',
+    });
   }
   logInfo(context, 'ride.accept.won', {
     operation: 'accept',
@@ -290,6 +333,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     rideId,
     normalizedStatus: 'assigned',
     amountCentavos: result.holdAmount,
+    reasonCode: result.commissionFree ? 'COMMISSION_FREE_AT_ACCEPTANCE' : null,
     hasApprovedDriverPhoto: Boolean(result.ride.acceptedDriverPublic?.photoStoragePath),
   });
   logInfo(context, 'ride.accept.exact_pickup_revealed', { operation: 'accept', rideId, offerId });
@@ -315,8 +359,10 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
 }
 
 module.exports = {
+  COMMISSION_POLICY_VERSION,
   acceptDriverOfferSecure,
   resolveHold,
+  buildCommissionPolicySnapshot,
   publicDriverSummary,
   trackingLocationFromDriver,
   approvedPhotoPath,

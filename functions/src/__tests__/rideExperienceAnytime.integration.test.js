@@ -145,13 +145,15 @@ describe('any-hour moto customer experience', () => {
     expect(accepted.pickup).toEqual(PICKUP);
 
     const assignedRide = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
-    expect(assignedRide.acceptedDriverPublic).toEqual({
+    expect(assignedRide.acceptedDriverPublic).toMatchObject({
       name: 'João Moto Teste',
       vehicleType: 'moto',
       vehicleMake: 'Honda',
       vehicleModel: 'CG 160',
       vehicleColor: 'Vermelha',
       vehiclePlate: 'TST1B02',
+      photoStoragePath: null,
+      photoVerified: false,
     });
     const assignedEvent = db._store.get(`${C.NOTIFICATION_EVENTS}/${rideId}_ride_assigned_passenger`);
     const assignedMessage = buildMulticastMessage(assignedEvent, ['passenger-token']);

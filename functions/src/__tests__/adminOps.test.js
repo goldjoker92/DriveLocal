@@ -174,10 +174,24 @@ describe('ride dispute resolution', () => {
     expect(get(db, C.DRIVERS, 'D').walletBalanceCentavos).toBe(4760);
   });
 
-  it('confirm captures ZERO during the commission-free window', async () => {
+  it('confirm captures ZERO when acceptance froze a commission-free policy', async () => {
     const db = makeFakeFirestore(); const clock = fixedClock(T0); const adm = seedAdmin(db);
-    seedDriver(db, 'D', { founderEligible: true, commissionFreeUntil: T0 + 864e5, walletBalanceCentavos: 5000, walletHeldCentavos: 240, walletAvailableCentavos: 4760 });
-    seedRide(db, 'r1');
+    seedDriver(db, 'D', {
+      founderEligible: true,
+      commissionFreeUntil: T0 + 864e5,
+      walletBalanceCentavos: 5000,
+      walletHeldCentavos: 0,
+      walletAvailableCentavos: 5000,
+    });
+    seedRide(db, 'r1', {
+      finalCommissionCentavos: 0,
+      commissionHoldCentavos: 0,
+      commissionPolicySnapshot: {
+        policyVersion: 'launch-v1',
+        commissionFreeAtAcceptance: true,
+        holdAmountCentavos: 0,
+      },
+    });
     const r = await resolveRideDispute({ db, request: adminReq(adm, { rideId: 'r1', outcome: 'confirm_driver_payment', reason: 'pago', idempotencyKey: rk(3) }), context: ctx, clock });
     expect(r.capturedCommissionCentavos).toBe(0);
     const d = get(db, C.DRIVERS, 'D');

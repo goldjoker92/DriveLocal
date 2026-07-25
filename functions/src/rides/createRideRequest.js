@@ -1,6 +1,8 @@
 // @ts-check
 // createRideRequestSecure — a passenger requests a ride. The backend owns every
 // authoritative field: passengerId, service area, route, fare and dispatch.
+// Passenger risk restrictions are evaluated server-side before route/dispatch
+// costs are incurred; they never interrupt an already-active ride.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -12,6 +14,7 @@ const {
   recordFailure,
   OPERATION_STATES,
 } = require('../idempotency/idempotency');
+const { evaluatePassengerRideEligibility } = require('../passengers/eligibility');
 const { validateServiceArea } = require('./serviceArea');
 const { calculateServerRideQuote } = require('./quote');
 const { dispatchRide } = require('./dispatch');
@@ -104,7 +107,24 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
   try {
     const paxRef = db.collection(C.PASSENGERS).doc(passengerId);
     const paxSnap = await paxRef.get();
-    const activeRideId = paxSnap.exists ? (paxSnap.data() || {}).activeRideId : null;
+    const passenger = paxSnap.exists ? paxSnap.data() || {} : {};
+    const eligibility = evaluatePassengerRideEligibility(passenger, clock);
+    if (!eligibility.canRequestRide) {
+      logInfo(context, 'ride.create.passenger_restricted', {
+        operation: OPERATION_TYPE,
+        result: 'blocked_new_ride',
+        reasonCode: eligibility.reasonCode,
+      });
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+        internalMessage: `passenger ${passengerId} cannot request a ride: ${eligibility.reasonCode}`,
+        safeMetadata: {
+          reason: eligibility.reasonCode,
+          restrictionUntilMs: eligibility.restrictionUntilMs,
+        },
+      });
+    }
+
+    const activeRideId = passenger.activeRideId || null;
     if (activeRideId) {
       const activeSnap = await db.collection(C.RIDE_REQUESTS).doc(activeRideId).get();
       const activeStatus = activeSnap.exists ? (activeSnap.data() || {}).status : null;
@@ -230,4 +250,8 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
   }
 }
 
-module.exports = { createRideRequestSecure, clearPassengerActiveRideIfCurrent };
+module.exports = {
+  createRideRequestSecure,
+  clearPassengerActiveRideIfCurrent,
+  sanitizeCoord,
+};

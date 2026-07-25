@@ -8,6 +8,7 @@
 // canReceiveRides is COMPUTED here on demand and is never stored as a
 // client-authoritative flag.
 
+const { activeRiskRestrictionState } = require('../risk/restrictions');
 const C = require('./constants');
 
 /**
@@ -67,6 +68,8 @@ function safeDriverView(driverId, d = {}) {
     subscriptionActive: d.subscriptionActive === true,
     subscriptionExpiresAt: d.subscriptionExpiresAt != null ? d.subscriptionExpiresAt : null,
     isBlocked: d.isBlocked === true,
+    financialReviewRequired: d.financialReviewRequired === true,
+    riskRestrictionUntilMs: d.riskRestrictionUntilMs != null ? d.riskRestrictionUntilMs : null,
   };
 }
 
@@ -76,7 +79,9 @@ function safeDriverView(driverId, d = {}) {
  *   - founders: subscription-covered until subscriptionFreeUntil, then need an
  *     active subscription;
  *   - non-founders: covered for their first FREE_RIDE_LIMIT rides, then need an
- *     active subscription.
+ *     active subscription;
+ *   - unresolved payment review or an active admin risk restriction blocks NEW
+ *     offers, without changing the wallet or the old ride hold.
  * @param {object} d driver document data
  * @param {{now:()=>number|Date|object}} clock
  */
@@ -92,24 +97,24 @@ function evaluateRideEligibility(d = {}, clock) {
   const subscriptionFreeUntilMs = toMillis(d.subscriptionFreeUntil || d.founderFreeUntil);
 
   const commissionFree = commissionFreeUntilMs > now;
-
-  const activeSubscription =
-    d.subscriptionActive === true &&
-    subscriptionExpiresAtMs > now;
-
+  const activeSubscription = d.subscriptionActive === true && subscriptionExpiresAtMs > now;
   const founderCovered = isFounder && subscriptionFreeUntilMs > now;
-
   const freeRidesRemaining = !isFounder && Number(d.freeRideCountUsed || 0) < C.FREE_RIDE_LIMIT;
-
   const subscriptionCovered = founderCovered || freeRidesRemaining || activeSubscription;
+  const financialReviewRequired = d.financialReviewRequired === true;
+  const temporaryRestriction = activeRiskRestrictionState(d, now);
+  const riskRestricted = financialReviewRequired || temporaryRestriction.active;
 
   return {
     isFounder,
     commissionFree,
     subscriptionCovered,
     requiresSubscription: !subscriptionCovered,
+    financialReviewRequired,
+    riskRestricted,
+    riskRestrictionUntilMs: temporaryRestriction.untilMs,
     // Derived on the fly — never persisted as an authoritative flag.
-    canReceiveRides: approved && !blocked && subscriptionCovered,
+    canReceiveRides: approved && !blocked && !riskRestricted && subscriptionCovered,
   };
 }
 

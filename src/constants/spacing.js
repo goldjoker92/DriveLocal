@@ -15,4 +15,5 @@ export const radius = {
   lg: 16,
   xl: 24,
   pill: 999,
+  full: 999,
 };

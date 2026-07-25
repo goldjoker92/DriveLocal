@@ -39,6 +39,8 @@ exports.confirmDriverPixReceivedSecure = rideCallables.confirmDriverPixReceivedS
 exports.cancelRideSecure = rideCallables.cancelRideSecure;
 exports.reportRidePaymentIssueSecure = rideCallables.reportRidePaymentIssueSecure;
 exports.resolveRideDisputeSecure = rideCallables.resolveRideDisputeSecure;
+exports.getAdminRideSummarySecure = rideCallables.getAdminRideSummarySecure;
+exports.listAdminDisputedRidesSecure = rideCallables.listAdminDisputedRidesSecure;
 
 const { expireRideOffersTask } = require('./rides/expireOffersTask');
 exports.expireRideOffersTask = expireRideOffersTask;
@@ -49,3 +51,21 @@ exports.processRideNotificationEvent = notificationCallables.processRideNotifica
 
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
+
+// Launch antifraud and business observability. Analytics/case decisions are
+// admin-only. Automated scans create review signals or temporary new-ride gates;
+// they never change hold amounts, settle commissions or permanently ban accounts.
+const riskCallables = require('./risk/callables');
+exports.getAdminBusinessAnalyticsSecure = riskCallables.getAdminBusinessAnalyticsSecure;
+exports.listAdminRiskCasesSecure = riskCallables.listAdminRiskCasesSecure;
+exports.decideAdminRiskCaseSecure = riskCallables.decideAdminRiskCaseSecure;
+const { financialReconciliationTask } = require('./risk/reconciliation');
+exports.financialReconciliationTask = financialReconciliationTask;
+const { operationalRiskScanTask } = require('./risk/operationalScan');
+exports.operationalRiskScanTask = operationalRiskScanTask;
+const { driverLocationRiskTrigger } = require('./risk/locationRisk');
+exports.driverLocationRiskTrigger = driverLocationRiskTrigger;
+const { ridePaymentRestrictionTrigger } = require('./risk/paymentRestriction');
+exports.ridePaymentRestrictionTrigger = ridePaymentRestrictionTrigger;
+const { supplySnapshotTask } = require('./risk/supplySnapshots');
+exports.supplySnapshotTask = supplySnapshotTask;

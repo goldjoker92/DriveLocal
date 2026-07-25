@@ -19,7 +19,17 @@ function seedAdmin(db) {
 function seedDriver(db, id, overrides = {}) {
   db.collection('drivers')
     .doc(id)
-    .set({ serviceAreaId: 'HORIZONTE_CE_BR', vehicleType: 'moto', ...overrides });
+    .set({
+      serviceAreaId: 'HORIZONTE_CE_BR',
+      vehicleType: 'moto',
+      // Approval now correctly requires the passenger-facing photo workflow to be
+      // completed. These domain tests are not photo-review tests, so their fixture
+      // explicitly represents an already approved public photo.
+      driverPhotoReviewStatus: 'approved',
+      driverPhotoPublicPath: `publicDriverPhotos/${id}/v1.jpg`,
+      driverPhotoPublicVersion: 'v1',
+      ...overrides,
+    });
 }
 
 function adminReq(data) {
