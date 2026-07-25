@@ -74,13 +74,30 @@ function activeRiskRestrictionState(profile = {}, nowMs = Date.now()) {
     return { active: true, entries, ...summary, indefinite: false };
   }
 
-  // Compatibility for old documents that stored only a boolean and no expiration.
-  const legacyUntilMs = validUntilMs(profile.riskRestrictionUntilMs);
-  const indefinite = profile.riskBlockedFromNewAcceptances === true
+  const blockedFlag = profile.riskBlockedFromNewAcceptances === true
     || profile.riskBlockedFromNewRides === true;
-  if (indefinite && legacyUntilMs === 0 && !validCaseId(profile.riskRestrictionCaseId)) {
+  const legacyUntilMs = validUntilMs(profile.riskRestrictionUntilMs);
+  const legacyCaseId = validCaseId(profile.riskRestrictionCaseId);
+
+  // Legacy documents sometimes stored only boolean + expiration, without a case id.
+  // Honor that expiration while active, then let it expire dynamically.
+  if (blockedFlag && legacyUntilMs > nowMs) {
+    return {
+      active: true,
+      entries: [],
+      caseId: legacyCaseId,
+      untilMs: legacyUntilMs,
+      indefinite: false,
+    };
+  }
+
+  // Compatibility for old documents that stored only a boolean and no expiration.
+  // Do not reinterpret an expired structured array as an indefinite restriction.
+  const hasStructuredArray = Array.isArray(profile.riskRestrictions);
+  if (blockedFlag && legacyUntilMs === 0 && !legacyCaseId && !hasStructuredArray) {
     return { active: true, entries: [], caseId: null, untilMs: null, indefinite: true };
   }
+
   return { active: false, entries: [], caseId: null, untilMs: null, indefinite: false };
 }
 
