@@ -1,11 +1,11 @@
 // Admin client service — the ONLY app-side entry point for secure admin
-// operations. Sensitive mutations and aggregate business reads always go through
-// authenticated callables. Raw financial ledgers and precise passenger locations
-// are never downloaded by the dashboard.
+// operations. Sensitive mutations and aggregate/support reads always go through
+// authenticated callables. Raw financial ledgers, Pix payloads and precise passenger
+// locations are never downloaded by the dashboard or dispute screens.
 
 import { httpsCallable } from 'firebase/functions';
 import {
-  collection, query, where, orderBy, limit as fbLimit, getDocs, getDoc, doc,
+  collection, query, where, orderBy, limit as fbLimit, getDocs,
 } from 'firebase/firestore';
 import { functions, db } from '../config/firebase';
 
@@ -55,6 +55,16 @@ export const resolveRideDispute = (rideId, outcome, reason, note) =>
     note: note || null,
     idempotencyKey: idempotencyKey('disp'),
   });
+
+// Privacy-safe server projections: these never return paymentPixPayload, exact
+// pickup/destination, contact details or private document data.
+export const getRideById = (rideId) =>
+  call('getAdminRideSummarySecure', { rideId });
+
+export async function listDisputedRides(max = DEFAULT_LIMIT) {
+  const result = await call('listAdminDisputedRidesSecure', { limit: max });
+  return result?.rides || [];
+}
 
 // --- Wallet adjustment ------------------------------------------------------
 export function adjustDriverWallet({
@@ -112,20 +122,4 @@ export async function listDriversByStatus(status, max = DEFAULT_LIMIT) {
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ driverId: d.id, ...d.data() }));
-}
-
-export async function getRideById(rideId) {
-  const snap = await getDoc(doc(db, 'rideRequests', rideId));
-  return snap.exists() ? { rideId: snap.id, ...snap.data() } : null;
-}
-
-export async function listDisputedRides(max = DEFAULT_LIMIT) {
-  const q = query(
-    collection(db, 'rideRequests'),
-    where('status', '==', 'disputed'),
-    orderBy('updatedAt', 'desc'),
-    fbLimit(max),
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ rideId: d.id, ...d.data() }));
 }
