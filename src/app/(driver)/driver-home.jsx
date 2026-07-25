@@ -3,7 +3,7 @@
 // server session and only turns the UI green after the first session-bound GPS
 // point has been published successfully.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -35,6 +35,7 @@ import {
 import { isFounderCommissionFreeActive } from '../../services/founderService';
 import {
   getDriverTrackingPermissionState,
+  getDriverTrackingSession,
   restoreDriverOnlineTracking,
   startDriverOnlineTracking,
   stopDriverOnlineTracking,
@@ -56,6 +57,7 @@ import {
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
+const REMOTE_RECONCILIATION_GRACE_MS = 12_000;
 
 function shortId(value) {
   const text = typeof value === 'string' ? value : '';
@@ -114,6 +116,7 @@ function trackingErrorLabel(status) {
     background_denied: 'A localização em segundo plano foi recusada. Ative “Permitir o tempo todo” nas configurações do Android.',
     unsupported: 'O rastreamento do motorista está disponível somente no aplicativo Android.',
     invalid_session: 'Não foi possível iniciar sua sessão de trabalho. Tente novamente.',
+    'permission-denied': 'A sessão mudou durante a ativação. Aguarde um instante e tente novamente.',
     DRIVER_INITIAL_LOCATION_NOT_PUBLISHED: 'Não foi possível confirmar sua primeira posição. Verifique a internet e tente novamente.',
   };
   return labels[status] || 'Não foi possível iniciar a localização do motorista.';
@@ -150,8 +153,20 @@ function hasFreshRemoteWorkSession(driver, nowMs = Date.now()) {
   return updatedAtMs > 0 && nowMs - updatedAtMs <= WORK_SESSION_MAX_AGE_MS;
 }
 
+function localSessionInTransition(session, nowMs = Date.now()) {
+  const updatedAtMs = Number(session?.updatedAtMs || 0);
+  if (!(updatedAtMs > 0)) return false;
+  const ageMs = nowMs - updatedAtMs;
+  return ageMs >= 0 && ageMs < REMOTE_RECONCILIATION_GRACE_MS;
+}
+
+function snapshotNeedsServerConfirmation(metadata = {}) {
+  return metadata.fromCache === true || metadata.hasPendingWrites === true;
+}
+
 export default function DriverHome() {
   const router = useRouter();
+  const activationInProgress = useRef(false);
   const [driver, setDriver] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -180,9 +195,25 @@ export default function DriverHome() {
           return;
         }
 
+        const localBeforeRestore = await getDriverTrackingSession();
         const remoteSessionId = data?.availabilitySessionId || null;
         const online = data?.availabilityStatus === AVAILABILITY.ONLINE;
+
         if (!online) {
+          // A reload can expose a cached pre-callable offline document while the new
+          // local session is being written. Do not cancel that transition.
+          if (localSessionInTransition(localBeforeRestore)) {
+            console.log('[DRIVER_AVAILABILITY] cockpit.initial_reconciliation_deferred', {
+              scope: 'driver_availability',
+              event: 'cockpit.initial_reconciliation_deferred',
+              driverId: shortId(uid),
+              localSessionId: shortId(localBeforeRestore?.availabilitySessionId),
+              reason: 'local_transition_grace',
+              result: 'waiting_for_server',
+              atMs: Date.now(),
+            });
+            return;
+          }
           await stopDriverOnlineTracking().catch(() => undefined);
           if (active) {
             setAvailability(AVAILABILITY.OFFLINE);
@@ -192,8 +223,27 @@ export default function DriverHome() {
         }
 
         // Legacy flags and expired leases are closed instead of silently
-        // resurrecting a ghost driver when the cockpit opens.
+        // resurrecting a ghost driver. A just-created matching local session gets a
+        // short grace because the callable result may not have reached every read.
         if (!remoteSessionId || !hasFreshRemoteWorkSession(data)) {
+          const matchingTransition = Boolean(
+            localBeforeRestore?.availabilitySessionId
+            && localBeforeRestore.availabilitySessionId === remoteSessionId
+            && localSessionInTransition(localBeforeRestore)
+          );
+          if (matchingTransition) {
+            console.log('[DRIVER_AVAILABILITY] cockpit.initial_reconciliation_deferred', {
+              scope: 'driver_availability',
+              event: 'cockpit.initial_reconciliation_deferred',
+              driverId: shortId(uid),
+              localSessionId: shortId(localBeforeRestore.availabilitySessionId),
+              remoteSessionId: shortId(remoteSessionId),
+              reason: 'remote_timestamp_not_settled',
+              result: 'waiting_for_server',
+              atMs: Date.now(),
+            });
+            return;
+          }
           await stopDriverOnlineTracking().catch(() => undefined);
           await stopDriverWorkSession(remoteSessionId).catch(() => undefined);
           if (active) {
@@ -221,11 +271,32 @@ export default function DriverHome() {
           return;
         }
 
-        const restored = await restoreDriverOnlineTracking({
+        let restored = await restoreDriverOnlineTracking({
           driverId: uid,
           vehicleType: data?.vehicleType,
           availabilitySessionId: remoteSessionId,
         });
+
+        // AsyncStorage is not an authority. If Android removed it but the server
+        // session is fresh and belongs to this authenticated driver, reconstruct the
+        // local tracking session and publish a new session-bound point.
+        if (restored.status === 'no_session') {
+          console.log('[DRIVER_AVAILABILITY] cockpit.online_restore_recovering', {
+            scope: 'driver_availability',
+            event: 'cockpit.online_restore_recovering',
+            driverId: shortId(uid),
+            remoteSessionId: shortId(remoteSessionId),
+            reason: 'local_session_missing',
+            atMs: Date.now(),
+          });
+          restored = await startDriverOnlineTracking({
+            driverId: uid,
+            vehicleType: data?.vehicleType,
+            availabilitySessionId: remoteSessionId,
+            requestPermissions: false,
+          });
+        }
+
         if (!active) return;
         if (restored.status === 'active') {
           setAvailability(AVAILABILITY.ONLINE);
@@ -242,7 +313,14 @@ export default function DriverHome() {
           } : current);
         }
       })
-      .catch(() => {
+      .catch((loadError) => {
+        console.warn('[DRIVER_AVAILABILITY] cockpit.initialization_failed', {
+          scope: 'driver_availability',
+          event: 'cockpit.initialization_failed',
+          driverId: shortId(uid),
+          reason: loadError?.code || loadError?.message || 'unknown',
+          atMs: Date.now(),
+        });
         if (active) setError('Não foi possível carregar seu cadastro.');
       })
       .finally(() => {
@@ -260,50 +338,98 @@ export default function DriverHome() {
 
     // Live reconciliation prevents a green cockpit while the server has already
     // revoked the work session because of moderation, finance or lease expiry.
-    return onSnapshot(doc(db, 'drivers', uid), async (snapshot) => {
-      if (!snapshot.exists()) return;
-      const remote = snapshot.data();
-      setDriver(remote);
+    return onSnapshot(
+      doc(db, 'drivers', uid),
+      { includeMetadataChanges: true },
+      async (snapshot) => {
+        if (!snapshot.exists()) return;
+        const remote = snapshot.data();
 
-      if (remote?.activeRideId) return;
-      if (availability !== AVAILABILITY.ONLINE) return;
+        // Cached/pending data may still be rendered, but it must never stop GPS.
+        if (!snapshotNeedsServerConfirmation(snapshot.metadata || {})) {
+          setDriver(remote);
+        }
 
-      const expectedSessionId = driver?.availabilitySessionId || null;
-      const remoteSessionMatches = Boolean(
-        remote?.availabilityStatus === AVAILABILITY.ONLINE
-        && remote?.availabilitySessionId
-        && remote.availabilitySessionId === expectedSessionId
-        && hasFreshRemoteWorkSession(remote)
-      );
-      if (remoteSessionMatches) return;
+        if (remote?.activeRideId) return;
+        if (availability !== AVAILABILITY.ONLINE) return;
+        if (activationInProgress.current) {
+          console.log('[DRIVER_AVAILABILITY] cockpit.reconciliation_deferred', {
+            scope: 'driver_availability',
+            event: 'cockpit.reconciliation_deferred',
+            driverId: shortId(uid),
+            reason: 'activation_in_progress',
+            result: 'waiting_for_transition',
+            atMs: Date.now(),
+          });
+          return;
+        }
+        if (snapshotNeedsServerConfirmation(snapshot.metadata || {})) {
+          console.log('[DRIVER_AVAILABILITY] cockpit.reconciliation_deferred', {
+            scope: 'driver_availability',
+            event: 'cockpit.reconciliation_deferred',
+            driverId: shortId(uid),
+            reason: snapshot.metadata?.hasPendingWrites ? 'pending_writes' : 'snapshot_from_cache',
+            result: 'waiting_for_server',
+            atMs: Date.now(),
+          });
+          return;
+        }
 
-      console.warn('[DRIVER_AVAILABILITY] cockpit.remote_session_revoked', {
-        scope: 'driver_availability',
-        event: 'cockpit.remote_session_revoked',
-        driverId: shortId(uid),
-        expectedSessionId: shortId(expectedSessionId),
-        remoteSessionId: shortId(remote?.availabilitySessionId),
-        remoteStatus: remote?.availabilityStatus || 'missing',
-        reason: remote?.availabilityStatus !== AVAILABILITY.ONLINE
-          ? 'remote_offline'
-          : remote?.availabilitySessionId !== expectedSessionId
-            ? 'session_mismatch'
-            : 'lease_expired',
-        atMs: Date.now(),
-      });
-      await stopDriverOnlineTracking().catch(() => undefined);
-      setAvailability(AVAILABILITY.OFFLINE);
-      setTrackingActive(false);
-      setAvailabilityError('Sua sessão de trabalho foi encerrada. Toque em “Começar a trabalhar” quando quiser ficar disponível novamente.');
-    }, (snapshotError) => {
-      console.warn('[DRIVER_AVAILABILITY] cockpit.driver_listener_failed', {
-        scope: 'driver_availability',
-        event: 'cockpit.driver_listener_failed',
-        driverId: shortId(uid),
-        reason: snapshotError?.code || snapshotError?.message || 'unknown',
-        atMs: Date.now(),
-      });
-    });
+        const localSession = await getDriverTrackingSession();
+        if (localSessionInTransition(localSession)) {
+          console.log('[DRIVER_AVAILABILITY] cockpit.reconciliation_deferred', {
+            scope: 'driver_availability',
+            event: 'cockpit.reconciliation_deferred',
+            driverId: shortId(uid),
+            localSessionId: shortId(localSession?.availabilitySessionId),
+            remoteSessionId: shortId(remote?.availabilitySessionId),
+            reason: 'local_transition_grace',
+            result: 'waiting_for_stable_state',
+            atMs: Date.now(),
+          });
+          return;
+        }
+
+        const expectedSessionId = localSession?.availabilitySessionId
+          || driver?.availabilitySessionId
+          || null;
+        const remoteSessionMatches = Boolean(
+          remote?.availabilityStatus === AVAILABILITY.ONLINE
+          && remote?.availabilitySessionId
+          && remote.availabilitySessionId === expectedSessionId
+          && hasFreshRemoteWorkSession(remote)
+        );
+        if (remoteSessionMatches) return;
+
+        console.warn('[DRIVER_AVAILABILITY] cockpit.remote_session_revoked', {
+          scope: 'driver_availability',
+          event: 'cockpit.remote_session_revoked',
+          driverId: shortId(uid),
+          expectedSessionId: shortId(expectedSessionId),
+          remoteSessionId: shortId(remote?.availabilitySessionId),
+          remoteStatus: remote?.availabilityStatus || 'missing',
+          reason: remote?.availabilityStatus !== AVAILABILITY.ONLINE
+            ? 'remote_offline'
+            : remote?.availabilitySessionId !== expectedSessionId
+              ? 'session_mismatch'
+              : 'lease_expired',
+          atMs: Date.now(),
+        });
+        await stopDriverOnlineTracking().catch(() => undefined);
+        setAvailability(AVAILABILITY.OFFLINE);
+        setTrackingActive(false);
+        setAvailabilityError('Sua sessão de trabalho foi encerrada. Toque em “Começar a trabalhar” quando quiser ficar disponível novamente.');
+      },
+      (snapshotError) => {
+        console.warn('[DRIVER_AVAILABILITY] cockpit.driver_listener_failed', {
+          scope: 'driver_availability',
+          event: 'cockpit.driver_listener_failed',
+          driverId: shortId(uid),
+          reason: snapshotError?.code || snapshotError?.message || 'unknown',
+          atMs: Date.now(),
+        });
+      }
+    );
   }, [availability, driver?.availabilitySessionId]);
 
   const nowMs = Date.now();
@@ -340,6 +466,7 @@ export default function DriverHome() {
     }
     if (!uid || savingAvailability) return;
 
+    activationInProgress.current = true;
     setSavingAvailability(true);
     let workSession = null;
     try {
@@ -425,6 +552,7 @@ export default function DriverHome() {
         || 'Não foi possível ativar sua disponibilidade e localização.'
       );
     } finally {
+      activationInProgress.current = false;
       setSavingAvailability(false);
     }
   }
@@ -436,6 +564,7 @@ export default function DriverHome() {
       return;
     }
     if (!uid || savingAvailability) return;
+    activationInProgress.current = true;
     setSavingAvailability(true);
     const sessionId = driver?.availabilitySessionId || null;
     try {
@@ -480,6 +609,7 @@ export default function DriverHome() {
         || 'A localização foi interrompida. A indisponibilidade será sincronizada assim que a conexão voltar.'
       );
     } finally {
+      activationInProgress.current = false;
       setSavingAvailability(false);
     }
   }
