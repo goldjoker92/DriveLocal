@@ -3,7 +3,7 @@
 // It never creates, accepts, starts or finishes a ride. The real passenger and
 // driver screens keep controlling the complete business flow. This service only
 // replaces the driver's physical GPS movement and publishes through the same
-// Firestore documents consumed by dispatch and live tracking.
+// session-bound Firestore documents consumed by dispatch and live tracking.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
@@ -15,16 +15,20 @@ import {
   beginDevLocationSimulation,
   publishDevSimulatedLocation,
   restoreRealDriverTrackingAfterSimulation,
+  stopDriverOnlineTracking,
 } from './driverLocationTracking';
+import {
+  startDriverWorkSession,
+  stopDriverWorkSession,
+} from './driverAvailabilityService';
 import { listenToMyOffer } from './ridesService';
 
 const STORAGE_KEY = '@drivelocal/robot-driver-v1';
-// Shared intentionally with driverLocationTracking. Writing the ride session
-// before enabling its DEV override avoids one native-GPS publication during the
-// online -> accepted-ride transition.
+// Shared intentionally with driverLocationTracking. The simulator prepares the
+// exact same local session before publishing its first point.
 const TRACKING_SESSION_KEY = '@drivelocal/driver-location-session-v1';
 const STEP_INTERVAL_MS = 3_000;
-const WAITING_HEARTBEAT_MS = 30_000;
+const WAITING_HEARTBEAT_MS = 4 * 60_000;
 const ARRIVAL_THRESHOLD_METERS = 12;
 const TERMINAL_RIDE_STATUSES = new Set(['completed', 'cancelled', 'disputed']);
 const listeners = new Set();
@@ -33,6 +37,7 @@ const initialState = {
   enabled: false,
   phase: 'idle',
   driverId: null,
+  availabilitySessionId: null,
   rideId: null,
   rideStatus: null,
   vehicleType: 'car',
@@ -61,6 +66,7 @@ function trace(event, details = {}, level = 'log') {
     event,
     simulationId,
     driverId: state.driverId,
+    availabilitySessionId: state.availabilitySessionId,
     rideId: state.rideId,
     rideStatus: state.rideStatus,
     phase: state.phase,
@@ -127,8 +133,6 @@ function ridePoint(kind) {
 
 function offerRideStatus(offer) {
   if (offer?.driverRideStatus) return offer.driverRideStatus;
-  // The accepted offer reveals the exact destination only after the real ride is
-  // started. Keep this fallback aligned with the existing active-ride screen.
   if (offer?.exactDestination) return 'in_progress';
   return offer?.status === 'accepted' ? 'assigned' : null;
 }
@@ -151,18 +155,43 @@ async function stopNativeTask() {
   }
 }
 
+async function writeTrackingSession(patch) {
+  const raw = await AsyncStorage.getItem(TRACKING_SESSION_KEY);
+  const current = raw ? JSON.parse(raw) : {};
+  const next = {
+    ...current,
+    driverId: state.driverId,
+    availabilitySessionId: state.availabilitySessionId,
+    vehicleType: state.vehicleType,
+    ...patch,
+    updatedAtMs: Date.now(),
+  };
+  await AsyncStorage.setItem(TRACKING_SESSION_KEY, JSON.stringify(next));
+  return next;
+}
+
 async function publishWaitingPoint(point, reason) {
-  if (!state.enabled || !state.driverId || state.rideId) return false;
+  if (
+    !state.enabled
+    || !state.driverId
+    || !state.availabilitySessionId
+    || state.rideId
+  ) return false;
+
+  const nowMs = Date.now();
   await updateDoc(doc(db, 'drivers', state.driverId), {
     location: point,
     locationAccuracyMeters: 5,
     locationHeadingDegrees: null,
     locationSpeedMps: 0,
-    locationUpdatedAtMs: Date.now(),
+    locationUpdatedAtMs: nowMs,
     locationUpdatedAt: serverTimestamp(),
+    locationAvailabilitySessionId: state.availabilitySessionId,
+    availabilityUpdatedAtMs: nowMs,
+    availabilityUpdatedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  emit({ currentPoint: point, lastPublishAtMs: Date.now() }, 'robot.waiting_position_published');
+  emit({ currentPoint: point, lastPublishAtMs: nowMs }, 'robot.waiting_position_published');
   trace('location.published_waiting', { reason, point });
   return true;
 }
@@ -246,6 +275,9 @@ function processRideOffer(nextOffer, rideId) {
     hasDestination: Boolean(ridePoint('destination')),
   });
 
+  writeTrackingSession({ rideId, rideStatus: nextStatus || 'assigned', trackingPaused: false })
+    .catch((error) => trace('tracking_session.update_failed', { message: error?.message }, 'warn'));
+
   if (TERMINAL_RIDE_STATUSES.has(nextStatus)) {
     stopMovementTimer();
     emit({ rideStatus: nextStatus, phase: 'terminal', targetPoint: null, targetKind: null }, 'robot.ride_terminal');
@@ -266,18 +298,14 @@ function processRideOffer(nextOffer, rideId) {
 async function bindRide(rideId) {
   if (!rideId || rideId === state.rideId) return;
   trace('ride.binding_started', { nextRideId: rideId });
-  emit({ rideId, rideStatus: null, phase: 'ride_bound' }, 'robot.ride_detected');
+  emit({ rideId, rideStatus: 'assigned', phase: 'ride_bound' }, 'robot.ride_detected');
 
-  // Avoid the legacy native tracking helper here because it starts native GPS
-  // before the DEV override exists. Preparing the same secured local session
-  // first keeps simulated GPS authoritative with zero real-GPS flash.
   await stopNativeTask();
-  await AsyncStorage.setItem(TRACKING_SESSION_KEY, JSON.stringify({
-    driverId: state.driverId,
-    vehicleType: state.vehicleType,
+  await writeTrackingSession({
     rideId,
-    updatedAtMs: Date.now(),
-  }));
+    rideStatus: 'assigned',
+    trackingPaused: false,
+  });
   const simulation = await beginDevLocationSimulation({
     driverId: state.driverId,
     vehicleType: state.vehicleType,
@@ -289,14 +317,9 @@ async function bindRide(rideId) {
     throw error;
   }
 
-  // Seed activeRideLocations immediately so both real screens have a point as
-  // soon as the accepted ride opens, before the operator presses Move.
   await publishRidePoint(state.currentPoint, 'ride_bound_seed');
 
   if (unsubscribeRide) unsubscribeRide();
-  // Drivers are intentionally forbidden from reading rideRequests directly.
-  // The secured winning offer is their source of truth for lifecycle status and
-  // reveals exact pickup/destination coordinates at the correct moments.
   unsubscribeRide = listenToMyOffer(
     state.driverId,
     (nextOffer) => processRideOffer(nextOffer, rideId),
@@ -321,6 +344,7 @@ function startDriverListener() {
     trace('driver.snapshot', {
       exists: Boolean(driver),
       availabilityStatus: driver?.availabilityStatus,
+      availabilitySessionMatches: driver?.availabilitySessionId === state.availabilitySessionId,
       activeRideId,
       vehicleType: driver?.vehicleType,
     });
@@ -338,7 +362,6 @@ function startDriverListener() {
 export function presetPoint(origin, distanceKm) {
   const point = normalizePoint(origin);
   if (!point) return null;
-  // Offset north-east so several presets remain visible and deterministic.
   const meters = Number(distanceKm) * 1000;
   const north = meters * 0.82;
   const east = meters * 0.57;
@@ -373,36 +396,48 @@ export async function activateRobotDriver({ vehicleType, speedKmh, startPoint })
   const point = normalizePoint(startPoint);
   if (!driverId || !point) throw new Error('ROBOT_INVALID_ACTIVATION');
 
+  let workSession = null;
   simulationId = `robot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  state = {
-    ...initialState,
-    enabled: true,
-    phase: 'waiting_request',
-    driverId,
-    vehicleType: vehicleType === 'moto' ? 'moto' : 'car',
-    speedKmh: Number(speedKmh) || 20,
-    currentPoint: point,
-    lastEvent: 'robot.activation_started',
-  };
-  trace('activation.started', { startPoint: point, speedKmh: state.speedKmh, vehicleType: state.vehicleType });
-  await stopNativeTask();
-  await publishWaitingPoint(point, 'activation');
-  startDriverListener();
+  try {
+    workSession = await startDriverWorkSession();
+    state = {
+      ...initialState,
+      enabled: true,
+      phase: 'waiting_request',
+      driverId,
+      availabilitySessionId: workSession.availabilitySessionId,
+      vehicleType: vehicleType === 'moto' ? 'moto' : 'car',
+      speedKmh: Number(speedKmh) || 20,
+      currentPoint: point,
+      lastEvent: 'robot.activation_started',
+    };
+    trace('activation.started', { startPoint: point, speedKmh: state.speedKmh, vehicleType: state.vehicleType });
+    await stopNativeTask();
+    await writeTrackingSession({ rideId: null, rideStatus: null, trackingPaused: false });
+    await publishWaitingPoint(point, 'activation');
+    startDriverListener();
 
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  heartbeatTimer = setInterval(() => {
-    // The online screen is also guarded, but this watchdog repairs any external
-    // native-task restart and republishes the authoritative simulated point.
-    stopNativeTask()
-      .then(() => publishWaitingPoint(state.currentPoint, 'waiting_heartbeat'))
-      .catch((error) => {
-        trace('waiting_heartbeat.failed', { message: error?.message }, 'error');
-      });
-  }, WAITING_HEARTBEAT_MS);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      stopNativeTask()
+        .then(() => publishWaitingPoint(state.currentPoint, 'waiting_heartbeat'))
+        .catch((error) => {
+          trace('waiting_heartbeat.failed', { message: error?.message }, 'error');
+        });
+    }, WAITING_HEARTBEAT_MS);
 
-  emit({ phase: 'waiting_request' }, 'robot.active_waiting_request');
-  trace('activation.succeeded');
-  return getRobotDriverState();
+    emit({ phase: 'waiting_request' }, 'robot.active_waiting_request');
+    trace('activation.succeeded');
+    return getRobotDriverState();
+  } catch (error) {
+    await stopDriverOnlineTracking().catch(() => undefined);
+    if (workSession?.availabilitySessionId) {
+      await stopDriverWorkSession(workSession.availabilitySessionId).catch(() => undefined);
+    }
+    state = { ...initialState, lastEvent: 'robot.activation_failed', errorCode: error?.code || error?.message };
+    trace('activation.failed', { code: error?.code, message: error?.message }, 'error');
+    throw error;
+  }
 }
 
 export async function moveRobotTo(kind) {
@@ -446,8 +481,9 @@ export function resumeRobotDriver() {
   movementTimer = setInterval(movementTick, STEP_INTERVAL_MS);
 }
 
-export async function stopRobotDriver() {
-  trace('stop.started');
+export async function stopRobotDriver(options = {}) {
+  const restoreRealTracking = options.restoreRealTracking !== false;
+  trace('stop.started', { restoreRealTracking });
   stopMovementTimer();
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = null;
@@ -458,9 +494,13 @@ export async function stopRobotDriver() {
   currentRide = null;
 
   try {
-    await restoreRealDriverTrackingAfterSimulation();
+    if (restoreRealTracking) {
+      await restoreRealDriverTrackingAfterSimulation();
+    } else {
+      await stopDriverOnlineTracking();
+    }
   } catch (error) {
-    trace('stop.restore_native_failed', { message: error?.message }, 'warn');
+    trace('stop.tracking_cleanup_failed', { message: error?.message }, 'warn');
   }
   await AsyncStorage.removeItem(STORAGE_KEY).catch(() => undefined);
   state = { ...initialState, lastEvent: 'robot.stopped' };
