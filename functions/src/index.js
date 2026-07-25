@@ -63,3 +63,5 @@ const { driverLocationRiskTrigger } = require('./risk/locationRisk');
 exports.driverLocationRiskTrigger = driverLocationRiskTrigger;
 const { ridePaymentRestrictionTrigger } = require('./risk/paymentRestriction');
 exports.ridePaymentRestrictionTrigger = ridePaymentRestrictionTrigger;
+const { supplySnapshotTask } = require('./risk/supplySnapshots');
+exports.supplySnapshotTask = supplySnapshotTask;
