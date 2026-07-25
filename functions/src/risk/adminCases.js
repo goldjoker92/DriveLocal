@@ -116,6 +116,16 @@ function decisionStatus(outcome) {
   return 'resolved';
 }
 
+function revokeDriverWorkSession(profileUpdate, nowMs) {
+  profileUpdate.availabilityStatus = 'offline';
+  profileUpdate.availabilitySessionId = null;
+  profileUpdate.locationAvailabilitySessionId = null;
+  profileUpdate.availabilityUpdatedAtMs = nowMs;
+  profileUpdate.availabilityUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
+  profileUpdate.availabilitySessionEndedAtMs = nowMs;
+  profileUpdate.availabilitySessionEndedAt = admin.firestore.FieldValue.serverTimestamp();
+}
+
 async function decideAdminRiskCase({ db, request, context, clock }) {
   const adminUid = await requireAdmin(db, request);
   const payload = assertShape(request?.data || {}, {
@@ -195,6 +205,10 @@ async function decideAdminRiskCase({ db, request, context, clock }) {
         profileUpdate.riskRestrictionUntil = new Date(summary.untilMs);
         if (before.actorType === C.ACTOR_TYPE.DRIVER) {
           profileUpdate.riskBlockedFromNewAcceptances = true;
+          // The dedicated ride channel may continue for an assigned ride, but the
+          // driver immediately disappears from new dispatch and must opt in again
+          // after the restriction is cleared.
+          revokeDriverWorkSession(profileUpdate, nowMs);
         } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
           profileUpdate.riskBlockedFromNewRides = true;
         }
@@ -206,7 +220,7 @@ async function decideAdminRiskCase({ db, request, context, clock }) {
         profileUpdate.riskBlockedAt = admin.firestore.FieldValue.serverTimestamp();
         if (before.actorType === C.ACTOR_TYPE.DRIVER) {
           profileUpdate.riskBlockedFromNewAcceptances = true;
-          profileUpdate.availabilityStatus = 'offline';
+          revokeDriverWorkSession(profileUpdate, nowMs);
         } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
           profileUpdate.riskBlockedFromNewRides = true;
         }
@@ -222,6 +236,7 @@ async function decideAdminRiskCase({ db, request, context, clock }) {
           profileUpdate.riskRestrictionUntil = summary.untilMs ? new Date(summary.untilMs) : null;
           if (before.actorType === C.ACTOR_TYPE.DRIVER) {
             profileUpdate.riskBlockedFromNewAcceptances = restrictions.length > 0 || profile.isBlocked === true;
+            // Never auto-online after an admin clears a case.
           } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
             profileUpdate.riskBlockedFromNewRides = restrictions.length > 0 || profile.isBlocked === true;
           }
@@ -315,5 +330,6 @@ module.exports = {
   MAX_RESTRICTION_HOURS,
   safeCase,
   listAdminRiskCases,
+  revokeDriverWorkSession,
   decideAdminRiskCase,
 };
