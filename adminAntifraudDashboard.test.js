@@ -10,11 +10,15 @@ function read(relativePath) {
 }
 
 describe('admin launch command center contracts', () => {
-  test('business analytics and risk cases use secure callables', () => {
+  test('business analytics, risk cases and ride summaries use secure callables', () => {
     const service = read('src/services/adminService.js');
     expect(service).toContain("call('getAdminBusinessAnalyticsSecure'");
     expect(service).toContain("call('listAdminRiskCasesSecure'");
     expect(service).toContain("call('decideAdminRiskCaseSecure'");
+    expect(service).toContain("call('getAdminRideSummarySecure'");
+    expect(service).toContain("call('listAdminDisputedRidesSecure'");
+    expect(service).not.toContain("getDoc(doc(db, 'rideRequests'");
+    expect(service).not.toContain("collection(db, 'rideRequests')");
   });
 
   test('dashboard separates revenue, commission, subscriptions and driver supply', () => {
