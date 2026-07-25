@@ -67,6 +67,8 @@ function safeDriverView(driverId, d = {}) {
     subscriptionActive: d.subscriptionActive === true,
     subscriptionExpiresAt: d.subscriptionExpiresAt != null ? d.subscriptionExpiresAt : null,
     isBlocked: d.isBlocked === true,
+    financialReviewRequired: d.financialReviewRequired === true,
+    riskRestrictionUntilMs: d.riskRestrictionUntilMs != null ? d.riskRestrictionUntilMs : null,
   };
 }
 
@@ -76,7 +78,9 @@ function safeDriverView(driverId, d = {}) {
  *   - founders: subscription-covered until subscriptionFreeUntil, then need an
  *     active subscription;
  *   - non-founders: covered for their first FREE_RIDE_LIMIT rides, then need an
- *     active subscription.
+ *     active subscription;
+ *   - unresolved payment review or an active admin risk restriction blocks NEW
+ *     offers, without changing the wallet or the old ride hold.
  * @param {object} d driver document data
  * @param {{now:()=>number|Date|object}} clock
  */
@@ -90,6 +94,7 @@ function evaluateRideEligibility(d = {}, clock) {
   const commissionFreeUntilMs = toMillis(d.commissionFreeUntil);
   const subscriptionExpiresAtMs = toMillis(d.subscriptionExpiresAt);
   const subscriptionFreeUntilMs = toMillis(d.subscriptionFreeUntil || d.founderFreeUntil);
+  const riskRestrictionUntilMs = toMillis(d.riskRestrictionUntilMs);
 
   const commissionFree = commissionFreeUntilMs > now;
 
@@ -102,14 +107,20 @@ function evaluateRideEligibility(d = {}, clock) {
   const freeRidesRemaining = !isFounder && Number(d.freeRideCountUsed || 0) < C.FREE_RIDE_LIMIT;
 
   const subscriptionCovered = founderCovered || freeRidesRemaining || activeSubscription;
+  const financialReviewRequired = d.financialReviewRequired === true;
+  const temporaryRiskRestriction = d.riskBlockedFromNewAcceptances === true
+    && (riskRestrictionUntilMs === 0 || riskRestrictionUntilMs > now);
+  const riskRestricted = financialReviewRequired || temporaryRiskRestriction;
 
   return {
     isFounder,
     commissionFree,
     subscriptionCovered,
     requiresSubscription: !subscriptionCovered,
+    financialReviewRequired,
+    riskRestricted,
     // Derived on the fly — never persisted as an authoritative flag.
-    canReceiveRides: approved && !blocked && subscriptionCovered,
+    canReceiveRides: approved && !blocked && !riskRestricted && subscriptionCovered,
   };
 }
 
