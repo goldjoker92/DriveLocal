@@ -75,12 +75,13 @@ module.exports = Object.freeze({
 
   // Horizonte launch policy: broadcast to every eligible online driver in the
   // municipality (bounded for safety), give enough time to answer, and tolerate
-  // short Android heartbeat delays without treating a working driver as offline.
+  // short Android delivery delays without treating a working driver as offline.
   OFFER_TTL_SECONDS: 45,
   SEARCH_TTL_SECONDS: 90,
   MAX_CANDIDATES: 100,
   DEFAULT_SEARCH_RADIUS_METERS: 50_000,
   LOCATION_MAX_AGE_MS: 5 * 60 * 1000,
+  AVAILABILITY_SESSION_MAX_AGE_MS: 7 * 60 * 1000,
 
   MIN_WALLET_BALANCE_CENTAVOS: 300,
 
