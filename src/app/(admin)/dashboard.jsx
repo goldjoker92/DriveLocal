@@ -1,5 +1,5 @@
 // Admin dashboard (route "/dashboard"). Launch command center for business,
-// commission integrity, subscriptions, demand peaks and antifraud alerts.
+// commission integrity, subscriptions, demand peaks, driver supply and antifraud.
 //
 // Privacy: the screen receives server-computed aggregates only. It never downloads
 // raw ledgers, CPF/CNH/Pix values or precise passenger coordinates.
@@ -33,6 +33,10 @@ const PERIODS = [
 
 const money = (value) => formatBRL(Number(value || 0));
 const number = (value) => Number(value || 0).toLocaleString('pt-BR');
+const decimal = (value) => Number(value || 0).toLocaleString('pt-BR', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
 const percent = (value) => `${(Number(value || 0) * 100).toFixed(1).replace('.', ',')}%`;
 const hourLabel = (hour) => `${String(Number(hour || 0)).padStart(2, '0')}h–${String((Number(hour || 0) + 1) % 24).padStart(2, '0')}h`;
 
@@ -100,6 +104,37 @@ function PeakList({ rows, valueLabel, valueKey }) {
   ));
 }
 
+function DemandSupplyList({ rows }) {
+  const visible = [...(rows || [])]
+    .filter((row) => Number(row.requests || 0) > 0 || Number(row.averageOnlineDrivers || 0) > 0)
+    .sort((a, b) => {
+      const aPressure = a.requestsPerAvailableDriver == null ? -1 : a.requestsPerAvailableDriver;
+      const bPressure = b.requestsPerAvailableDriver == null ? -1 : b.requestsPerAvailableDriver;
+      return bPressure - aPressure || b.noDriverAvailable - a.noDriverAvailable;
+    })
+    .slice(0, 5);
+
+  if (visible.length === 0) {
+    return (
+      <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+        As médias de oferta aparecerão após os primeiros snapshots horários.
+      </Text>
+    );
+  }
+
+  return visible.map((row, index) => (
+    <MetricRow
+      key={`supply-${row.hour}`}
+      label={`${index + 1}. ${hourLabel(row.hour)}`}
+      value={row.requestsPerAvailableDriver == null
+        ? 'sem motorista disponível'
+        : `${decimal(row.requestsPerAvailableDriver)} pedido(s) / disponível`}
+      strong={index === 0}
+      hint={`${number(row.requests)} pedidos · média ${decimal(row.averageAvailableDrivers)} disponíveis · ${number(row.noDriverAvailable)} não atendidos`}
+    />
+  ));
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [rangeDays, setRangeDays] = useState(30);
@@ -138,6 +173,8 @@ export default function Dashboard() {
   const rides = data?.rides || {};
   const drivers = data?.drivers || {};
   const alerts = data?.alerts || {};
+  const supply = data?.supply || {};
+  const latestSupply = supply.latest || {};
   const health = Number(alerts.critical || 0) > 0
     ? 'CRÍTICO'
     : Number(alerts.high || 0) > 0
@@ -213,7 +250,7 @@ export default function Dashboard() {
             style={{ width: '48%' }}
             label="Valor em risco"
             value={data ? money(revenue.amountAtRiskCentavos) : '…'}
-            hint={`${number(alerts.open)} alerta(s) aberto(s)`}
+            hint={`${number(alerts.open)} alerta(s) financeiro(s)`}
           />
         </View>
 
@@ -303,6 +340,26 @@ export default function Dashboard() {
           />
         </AppCard>
 
+        <SectionTitle
+          title="Demanda x oferta de motoristas"
+          subtitle="Médias horárias agregadas; nenhum ID ou ponto GPS é armazenado neste estudo."
+        />
+        <AppCard>
+          <MetricRow label="Online no último snapshot" value={number(latestSupply.online?.total)} strong />
+          <MetricRow
+            label="Disponíveis agora"
+            value={number(latestSupply.available?.total)}
+            hint={`Moto ${number(latestSupply.available?.moto)} · Carro ${number(latestSupply.available?.car)}`}
+          />
+          <MetricRow label="Ocupados agora" value={number(latestSupply.busy?.total)} />
+        </AppCard>
+        <AppCard>
+          <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
+            Horários com maior pressão de demanda
+          </Text>
+          <DemandSupplyList rows={supply.demandVsSupply} />
+        </AppCard>
+
         <SectionTitle title="Dias mais ativos" subtitle="Ranking do período por quantidade de pedidos." />
         <AppCard>
           {(rides.peakDays || []).filter((day) => Number(day.requests || 0) > 0).map((day, index) => (
@@ -332,11 +389,11 @@ export default function Dashboard() {
           <MetricRow label="Em disputa" value={number(rides.total?.disputed)} />
         </AppCard>
 
-        <SectionTitle title="Alertas antifraude" subtitle="Nenhum alerta altera saldo automaticamente." />
+        <SectionTitle title="Alertas financeiros" subtitle="Nenhum alerta altera saldo automaticamente." />
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: spacing.md }}>
           <AdminStatCard style={{ width: '48%' }} label="Críticos" value={data ? number(alerts.critical) : '…'} />
           <AdminStatCard style={{ width: '48%' }} label="Alta prioridade" value={data ? number(alerts.high) : '…'} />
-          <AdminStatCard style={{ width: '48%' }} label="Casos abertos" value={data ? number(alerts.open) : '…'} />
+          <AdminStatCard style={{ width: '48%' }} label="Alertas abertos" value={data ? number(alerts.open) : '…'} />
           <AdminStatCard style={{ width: '48%' }} label="Montante em risco" value={data ? money(alerts.amountAtRiskCentavos) : '…'} />
         </View>
 
@@ -349,7 +406,8 @@ export default function Dashboard() {
         ) : null}
 
         <SectionTitle title="Operações administrativas" />
-        <AppButton title="Motoristas pendentes" onPress={() => router.push('/drivers-pending')} />
+        <AppButton title="Antifraude — casos e decisões" onPress={() => router.push('/antifraud')} />
+        <AppButton title="Motoristas pendentes" variant="secondary" onPress={() => router.push('/drivers-pending')} />
         <AppButton title="Disputas de corrida" variant="secondary" onPress={() => router.push('/ride-disputes')} />
         <AppButton title="Ajuste de saldo" variant="secondary" onPress={() => router.push('/wallet-adjust')} />
         <AppButton title="Recargas pendentes" variant="secondary" onPress={() => router.push('/topups-pending')} />
