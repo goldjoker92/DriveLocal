@@ -28,13 +28,27 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
-async function assertNoActiveRideAccountChange(reason) {
-  const session = await getDriverTrackingSession();
-  if (!session?.rideId) return session;
+function activeRideAccountChangeError(reason) {
   const error = new Error('Finalize ou cancele a corrida ativa antes de trocar de conta.');
   error.code = 'auth/active-ride-in-progress';
   error.reason = reason;
-  throw error;
+  return error;
+}
+
+async function activeTrackingState() {
+  const session = await getDriverTrackingSession();
+  const robot = getRobotDriverState();
+  return {
+    session,
+    hasActiveRide: Boolean(session?.rideId || robot?.rideId),
+    driverId: session?.driverId || robot?.driverId || null,
+  };
+}
+
+async function assertNoActiveRideAccountChange(reason) {
+  const tracking = await activeTrackingState();
+  if (!tracking.hasActiveRide) return tracking.session;
+  throw activeRideAccountChangeError(reason);
 }
 
 async function clearLocalDriverTracking(reason) {
@@ -52,7 +66,9 @@ async function clearLocalDriverTracking(reason) {
 
   try {
     if (robot?.enabled) {
-      await stopRobotDriver();
+      // Account cleanup must end with no native task. Do not briefly restore the
+      // physical GPS when stopping the DEV simulator for sign-out/account switch.
+      await stopRobotDriver({ restoreRealTracking: false });
     }
   } catch (error) {
     console.warn('[AUTH_TRACKING_CLEANUP] robot stop failed', {
@@ -139,6 +155,14 @@ async function resolveAccountRole(uid) {
   return { role: 'unknown', profile: null };
 }
 
+async function roleResult(user) {
+  const account = await resolveAccountRole(user.uid);
+  if (account.role === 'admin') return { user, role: 'admin' };
+  if (account.role === 'driver') return { user, role: 'driver', driver: account.profile };
+  if (account.role === 'passenger') return { user, role: 'passenger', passenger: account.profile };
+  return { user, role: 'unknown' };
+}
+
 async function writeRoleProfile(user, collectionName, buildProfile, normalizedEmail) {
   const profile = buildProfile(user, normalizedEmail);
   await setDoc(doc(db, collectionName, user.uid), profile);
@@ -206,7 +230,7 @@ async function createAccountWithProfile({
     await clearAuthenticatedSession();
   } else {
     // A native background task can remain after an earlier process/session even
-    // when Firebase Auth is already signed out. Clear it before creating a user.
+    // when Firebase Auth is already signed out. Never replace an active ride.
     await assertNoActiveRideAccountChange('register_preflight');
     await clearLocalDriverTracking('register_preflight');
   }
@@ -309,31 +333,37 @@ export async function registerPassenger(email, password, profile) {
 }
 
 // Signs the user in, then resolves their role.
-// Returns { user, role, driver?, passenger? }.
+// A same-driver reauthentication preserves an active ride and its tracking;
+// switching to any other account remains blocked until the ride is terminal.
 export async function loginUser(email, password) {
   const normalizedEmail = normalizeEmail(email);
+  const tracking = await activeTrackingState();
 
-  // A work session belongs to the currently authenticated driver. It must be
-  // stopped before another account is authenticated, except during an active ride
-  // where account switching is rejected entirely.
-  await assertNoActiveRideAccountChange('login_preflight');
+  if (tracking.hasActiveRide) {
+    const currentUid = auth.currentUser?.uid || null;
+    const currentEmail = normalizeEmail(auth.currentUser?.email);
+    if (
+      (currentUid && currentUid !== tracking.driverId)
+      || (currentEmail && currentEmail !== normalizedEmail)
+    ) {
+      throw activeRideAccountChangeError('login_preflight');
+    }
+
+    const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+    if (credential.user.uid !== tracking.driverId) {
+      // Keep the local ride session so the correct account can be entered next.
+      // The wrong account is immediately signed out and never inherits the ride.
+      await signOut(auth);
+      throw activeRideAccountChangeError('login_uid_mismatch');
+    }
+    return roleResult(credential.user);
+  }
+
+  // No active ride: close the previous optional work session before replacing the
+  // authenticated account. New login therefore starts unavailable by default.
   await clearLocalDriverTracking('login_preflight');
-
   const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
-  const user = credential.user;
-  const account = await resolveAccountRole(user.uid);
-
-  if (account.role === 'admin') {
-    return { user, role: 'admin' };
-  }
-  if (account.role === 'driver') {
-    return { user, role: 'driver', driver: account.profile };
-  }
-  if (account.role === 'passenger') {
-    return { user, role: 'passenger', passenger: account.profile };
-  }
-
-  return { user, role: 'unknown' };
+  return roleResult(credential.user);
 }
 
 export async function logoutUser() {
