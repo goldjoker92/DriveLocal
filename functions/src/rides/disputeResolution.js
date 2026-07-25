@@ -24,6 +24,7 @@ const {
 const { writeAuditLog } = require('../audit/auditLog');
 const { requireAdmin } = require('../auth/adminAuth');
 const { logInfo, shortHash } = require('../logging/logger');
+const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const driverC = require('../drivers/constants');
 const C = require('./constants');
 
@@ -49,6 +50,23 @@ function settlementFromFrozenHold(ride) {
     captured,
     released: originalHold - captured,
   };
+}
+
+function setDriverOfferStatusTx(tx, db, rideId, driverId, status, extra = {}) {
+  if (!driverId) return;
+  tx.set(db.collection(C.DRIVER_OFFERS).doc(`${rideId}_${driverId}`), {
+    driverRideStatus: status,
+    ...extra,
+    updatedAt: ts(),
+  }, { merge: true });
+}
+
+function clearActiveRideIfCurrentTx(tx, ref, snapshot, rideId) {
+  if (!ref || !snapshot?.exists) return false;
+  const profile = snapshot.data() || {};
+  if (profile.activeRideId !== rideId) return false;
+  tx.set(ref, { activeRideId: null, updatedAt: ts() }, { merge: true });
+  return true;
 }
 
 async function resolveRideDispute({ db, request, context, clock }) {
@@ -104,11 +122,16 @@ async function resolveRideDispute({ db, request, context, clock }) {
         disputeReviewedAtMs: nowMs,
         updatedAt: ts(),
       }, { merge: true });
-      return { replay: false, ride, outcome, captured: 0, released: 0, originalHold: Number(ride.commissionHoldCentavos || 0) };
+      return {
+        replay: false,
+        ride,
+        outcome,
+        captured: 0,
+        released: 0,
+        originalHold: Number(ride.commissionHoldCentavos || 0),
+      };
     }
 
-    // Financial outcomes require a still-disputed ride. Any other state means the
-    // case was already resolved differently or the request is invalid.
     if (ride.status !== C.RIDE_STATUS.DISPUTED) {
       throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
         internalMessage: `${outcome} from ${ride.status}`,
@@ -117,15 +140,23 @@ async function resolveRideDispute({ db, request, context, clock }) {
     }
 
     const driverId = ride.acceptedDriverId;
+    const passengerId = ride.passengerId;
     const driverRef = driverId ? db.collection(C.DRIVERS).doc(driverId) : null;
+    const passengerRef = passengerId ? db.collection(C.PASSENGERS).doc(passengerId) : null;
     const driverSnap = driverRef ? await tx.get(driverRef) : null;
-    const driver = driverSnap && driverSnap.exists ? driverSnap.data() || {} : {};
+    const passengerSnap = passengerRef ? await tx.get(passengerRef) : null;
+    const driver = driverSnap?.exists ? driverSnap.data() || {} : {};
     const settlement = settlementFromFrozenHold(ride);
     const nowMs = clock.now();
 
     if (outcome === 'confirm_driver_payment') {
       const capSnap = await tx.get(captureRef);
-      if (capSnap.exists) return { replay: true, ride, outcome };
+      if (capSnap.exists) {
+        throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+          internalMessage: `capture exists while disputed ride is unresolved: ${rideId}`,
+          safeMetadata: { reason: 'DISPUTE_CAPTURE_ALREADY_EXISTS' },
+        });
+      }
 
       if (driverRef) {
         const driverUpdate = {
@@ -141,10 +172,12 @@ async function resolveRideDispute({ db, request, context, clock }) {
             0,
             Number(driver.walletAvailableCentavos || 0) + settlement.released
           ),
-          activeRideId: null,
           completedRideCount: Number(driver.completedRideCount || 0) + 1,
           updatedAt: ts(),
         };
+        // The disputed ride was already detached. Never clear a newer active ride
+        // accepted while this old case waited for admin review.
+        if (driver.activeRideId === rideId) driverUpdate.activeRideId = null;
         if (
           driver.founderEligible !== true
           && Number(driver.freeRideCountUsed || 0) < driverC.FREE_RIDE_LIMIT
@@ -153,6 +186,7 @@ async function resolveRideDispute({ db, request, context, clock }) {
         }
         tx.set(driverRef, driverUpdate, { merge: true });
       }
+      clearActiveRideIfCurrentTx(tx, passengerRef, passengerSnap, rideId);
 
       tx.set(rideRef, {
         status: C.RIDE_STATUS.COMPLETED,
@@ -161,6 +195,7 @@ async function resolveRideDispute({ db, request, context, clock }) {
         commissionCapturedCentavos: settlement.captured,
         holdReleasedCentavos: settlement.released,
         commissionSettlementStatus: settlement.originalHold > 0 ? 'captured' : 'free',
+        requiresManualReview: false,
         disputeResolution: {
           outcome,
           reasonCode: reason,
@@ -171,6 +206,9 @@ async function resolveRideDispute({ db, request, context, clock }) {
         disputeResolutionStatus: 'resolved',
         updatedAt: ts(),
       }, { merge: true });
+      setDriverOfferStatusTx(tx, db, rideId, driverId, C.RIDE_STATUS.COMPLETED, {
+        completedAtMs: nowMs,
+      });
 
       if (settlement.originalHold > 0) {
         tx.set(holdRef, {
@@ -194,14 +232,41 @@ async function resolveRideDispute({ db, request, context, clock }) {
           traceId: context && context.traceId,
         });
       }
+      if (passengerId) {
+        enqueueEventTx(tx, db, buildNotificationEvent({
+          rideId,
+          eventType: C.NOTIFICATION_EVENT.RIDE_COMPLETED,
+          recipientUid: passengerId,
+          recipientRole: 'passenger',
+          route: '/pix-payment',
+          traceId: context?.traceId,
+          nowMs,
+        }));
+      }
+      if (driverId) {
+        enqueueEventTx(tx, db, buildNotificationEvent({
+          rideId,
+          eventType: C.NOTIFICATION_EVENT.RIDE_COMPLETED,
+          recipientUid: driverId,
+          recipientRole: 'driver',
+          route: '/active-ride',
+          traceId: context?.traceId,
+          nowMs,
+        }));
+      }
       return { replay: false, ride, outcome, ...settlement };
     }
 
     // release_driver_hold
     const relSnap = await tx.get(releaseRef);
-    if (relSnap.exists) return { replay: true, ride, outcome };
+    if (relSnap.exists) {
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+        internalMessage: `release exists while disputed ride is unresolved: ${rideId}`,
+        safeMetadata: { reason: 'DISPUTE_RELEASE_ALREADY_EXISTS' },
+      });
+    }
     if (driverRef) {
-      tx.set(driverRef, {
+      const driverUpdate = {
         walletHeldCentavos: Math.max(
           0,
           Number(driver.walletHeldCentavos || 0) - settlement.originalHold
@@ -210,10 +275,12 @@ async function resolveRideDispute({ db, request, context, clock }) {
           0,
           Number(driver.walletAvailableCentavos || 0) + settlement.originalHold
         ),
-        activeRideId: null,
         updatedAt: ts(),
-      }, { merge: true });
+      };
+      if (driver.activeRideId === rideId) driverUpdate.activeRideId = null;
+      tx.set(driverRef, driverUpdate, { merge: true });
     }
+    clearActiveRideIfCurrentTx(tx, passengerRef, passengerSnap, rideId);
     tx.set(rideRef, {
       status: C.RIDE_STATUS.CANCELLED,
       cancelledAtMs: nowMs,
@@ -222,6 +289,7 @@ async function resolveRideDispute({ db, request, context, clock }) {
       commissionHoldCentavos: 0,
       holdReleasedCentavos: settlement.originalHold,
       commissionSettlementStatus: settlement.originalHold > 0 ? 'released' : 'free',
+      requiresManualReview: false,
       disputeResolution: {
         outcome,
         reasonCode: reason,
@@ -232,6 +300,9 @@ async function resolveRideDispute({ db, request, context, clock }) {
       disputeResolutionStatus: 'resolved',
       updatedAt: ts(),
     }, { merge: true });
+    setDriverOfferStatusTx(tx, db, rideId, driverId, C.RIDE_STATUS.CANCELLED, {
+      cancelledAtMs: nowMs,
+    });
 
     if (settlement.originalHold > 0) {
       tx.set(holdRef, {
@@ -252,6 +323,28 @@ async function resolveRideDispute({ db, request, context, clock }) {
         createdAt: ts(),
         traceId: context && context.traceId,
       });
+    }
+    if (passengerId) {
+      enqueueEventTx(tx, db, buildNotificationEvent({
+        rideId,
+        eventType: C.NOTIFICATION_EVENT.RIDE_CANCELLED,
+        recipientUid: passengerId,
+        recipientRole: 'passenger',
+        route: '/passenger-home',
+        traceId: context?.traceId,
+        nowMs,
+      }));
+    }
+    if (driverId) {
+      enqueueEventTx(tx, db, buildNotificationEvent({
+        rideId,
+        eventType: C.NOTIFICATION_EVENT.RIDE_CANCELLED,
+        recipientUid: driverId,
+        recipientRole: 'driver',
+        route: '/driver-home',
+        traceId: context?.traceId,
+        nowMs,
+      }));
     }
     return {
       replay: false,
@@ -302,4 +395,6 @@ module.exports = {
   resolveRideDispute,
   DISPUTE_OUTCOMES: OUTCOMES,
   settlementFromFrozenHold,
+  setDriverOfferStatusTx,
+  clearActiveRideIfCurrentTx,
 };
