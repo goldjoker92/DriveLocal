@@ -9,21 +9,40 @@ const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateIdentifier, validateNonEmptyString } = require('../validation/validators');
 const { writeAuditLog } = require('../audit/auditLog');
 const { requireAdmin } = require('../auth/adminAuth');
-const { bestEffortRiskSignal, caseId: buildCaseId } = require('../risk/riskEngine');
+const {
+  bestEffortRiskSignal,
+  caseId: buildCaseId,
+  stableId,
+} = require('../risk/riskEngine');
 const riskC = require('../risk/constants');
 const { safeDriverView } = require('./eligibility');
 const { scanDriverDuplicates } = require('./duplicateCheck');
 const C = require('./constants');
 
-async function reviewedDuplicateOverride(db, driverId, reasonCodes) {
-  if (reasonCodes.length === 0) return null;
-  const snapshots = await Promise.all(reasonCodes.map((reasonCode) => {
+// The source contains only a one-way fingerprint. A newly matching account changes
+// the fingerprint and therefore requires a fresh admin decision instead of reusing
+// an old "no evidence" closure forever.
+function duplicateConflictSourceId(conflict = {}) {
+  const matchingIds = Array.isArray(conflict.matchingDriverIds)
+    ? [...new Set(conflict.matchingDriverIds.map(String))].sort()
+    : [];
+  const fingerprint = stableId([
+    String(conflict.field || 'unknown'),
+    String(conflict.reasonCode || 'unknown'),
+    ...matchingIds,
+  ]);
+  return `duplicate_${String(conflict.field || 'unknown').slice(0, 20)}_${fingerprint}`;
+}
+
+async function reviewedDuplicateOverride(db, driverId, conflicts) {
+  if (!Array.isArray(conflicts) || conflicts.length === 0) return null;
+  const snapshots = await Promise.all(conflicts.map((conflict) => {
     const id = buildCaseId({
       actorType: riskC.ACTOR_TYPE.DRIVER,
       actorId: driverId,
-      reasonCode,
+      reasonCode: conflict.reasonCode,
       sourceType: 'driver_application',
-      sourceId: driverId,
+      sourceId: duplicateConflictSourceId(conflict),
     });
     return db.collection(riskC.COLLECTIONS.FRAUD_CASES).doc(id).get();
   }));
@@ -69,8 +88,9 @@ async function approveDriver({ db, request, context, clock }) {
 
   const conflicts = duplicateResult.conflicts || [];
   const reasonCodes = [...new Set(conflicts.map((conflict) => conflict.reasonCode))];
+  const conflictFingerprints = conflicts.map(duplicateConflictSourceId);
   const reviewedOverrideReason = conflicts.length > 0 && !explicitOverrideReason
-    ? await reviewedDuplicateOverride(db, driverId, reasonCodes)
+    ? await reviewedDuplicateOverride(db, driverId, conflicts)
     : null;
   const effectiveOverrideReason = explicitOverrideReason || reviewedOverrideReason;
 
@@ -78,6 +98,7 @@ async function approveDriver({ db, request, context, clock }) {
     await driverRef.set({
       duplicateCheckStatus: 'review_required',
       duplicateReasonCodes: reasonCodes,
+      duplicateConflictFingerprints: conflictFingerprints,
       duplicateConflictCount: conflicts.length,
       duplicateCheckScannedCount: duplicateResult.scannedCount,
       duplicateCheckReviewedAtMs: clock.now(),
@@ -86,6 +107,7 @@ async function approveDriver({ db, request, context, clock }) {
     }, { merge: true });
 
     for (const conflict of conflicts) {
+      const sourceId = duplicateConflictSourceId(conflict);
       await bestEffortRiskSignal({
         db,
         clock,
@@ -96,8 +118,8 @@ async function approveDriver({ db, request, context, clock }) {
         severity: conflict.hard ? riskC.SEVERITY.HIGH : riskC.SEVERITY.MEDIUM,
         recommendedAction: riskC.ACTION.REQUIRE_REVIEW,
         sourceType: 'driver_application',
-        sourceId: driverId,
-        eventKey: `duplicate_${conflict.field}`,
+        sourceId,
+        eventKey: sourceId,
         metadata: {
           count: conflict.matchingDriverIds.length,
           result: 'review_required',
@@ -163,6 +185,7 @@ async function approveDriver({ db, request, context, clock }) {
       subscriptionFreeUntil: isFounder ? freePeriodEnd : null,
       duplicateCheckStatus,
       duplicateReasonCodes: reasonCodes,
+      duplicateConflictFingerprints: conflictFingerprints,
       duplicateConflictCount: conflicts.length,
       duplicateCheckScannedCount: duplicateResult.scannedCount,
       duplicateCheckReviewedAtMs: nowMs,
@@ -213,7 +236,11 @@ async function approveDriver({ db, request, context, clock }) {
         founderNumber: outcome.after.founderNumber,
         driverPhotoPublicVersion: outcome.after.driverPhotoPublicVersion || null,
         duplicateCheckStatus: outcome.after.duplicateCheckStatus,
-        duplicateOverrideSource: reviewedOverrideReason ? 'closed_risk_cases' : explicitOverrideReason ? 'explicit_admin_reason' : null,
+        duplicateOverrideSource: reviewedOverrideReason
+          ? 'closed_risk_cases'
+          : explicitOverrideReason
+            ? 'explicit_admin_reason'
+            : null,
       },
     }, clock);
   }
@@ -221,4 +248,8 @@ async function approveDriver({ db, request, context, clock }) {
   return safeDriverView(driverId, outcome.after);
 }
 
-module.exports = { approveDriver, reviewedDuplicateOverride };
+module.exports = {
+  approveDriver,
+  duplicateConflictSourceId,
+  reviewedDuplicateOverride,
+};
