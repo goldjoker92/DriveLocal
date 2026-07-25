@@ -23,8 +23,9 @@ function buildAvailabilitySessionId(nowMs) {
 }
 
 function availabilityAgeMs(driver = {}, nowMs = Date.now()) {
-  const updatedAtMs = Number(driver.availabilityUpdatedAtMs || 0)
-    || toMillis(driver.availabilityUpdatedAt);
+  // Server timestamp first; epoch-ms is only a legacy/test fallback.
+  const updatedAtMs = toMillis(driver.availabilityUpdatedAt)
+    || Number(driver.availabilityUpdatedAtMs || 0);
   return updatedAtMs > 0 ? Math.max(0, Number(nowMs) - updatedAtMs) : Infinity;
 }
 
