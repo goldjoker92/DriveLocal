@@ -12,7 +12,13 @@ const rideC = require('../rides/constants');
 const riskC = require('./constants');
 const { buildAdminAnalytics } = require('./analytics');
 
-const LIMITS = Object.freeze({ rides: 2500, drivers: 1500, payments: 2000, alerts: 500 });
+const LIMITS = Object.freeze({
+  rides: 2500,
+  drivers: 1500,
+  payments: 2000,
+  alerts: 500,
+  supplySnapshots: 2200,
+});
 const ALLOWED_RANGE_DAYS = new Set([1, 7, 30, 90]);
 
 function docs(snapshot) {
@@ -31,12 +37,25 @@ async function getAdminBusinessAnalytics({ db, request, context, clock }) {
   }
 
   const nowMs = Number(clock.now());
-  const startMs = nowMs - rangeDays * 24 * 60 * 60 * 1000;
-  const [ridesSnap, driversSnap, paymentsSnap, alertsSnap] = await Promise.all([
-    db.collection(rideC.RIDE_REQUESTS).where('createdAtMs', '>=', startMs).limit(LIMITS.rides).get(),
+  const startMs = nowMs - rangeDays * 86400000;
+  const [ridesSnap, driversSnap, paymentsSnap, alertsSnap, supplySnap] = await Promise.all([
+    db.collection(rideC.RIDE_REQUESTS)
+      .where('createdAtMs', '>=', startMs)
+      .limit(LIMITS.rides)
+      .get(),
     db.collection(rideC.DRIVERS).limit(LIMITS.drivers).get(),
-    db.collection(paymentC.PAYMENT_REQUESTS).where('createdAtMs', '>=', startMs).limit(LIMITS.payments).get(),
-    db.collection(riskC.COLLECTIONS.FINANCIAL_ALERTS).where('createdAtMs', '>=', startMs).limit(LIMITS.alerts).get(),
+    db.collection(paymentC.PAYMENT_REQUESTS)
+      .where('createdAtMs', '>=', startMs)
+      .limit(LIMITS.payments)
+      .get(),
+    db.collection(riskC.COLLECTIONS.FINANCIAL_ALERTS)
+      .where('createdAtMs', '>=', startMs)
+      .limit(LIMITS.alerts)
+      .get(),
+    db.collection(riskC.COLLECTIONS.OPERATIONAL_SNAPSHOTS)
+      .where('createdAtMs', '>=', startMs)
+      .limit(LIMITS.supplySnapshots)
+      .get(),
   ]);
 
   const result = buildAdminAnalytics({
@@ -44,6 +63,7 @@ async function getAdminBusinessAnalytics({ db, request, context, clock }) {
     drivers: docs(driversSnap),
     payments: docs(paymentsSnap),
     alerts: docs(alertsSnap),
+    supplySnapshots: docs(supplySnap),
     nowMs,
     rangeDays,
   });
@@ -53,6 +73,7 @@ async function getAdminBusinessAnalytics({ db, request, context, clock }) {
     drivers: driversSnap.size >= LIMITS.drivers,
     payments: paymentsSnap.size >= LIMITS.payments,
     alerts: alertsSnap.size >= LIMITS.alerts,
+    supplySnapshots: supplySnap.size >= LIMITS.supplySnapshots,
   };
 
   logInfo(context, 'admin.analytics.generated', {
