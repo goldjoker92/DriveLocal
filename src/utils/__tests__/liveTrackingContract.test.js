@@ -66,6 +66,26 @@ describe('Android live driver tracking contracts', () => {
     expect(home).not.toContain('setDriverAvailability(uid, AVAILABILITY.ONLINE)');
   });
 
+  it('does not cancel a fresh work session from cached Firestore state', () => {
+    const home = source('src/app/(driver)/driver-home.jsx');
+    const layout = source('src/app/(driver)/_layout.jsx');
+
+    expect(home).toContain('REMOTE_RECONCILIATION_GRACE_MS = 12_000');
+    expect(home).toContain('snapshotNeedsServerConfirmation');
+    expect(home).toContain('{ includeMetadataChanges: true }');
+    expect(home).toContain('activationInProgress.current');
+    expect(home).toContain('cockpit.reconciliation_deferred');
+    expect(home).toContain('cockpit.online_restore_recovering');
+    expect(home).toContain('getDriverTrackingSession');
+
+    expect(layout).toContain('REMOTE_RECONCILIATION_GRACE_MS = 12_000');
+    expect(layout).toContain('snapshotNeedsServerConfirmation');
+    expect(layout).toContain('{ includeMetadataChanges: true }');
+    expect(layout).toContain('layout.reconciliation_deferred');
+    expect(layout).toContain("reason: 'snapshot_from_cache'");
+    expect(layout).toContain("reason: 'local_transition_grace'");
+  });
+
   it('recovers accepted rides but filters offers from an old work session', () => {
     const tracking = source('src/services/driverLocationTracking.js');
     const rides = source('src/services/ridesService.js');
