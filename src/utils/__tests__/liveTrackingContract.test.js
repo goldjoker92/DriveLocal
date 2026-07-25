@@ -61,6 +61,8 @@ describe('Android live driver tracking contracts', () => {
     expect(home).toContain('A localização de trabalho está ativa.');
     expect(home).toContain('Parar de trabalhar');
     expect(home).toContain('cockpit.remote_session_revoked');
+    expect(home).toContain('timestampMs(driver.availabilityUpdatedAt)');
+    expect(home).toContain('|| Number(driver.availabilityUpdatedAtMs || 0)');
     expect(home).not.toContain('setDriverAvailability(uid, AVAILABILITY.ONLINE)');
   });
 
@@ -68,6 +70,7 @@ describe('Android live driver tracking contracts', () => {
     const tracking = source('src/services/driverLocationTracking.js');
     const rides = source('src/services/ridesService.js');
     const layout = source('src/app/(driver)/_layout.jsx');
+    const auth = source('src/services/authService.js');
 
     expect(tracking).toContain("doc(db, 'rideRequests', rideId)");
     expect(tracking).toContain('acceptedAvailabilitySessionId');
@@ -76,6 +79,9 @@ describe('Android live driver tracking contracts', () => {
     expect(rides).toContain('selected.availabilitySessionId === trackingSession.availabilitySessionId');
     expect(layout).toContain('layout.remote_session_revoked');
     expect(layout).toContain('foreground_heartbeat_error');
+    expect(auth).toContain('readAuthenticatedDriverState');
+    expect(auth).toContain("source: remoteDriver?.activeRideId ? 'firestore_driver' : 'none'");
+    expect(auth).toContain('account_change_blocked');
   });
 
   it('renders the real passenger map from the secured ride location listener', () => {
