@@ -2,7 +2,7 @@
 // winning offer and attaches the background location service to this ride.
 // Payment feedback stays on-screen: success closes after 5 seconds; failures remain.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -32,6 +32,7 @@ import {
   stopDevRideSimulation,
   subscribeDevRideSimulation,
 } from '../../services/devRideSimulation';
+import { getRobotDriverState } from '../../services/robotDriverEngine';
 import {
   listenToMyOffer,
   markDriverArrived,
@@ -45,6 +46,7 @@ import {
 const TRACKED_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
 const PAYMENT_STATUSES = new Set(['awaiting_payment', 'payment_marked_sent', 'completed', 'disputed']);
 const ROBOT_NAVIGATION_STATUSES = new Set(['running', 'paused', 'completed']);
+const DEV_SIMULATION_OVERRIDE_STATUSES = new Set(['running', 'paused', 'completed', 'interrupted', 'error']);
 const SUCCESS_VISIBLE_MS = 5000;
 
 function statusFromEvent(eventType) {
@@ -119,12 +121,18 @@ function confirmRobotWazeOpen() {
   });
 }
 
+function cleanupStageForStatus(status) {
+  return ['completed', 'cancelled', 'disputed'].includes(status) ? 'terminal' : 'payment';
+}
+
 export default function ActiveRide() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const rideId = typeof params.rideId === 'string' ? params.rideId : null;
   const eventType = typeof params.eventType === 'string' ? params.eventType : null;
 
+  const cleanupDoneRef = useRef(new Set());
+  const cleanupInFlightRef = useRef(new Map());
   const [offer, setOffer] = useState(null);
   const [status, setStatus] = useState(() => statusFromEvent(eventType));
   const [busy, setBusy] = useState('');
@@ -134,6 +142,11 @@ export default function ActiveRide() {
 
   const paymentAmount = offer?.paymentAmountCentavos;
   const paymentPayload = offer?.paymentPixPayload;
+
+  useEffect(() => {
+    cleanupDoneRef.current = new Set();
+    cleanupInFlightRef.current = new Map();
+  }, [rideId]);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -195,6 +208,60 @@ export default function ActiveRide() {
     };
   }, [rideId]);
 
+  async function cleanupTrackingAfterRide(stage = cleanupStageForStatus(status)) {
+    if (!rideId) return;
+    const cleanupKey = `${rideId}:${stage}`;
+    if (cleanupDoneRef.current.has(cleanupKey)) return;
+    const existing = cleanupInFlightRef.current.get(cleanupKey);
+    if (existing) return existing;
+
+    const operation = (async () => {
+      const robotActive = DEV_RIDE_SIMULATOR_ENABLED && getRobotDriverState().enabled;
+      const localDevSimulationActive = DEV_RIDE_SIMULATOR_ENABLED
+        && (!devSimulation?.rideId || devSimulation.rideId === rideId)
+        && DEV_SIMULATION_OVERRIDE_STATUSES.has(devSimulation?.status);
+
+      console.log('[DRIVER_LOCATION] active_ride.cleanup_started', {
+        scope: 'driver_location',
+        event: 'active_ride.cleanup_started',
+        rideId,
+        stage,
+        robotActive,
+        localDevSimulationActive,
+        atMs: Date.now(),
+      });
+
+      if (localDevSimulationActive) {
+        await stopDevRideSimulation({ restoreRealTracking: false });
+      }
+
+      await detachActiveRideTracking(rideId);
+
+      // Robot Driver owns its synthetic waiting position and must not be replaced
+      // by the phone's real GPS after every ride. The per-ride DEV route simulator,
+      // on the other hand, must restore native tracking after its override ends.
+      if (localDevSimulationActive && !robotActive) {
+        await restoreRealDriverTrackingAfterSimulation();
+      }
+
+      cleanupDoneRef.current.add(cleanupKey);
+      console.log('[DRIVER_LOCATION] active_ride.cleanup_succeeded', {
+        scope: 'driver_location',
+        event: 'active_ride.cleanup_succeeded',
+        rideId,
+        stage,
+        robotActive,
+        restoredRealGps: localDevSimulationActive && !robotActive,
+        atMs: Date.now(),
+      });
+    })().finally(() => {
+      cleanupInFlightRef.current.delete(cleanupKey);
+    });
+
+    cleanupInFlightRef.current.set(cleanupKey, operation);
+    return operation;
+  }
+
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid || !rideId || !offer?.vehicleType) return undefined;
@@ -204,7 +271,9 @@ export default function ActiveRide() {
       attachActiveRideTracking({
         driverId: uid,
         vehicleType: offer.vehicleType,
+        availabilitySessionId: offer.availabilitySessionId || null,
         rideId,
+        rideStatus: status,
         requestPermissions: false,
       }).then((result) => {
         if (!active) return;
@@ -213,16 +282,7 @@ export default function ActiveRide() {
         if (active) setTrackingStatus('error');
       });
     } else {
-      const stopTracking = async () => {
-        if (DEV_RIDE_SIMULATOR_ENABLED) {
-          await stopDevRideSimulation({ restoreRealTracking: false });
-        }
-        await detachActiveRideTracking(rideId);
-        if (DEV_RIDE_SIMULATOR_ENABLED) {
-          await restoreRealDriverTrackingAfterSimulation();
-        }
-      };
-      stopTracking().finally(() => {
+      cleanupTrackingAfterRide(cleanupStageForStatus(status)).finally(() => {
         if (active) setTrackingStatus('stopped');
       });
     }
@@ -230,7 +290,7 @@ export default function ActiveRide() {
     return () => {
       active = false;
     };
-  }, [rideId, offer?.vehicleType, status]);
+  }, [rideId, offer?.vehicleType, offer?.availabilitySessionId, status]);
 
   async function enableRideTracking() {
     const uid = auth.currentUser?.uid;
@@ -243,23 +303,14 @@ export default function ActiveRide() {
       const result = await attachActiveRideTracking({
         driverId: uid,
         vehicleType: offer.vehicleType,
+        availabilitySessionId: offer.availabilitySessionId || null,
         rideId,
+        rideStatus: status,
         requestPermissions: true,
       });
       setTrackingStatus(result.status === 'active' ? 'active' : result.status);
     } catch (_error) {
       setTrackingStatus('error');
-    }
-  }
-
-  async function cleanupTrackingAfterRide() {
-    if (!rideId) return;
-    if (DEV_RIDE_SIMULATOR_ENABLED) {
-      await stopDevRideSimulation({ restoreRealTracking: false });
-    }
-    await detachActiveRideTracking(rideId);
-    if (DEV_RIDE_SIMULATOR_ENABLED) {
-      await restoreRealDriverTrackingAfterSimulation();
     }
   }
 
@@ -271,7 +322,7 @@ export default function ActiveRide() {
       const res = await fn(rideId);
       if (res?.status) setStatus(res.status);
       if (res && ['awaiting_payment', 'completed', 'cancelled', 'disputed'].includes(res.status)) {
-        await cleanupTrackingAfterRide();
+        await cleanupTrackingAfterRide(cleanupStageForStatus(res.status));
       }
       // Success and payment failure remain visible. Only cancellation leaves now.
       if (res?.status === 'cancelled') {
