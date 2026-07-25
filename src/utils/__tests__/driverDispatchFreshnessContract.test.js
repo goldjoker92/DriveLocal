@@ -17,22 +17,29 @@ describe('driver dispatch freshness contract', () => {
     expect(plugin[1].isAndroidForegroundServiceEnabled).toBe(true);
   });
 
-  it('publishes stationary heartbeats without allowing Android write bursts', () => {
+  it('uses adaptive idle, moving and active-ride publication policies', () => {
     const tracking = source('src/services/driverLocationTracking.js');
+    const policy = source('src/utils/driverLocationPolicy.js');
 
-    expect(tracking).toContain('const ONLINE_HEARTBEAT_INTERVAL_MS = 30_000');
-    expect(tracking).toContain('const ACTIVE_RIDE_INTERVAL_MS = 5_000');
-    expect(tracking).toContain('const ONLINE_MIN_PUBLISH_GAP_MS = 20_000');
-    expect(tracking).toContain('const ACTIVE_RIDE_MIN_PUBLISH_GAP_MS = 3_000');
-    expect(tracking).toContain('const LAST_PUBLISH_KEY');
+    expect(policy).toContain('online_idle');
+    expect(policy).toContain('online_moving');
+    expect(policy).toContain('driver_arrived');
+    expect(policy).toContain('in_progress');
+    expect(policy).toContain('maxAgeMs: 4 * 60_000');
+    expect(policy).toContain('minDistanceMeters: 100');
+    expect(policy).toContain('minDistanceMeters: 20');
+    expect(policy).toContain('shouldPublishDriverLocation');
+
+    expect(tracking).toContain('ONLINE_NATIVE_INTERVAL_MS = 30_000');
+    expect(tracking).toContain('ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000');
+    expect(tracking).toContain('distanceInterval: activeRide ? 10 : 25');
+    expect(tracking).toContain('stale_session_publish_dropped');
+    expect(tracking).toContain('locationAvailabilitySessionId: session.availabilitySessionId');
+    expect(tracking).toContain('availabilityUpdatedAtMs: nowMs');
     expect(tracking).toContain('let publishQueue = Promise.resolve()');
-    expect(tracking).toContain('burst throttled');
-    expect(tracking).toContain('distanceInterval: 0');
-    expect(tracking).toContain('deferredUpdatesDistance: 0');
-    expect(tracking).not.toContain('distanceInterval: 10');
   });
 
-  it('adds a foreground pulse that repairs a stopped native task', () => {
+  it('keeps a foreground pulse that repairs a stopped native task', () => {
     const tracking = source('src/services/driverLocationTracking.js');
     const layout = source('src/app/(driver)/_layout.jsx');
 
