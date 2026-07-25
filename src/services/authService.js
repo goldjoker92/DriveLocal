@@ -17,14 +17,28 @@ import {
 import { auth, db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
 import { disablePushNotifications } from './notificationsService';
-import { stopDriverOnlineTracking } from './driverLocationTracking';
+import {
+  getDriverTrackingSession,
+  stopDriverOnlineTracking,
+} from './driverLocationTracking';
+import { stopDriverWorkSession } from './driverAvailabilityService';
 import { getRobotDriverState, stopRobotDriver } from './robotDriverEngine';
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
+async function assertNoActiveRideAccountChange(reason) {
+  const session = await getDriverTrackingSession();
+  if (!session?.rideId) return session;
+  const error = new Error('Finalize ou cancele a corrida ativa antes de trocar de conta.');
+  error.code = 'auth/active-ride-in-progress';
+  error.reason = reason;
+  throw error;
+}
+
 async function clearLocalDriverTracking(reason) {
+  const trackingSession = await getDriverTrackingSession();
   const robot = getRobotDriverState();
   console.log('[AUTH_TRACKING_CLEANUP] started', {
     reason,
@@ -32,6 +46,7 @@ async function clearLocalDriverTracking(reason) {
     robotEnabled: Boolean(robot?.enabled),
     robotDriverId: robot?.driverId || null,
     robotRideId: robot?.rideId || null,
+    trackingRideId: trackingSession?.rideId || null,
     atMs: Date.now(),
   });
 
@@ -49,9 +64,8 @@ async function clearLocalDriverTracking(reason) {
   }
 
   try {
-    // Always stop the native task after Robot Driver cleanup. stopRobotDriver()
-    // briefly restores native tracking by design; account changes must end with
-    // no task and no persisted ride session owned by the previous account.
+    // Invalidate the local session before revoking it remotely so queued native
+    // points cannot publish after sign-out or account switching.
     await stopDriverOnlineTracking();
   } catch (error) {
     console.warn('[AUTH_TRACKING_CLEANUP] native stop failed', {
@@ -62,13 +76,30 @@ async function clearLocalDriverTracking(reason) {
     });
   }
 
+  if (
+    trackingSession?.availabilitySessionId
+    && trackingSession.driverId === auth.currentUser?.uid
+  ) {
+    try {
+      await stopDriverWorkSession(trackingSession.availabilitySessionId);
+    } catch (error) {
+      // The short server lease still removes a disconnected ghost driver. Account
+      // changes must not be blocked solely by a temporary network failure.
+      console.warn('[AUTH_TRACKING_CLEANUP] remote availability stop failed', {
+        reason,
+        code: error?.code,
+        message: error?.message,
+        atMs: Date.now(),
+      });
+    }
+  }
+
   console.log('[AUTH_TRACKING_CLEANUP] completed', { reason, atMs: Date.now() });
 }
 
 async function clearAuthenticatedSession() {
-  // Location tasks survive navigation and may survive sign-out. Stop them while
-  // the old Firebase user is still authenticated so they cannot keep producing
-  // permission-denied writes or leak a previous ride session into the next login.
+  // Never abandon a passenger mid-ride by switching the authenticated account.
+  await assertNoActiveRideAccountChange('sign_out');
   await clearLocalDriverTracking('sign_out');
 
   try {
@@ -176,6 +207,7 @@ async function createAccountWithProfile({
   } else {
     // A native background task can remain after an earlier process/session even
     // when Firebase Auth is already signed out. Clear it before creating a user.
+    await assertNoActiveRideAccountChange('register_preflight');
     await clearLocalDriverTracking('register_preflight');
   }
 
@@ -238,6 +270,9 @@ function buildInitialDriverProfile(user, email) {
     selfieStatus: 'missing',
     duplicateCheckStatus: 'clear',
     serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
+    availabilityStatus: 'offline',
+    availabilitySessionId: null,
+    availabilityUpdatedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -278,10 +313,10 @@ export async function registerPassenger(email, password, profile) {
 export async function loginUser(email, password) {
   const normalizedEmail = normalizeEmail(email);
 
-  // Critical account-switch preflight: an Expo background location task can be
-  // alive while Auth is signed out. Clear the persisted driver/ride session
-  // before authenticating, otherwise the new user inherits permission-denied
-  // activeRideLocations writes from the previous session.
+  // A work session belongs to the currently authenticated driver. It must be
+  // stopped before another account is authenticated, except during an active ride
+  // where account switching is rejected entirely.
+  await assertNoActiveRideAccountChange('login_preflight');
   await clearLocalDriverTracking('login_preflight');
 
   const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
