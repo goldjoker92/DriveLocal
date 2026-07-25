@@ -15,6 +15,7 @@ const { acceptDriverOfferSecure } = require('./acceptOffer');
 const { declineDriverOfferSecure } = require('./declineOffer');
 const lifecycle = require('./lifecycle');
 const { resolveRideDispute } = require('./disputeResolution');
+const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
 const C = require('./constants');
 
 const REGION = 'southamerica-east1';
@@ -102,5 +103,7 @@ module.exports = {
   cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
+  getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),
+  listAdminDisputedRidesSecure: bindLifecycle('listAdminDisputedRidesSecure', listAdminDisputedRides),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
 };
