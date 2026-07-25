@@ -1,9 +1,10 @@
 // Driver home / operational cockpit.
-// The admin decision remains the source of truth. Going online also starts the
-// Android foreground/background location service used by dispatch and rides.
+// The admin decision remains the source of truth. Starting work opens a secure
+// server session and only turns the UI green after the first session-bound GPS
+// point has been published successfully.
 
 import { useEffect, useState } from 'react';
-import { Alert, View, Text, ScrollView, useWindowDimensions } from 'react-native';
+import { Alert, View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
@@ -25,7 +26,11 @@ import {
 } from '../../constants/driverPhoto';
 import { auth } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
-import { getDriver, setDriverAvailability } from '../../services/driverService';
+import { getDriver } from '../../services/driverService';
+import {
+  startDriverWorkSession,
+  stopDriverWorkSession,
+} from '../../services/driverAvailabilityService';
 import { isFounderCommissionFreeActive } from '../../services/founderService';
 import {
   getDriverTrackingPermissionState,
@@ -64,6 +69,19 @@ function Line({ children, tone = 'muted' }) {
   return <Text style={[{ fontFamily, color }, typography.small]}>{children}</Text>;
 }
 
+function WorkStatusTitle({ online }) {
+  return (
+    <Text
+      style={[
+        { fontFamily, color: online ? colors.success : colors.danger },
+        typography.bodyBold,
+      ]}
+    >
+      {online ? '🟢 Você está disponível' : '🔴 Você está indisponível'}
+    </Text>
+  );
+}
+
 function confirmTrackingDisclosure() {
   return new Promise((resolve) => {
     Alert.alert(
@@ -86,6 +104,7 @@ function trackingErrorLabel(status) {
     foreground_denied: 'A localização precisa foi recusada. Ative-a nas configurações do Android.',
     background_denied: 'A localização em segundo plano foi recusada. Ative “Permitir o tempo todo” nas configurações do Android.',
     unsupported: 'O rastreamento do motorista está disponível somente no aplicativo Android.',
+    invalid_session: 'Não foi possível iniciar sua sessão de trabalho. Tente novamente.',
   };
   return labels[status] || 'Não foi possível iniciar a localização do motorista.';
 }
@@ -124,35 +143,66 @@ export default function DriverHome() {
         if (!active) return;
         setDriver(data);
 
-        // Old builds wrote "available", but secure dispatch accepts only "online".
-        if (data?.availabilityStatus === 'available') {
-          await setDriverAvailability(uid, AVAILABILITY.OFFLINE).catch(() => undefined);
+        const remoteSessionId = data?.availabilitySessionId || null;
+        const online = data?.availabilityStatus === AVAILABILITY.ONLINE;
+        if (!online) {
+          await stopDriverOnlineTracking().catch(() => undefined);
           if (active) {
-            setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.OFFLINE } : current);
             setAvailability(AVAILABILITY.OFFLINE);
             setTrackingActive(false);
           }
           return;
         }
 
-        const online = data?.availabilityStatus === AVAILABILITY.ONLINE;
-        setAvailability(online ? AVAILABILITY.ONLINE : AVAILABILITY.OFFLINE);
-
-        if (online) {
-          if (robotSimulationActive()) {
-            console.log('[ROBOT_DRIVER] online_restore.native_tracking_skipped', {
-              reason: 'robot_simulation_active',
-              driverId: uid,
-              atMs: Date.now(),
-            });
-            if (active) setTrackingActive(true);
-          } else {
-            const restored = await restoreDriverOnlineTracking({
-              driverId: uid,
-              vehicleType: data?.vehicleType,
-            });
-            if (active) setTrackingActive(restored.status === 'active');
+        // Legacy online values and online sessions without a matching local
+        // session are closed instead of silently resurrecting a ghost driver.
+        if (!remoteSessionId) {
+          await stopDriverOnlineTracking().catch(() => undefined);
+          await stopDriverWorkSession().catch(() => undefined);
+          if (active) {
+            setAvailability(AVAILABILITY.OFFLINE);
+            setTrackingActive(false);
+            setDriver((current) => current ? {
+              ...current,
+              availabilityStatus: AVAILABILITY.OFFLINE,
+              availabilitySessionId: null,
+            } : current);
           }
+          return;
+        }
+
+        if (robotSimulationActive()) {
+          console.log('[ROBOT_DRIVER] online_restore.native_tracking_skipped', {
+            reason: 'robot_simulation_active',
+            driverId: uid,
+            atMs: Date.now(),
+          });
+          if (active) {
+            setAvailability(AVAILABILITY.ONLINE);
+            setTrackingActive(true);
+          }
+          return;
+        }
+
+        const restored = await restoreDriverOnlineTracking({
+          driverId: uid,
+          vehicleType: data?.vehicleType,
+          availabilitySessionId: remoteSessionId,
+        });
+        if (!active) return;
+        if (restored.status === 'active') {
+          setAvailability(AVAILABILITY.ONLINE);
+          setTrackingActive(true);
+        } else {
+          await stopDriverOnlineTracking().catch(() => undefined);
+          await stopDriverWorkSession(remoteSessionId).catch(() => undefined);
+          setAvailability(AVAILABILITY.OFFLINE);
+          setTrackingActive(false);
+          setDriver((current) => current ? {
+            ...current,
+            availabilityStatus: AVAILABILITY.OFFLINE,
+            availabilitySessionId: null,
+          } : current);
         }
       })
       .catch(() => {
@@ -168,8 +218,6 @@ export default function DriverHome() {
   }, []);
 
   const nowMs = Date.now();
-  const { width } = useWindowDimensions();
-  const stackAvailabilityButtons = width < 360;
   const uid = auth.currentUser?.uid;
   const displayName = driver && (driver.displayName || driver.fullName || driver.email);
   const founderActive = isFounderCommissionFreeActive(driver);
@@ -204,15 +252,10 @@ export default function DriverHome() {
     if (!uid || savingAvailability) return;
 
     setSavingAvailability(true);
+    let workSession = null;
     try {
       const robotActive = robotSimulationActive();
-      if (robotActive) {
-        console.log('[ROBOT_DRIVER] go_online.native_tracking_skipped', {
-          reason: 'robot_simulation_active',
-          driverId: uid,
-          atMs: Date.now(),
-        });
-      } else {
+      if (!robotActive) {
         const permission = await getDriverTrackingPermissionState();
         if (permission.status !== 'granted') {
           const consented = await confirmTrackingDisclosure();
@@ -222,28 +265,50 @@ export default function DriverHome() {
           }
         }
 
+        workSession = await startDriverWorkSession();
         const tracking = await startDriverOnlineTracking({
           driverId: uid,
           vehicleType: driver?.vehicleType,
+          availabilitySessionId: workSession.availabilitySessionId,
           requestPermissions: permission.status !== 'granted',
         });
         if (tracking.status !== 'active') {
+          await stopDriverWorkSession(workSession.availabilitySessionId).catch(() => undefined);
+          workSession = null;
           setAvailabilityError(trackingErrorLabel(tracking.status));
           return;
         }
+      } else {
+        workSession = await startDriverWorkSession();
+        console.log('[ROBOT_DRIVER] go_online.native_tracking_skipped', {
+          reason: 'robot_simulation_active',
+          driverId: uid,
+          atMs: Date.now(),
+        });
       }
 
-      await setDriverAvailability(uid, AVAILABILITY.ONLINE);
       setAvailability(AVAILABILITY.ONLINE);
       setTrackingActive(true);
-      setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.ONLINE } : current);
-    } catch (_error) {
+      setDriver((current) => current ? {
+        ...current,
+        availabilityStatus: AVAILABILITY.ONLINE,
+        availabilitySessionId: workSession.availabilitySessionId,
+        availabilityUpdatedAtMs: workSession.availabilityUpdatedAtMs,
+      } : current);
+    } catch (errorValue) {
       if (!robotSimulationActive()) {
         await stopDriverOnlineTracking().catch(() => undefined);
       }
+      if (workSession?.availabilitySessionId) {
+        await stopDriverWorkSession(workSession.availabilitySessionId).catch(() => undefined);
+      }
       setTrackingActive(false);
       setAvailability(AVAILABILITY.OFFLINE);
-      setAvailabilityError('Não foi possível ativar sua disponibilidade e localização.');
+      setAvailabilityError(
+        errorValue?.details?.message
+        || errorValue?.message
+        || 'Não foi possível ativar sua disponibilidade e localização.'
+      );
     } finally {
       setSavingAvailability(false);
     }
@@ -257,18 +322,30 @@ export default function DriverHome() {
     }
     if (!uid || savingAvailability) return;
     setSavingAvailability(true);
+    const sessionId = driver?.availabilitySessionId || null;
     try {
-      await setDriverAvailability(uid, AVAILABILITY.OFFLINE);
+      // Stop locally first: queued GPS events immediately lose their session and
+      // cannot publish after the user pressed “Parar de trabalhar”.
       if (robotSimulationActive()) {
         await stopRobotDriver();
       } else {
         await stopDriverOnlineTracking();
       }
+      await stopDriverWorkSession(sessionId);
       setAvailability(AVAILABILITY.OFFLINE);
       setTrackingActive(false);
-      setDriver((current) => current ? { ...current, availabilityStatus: AVAILABILITY.OFFLINE } : current);
-    } catch (_error) {
-      setAvailabilityError('Não foi possível ficar indisponível. Tente novamente.');
+      setDriver((current) => current ? {
+        ...current,
+        availabilityStatus: AVAILABILITY.OFFLINE,
+        availabilitySessionId: null,
+      } : current);
+    } catch (errorValue) {
+      setAvailability(AVAILABILITY.OFFLINE);
+      setTrackingActive(false);
+      setAvailabilityError(
+        errorValue?.details?.message
+        || 'A localização foi interrompida. A indisponibilidade será sincronizada assim que a conexão voltar.'
+      );
     } finally {
       setSavingAvailability(false);
     }
@@ -357,33 +434,33 @@ export default function DriverHome() {
 
             <AppCard>
               <SectionTitle>DISPONIBILIDADE E GPS</SectionTitle>
-              <Line>
-                Quando disponível, sua posição é usada para encontrar corridas. Durante a corrida,
-                somente o passageiro daquela corrida vê seu deslocamento ao vivo.
-              </Line>
-              <View style={{ flexDirection: stackAvailabilityButtons ? 'column' : 'row', gap: spacing.sm }}>
-                <AppButton
-                  title="Disponível"
-                  variant={isAvailable ? 'primary' : 'secondary'}
-                  onPress={goAvailable}
-                  disabled={savingAvailability}
-                  style={stackAvailabilityButtons ? undefined : { flex: 1 }}
-                />
-                <AppButton
-                  title="Indisponível"
-                  variant={!isAvailable ? 'primary' : 'secondary'}
-                  onPress={goOffline}
-                  disabled={savingAvailability}
-                  style={stackAvailabilityButtons ? undefined : { flex: 1 }}
-                />
-              </View>
+              <WorkStatusTitle online={isAvailable} />
               {isAvailable ? (
-                <Line tone={trackingActive ? 'success' : 'warning'}>
-                  {trackingActive
-                    ? (robotSimulationActive() ? 'Localização simulada ativa.' : 'Localização de trabalho ativa.')
-                    : 'Verificando localização de trabalho…'}
-                </Line>
-              ) : null}
+                <>
+                  <Line tone="text">Buscando corridas próximas.</Line>
+                  <Line tone={trackingActive ? 'success' : 'warning'}>
+                    {trackingActive
+                      ? 'A localização de trabalho está ativa.'
+                      : 'Verificando localização de trabalho…'}
+                  </Line>
+                  <AppButton
+                    title={savingAvailability ? 'Parando…' : 'Parar de trabalhar'}
+                    variant="secondary"
+                    onPress={goOffline}
+                    disabled={savingAvailability}
+                  />
+                </>
+              ) : (
+                <>
+                  <Line tone="text">Ative sua disponibilidade quando quiser começar a trabalhar.</Line>
+                  <Line>Sua localização será usada somente durante seu período de trabalho.</Line>
+                  <AppButton
+                    title={savingAvailability ? 'Ativando…' : 'Começar a trabalhar'}
+                    onPress={goAvailable}
+                    disabled={savingAvailability || !eligibility.eligible}
+                  />
+                </>
+              )}
               {!eligibility.eligible ? (
                 <View style={{ backgroundColor: colors.warningBg, borderRadius: radius.md, padding: spacing.md, gap: spacing.xs }}>
                   <Text style={[{ fontFamily, color: colors.warning }, typography.bodyBold]}>
