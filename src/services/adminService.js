@@ -22,7 +22,13 @@ async function call(name, data) {
 }
 
 // --- Driver moderation (secure callables) ----------------------------------
-export const approveDriver = (driverId) => call('approveDriverSecure', { driverId });
+// duplicateOverrideReason is optional and must be supplied only after the admin
+// reviewed the duplicate indicators shown by the backend.
+export const approveDriver = (driverId, duplicateOverrideReason = null) =>
+  call('approveDriverSecure', {
+    driverId,
+    duplicateOverrideReason: duplicateOverrideReason || null,
+  });
 export const rejectDriver = (driverId, reason) => call('rejectDriverSecure', { driverId, reason });
 export const suspendDriver = (driverId, reason) => call('suspendDriverSecure', { driverId, reason });
 export const reactivateDriver = (driverId, reason) => call('reactivateDriverSecure', { driverId, reason });
@@ -76,6 +82,25 @@ export function adjustDriverWallet({
 // Server returns aggregates only. Supported launch windows: 1, 7, 30 or 90 days.
 export const getAdminBusinessAnalytics = (rangeDays = 30) =>
   call('getAdminBusinessAnalyticsSecure', { rangeDays });
+
+// --- Antifraud review queue -------------------------------------------------
+export const listAdminRiskCases = (status = 'open', max = 100) =>
+  call('listAdminRiskCasesSecure', { status, limit: max });
+
+export const decideAdminRiskCase = ({
+  caseId,
+  outcome,
+  reasonCode,
+  note,
+  restrictionHours,
+}) => call('decideAdminRiskCaseSecure', {
+  caseId,
+  outcome,
+  reasonCode,
+  note: note || null,
+  restrictionHours: restrictionHours == null ? null : Number(restrictionHours),
+  idempotencyKey: idempotencyKey('risk'),
+});
 
 // --- Bounded admin reads ----------------------------------------------------
 export async function listDriversByStatus(status, max = DEFAULT_LIMIT) {
