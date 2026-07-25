@@ -6,6 +6,7 @@ export const colors = {
   primary: '#0F2C5C',      // Deep blue
   primaryDark: '#0A2147',
   primaryTint: '#EEF2F9',  // Light blue card / chip background
+  onPrimary: '#FFFFFF',    // Text/icons rendered on primary surfaces
   accent: '#10B981',       // Green
   accentTint: '#E7F7F0',
 
