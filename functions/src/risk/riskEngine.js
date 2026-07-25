@@ -1,6 +1,8 @@
 // @ts-check
 // Append-only, privacy-safe risk event engine. Callers may use the transaction
 // variant so the business mutation and its fraud signal commit atomically.
+// Deterministic event ids make scheduled scans and network retries idempotent:
+// the same logical signal never increments a profile twice.
 
 const admin = require('firebase-admin');
 const { createHash } = require('crypto');
@@ -29,7 +31,10 @@ const SAFE_METADATA_KEYS = new Set([
 ]);
 
 function stableId(parts) {
-  return createHash('sha256').update(parts.filter(Boolean).join('|')).digest('hex').slice(0, 32);
+  return createHash('sha256')
+    .update(parts.filter(Boolean).join('|'))
+    .digest('hex')
+    .slice(0, 32);
 }
 
 function sanitizeMetadata(metadata = {}) {
@@ -63,7 +68,7 @@ function shouldOpenCase(severity, action) {
     || action === C.ACTION.TEMPORARY_RESTRICTION;
 }
 
-function writeRiskSignalTx({
+async function writeRiskSignalTx({
   tx,
   db,
   clock,
@@ -85,6 +90,15 @@ function writeRiskSignalTx({
   const nowMs = Number(clock?.now?.() || Date.now());
   const id = eventId({ actorType, actorId, reasonCode, sourceType, sourceId, eventKey });
   const eventRef = db.collection(C.COLLECTIONS.RISK_EVENTS).doc(id);
+  const eventSnap = await tx.get(eventRef);
+  if (eventSnap.exists) {
+    return {
+      eventId: id,
+      safeMetadata: sanitizeMetadata(metadata),
+      duplicate: true,
+    };
+  }
+
   const profileRef = db.collection(C.COLLECTIONS.RISK_PROFILES).doc(profileId(actorType, actorId));
   const safeMetadata = sanitizeMetadata(metadata);
 
@@ -104,7 +118,7 @@ function writeRiskSignalTx({
     occurredAtMs: nowMs,
     occurredAt: admin.firestore.FieldValue.serverTimestamp(),
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: false });
+  });
 
   tx.set(profileRef, {
     actorType,
@@ -134,19 +148,20 @@ function writeRiskSignalTx({
       ruleVersion: C.RULE_VERSION,
       openedAtMs: nowMs,
       openedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAtMs: nowMs,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   }
 
-  return { eventId: id, safeMetadata };
+  return { eventId: id, safeMetadata, duplicate: false };
 }
 
 async function writeRiskSignal(args) {
   const result = await args.db.runTransaction((tx) => writeRiskSignalTx({ ...args, tx }));
-  logInfo(args.context, 'risk.signal.created', {
+  logInfo(args.context, result.duplicate ? 'risk.signal.duplicate_ignored' : 'risk.signal.created', {
     operation: 'risk_signal',
     reasonCode: args.reasonCode,
-    result: args.recommendedAction || C.ACTION.LOG_ONLY,
+    result: result.duplicate ? 'duplicate_ignored' : (args.recommendedAction || C.ACTION.LOG_ONLY),
     targetUserIdHash: shortHash(args.actorId),
   });
   return result;
