@@ -1,7 +1,8 @@
 // @ts-check
-// Keeps a disputed ride from becoming a way to avoid DriveLocal commission while
-// continuing to accept new work. A dispute freezes only NEW acceptances; it never
-// changes the wallet/hold. Final admin resolution clears the restriction safely.
+// Keeps an unresolved payment from becoming a way to avoid DriveLocal commission
+// while continuing to accept new work. The restriction affects NEW acceptances
+// only; it never changes the wallet/hold or interrupts the current ride. Any final
+// settlement clears only the restriction linked to that exact ride.
 
 const admin = require('firebase-admin');
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
@@ -47,6 +48,19 @@ async function applyPaymentReviewRestriction({ db, driverId, rideId, disputed, n
   });
 }
 
+function paymentRestrictionTransition(beforeStatus, afterStatus) {
+  const enteredDispute = beforeStatus !== rideC.RIDE_STATUS.DISPUTED
+    && afterStatus === rideC.RIDE_STATUS.DISPUTED;
+  const becameFinal = beforeStatus !== afterStatus
+    && [rideC.RIDE_STATUS.COMPLETED, rideC.RIDE_STATUS.CANCELLED].includes(afterStatus);
+  return {
+    shouldHandle: enteredDispute || becameFinal,
+    restrict: enteredDispute,
+    enteredDispute,
+    becameFinal,
+  };
+}
+
 const ridePaymentRestrictionTrigger = onDocumentUpdated(
   { document: 'rideRequests/{rideId}', region: REGION, retry: true },
   async (event) => {
@@ -54,27 +68,28 @@ const ridePaymentRestrictionTrigger = onDocumentUpdated(
     const before = event.data?.before?.data() || {};
     const after = event.data?.after?.data() || {};
     const driverId = after.acceptedDriverId || before.acceptedDriverId;
-    const enteredDispute = before.status !== rideC.RIDE_STATUS.DISPUTED
-      && after.status === rideC.RIDE_STATUS.DISPUTED;
-    const resolvedDispute = before.status === rideC.RIDE_STATUS.DISPUTED
-      && [rideC.RIDE_STATUS.COMPLETED, rideC.RIDE_STATUS.CANCELLED].includes(after.status);
-    if (!enteredDispute && !resolvedDispute) return null;
+    const transition = paymentRestrictionTransition(before.status, after.status);
+    if (!transition.shouldHandle) return null;
 
-    const context = createLoggerContext({ functionName: 'ridePaymentRestrictionTrigger', actorType: 'system' });
+    const context = createLoggerContext({
+      functionName: 'ridePaymentRestrictionTrigger',
+      actorType: 'system',
+    });
     try {
       const result = await applyPaymentReviewRestriction({
         db: event.data.after.ref.firestore,
         driverId,
         rideId,
-        disputed: enteredDispute,
+        disputed: transition.restrict,
         nowMs: Date.now(),
       });
-      logInfo(context, enteredDispute
+      logInfo(context, transition.restrict
         ? 'driver.financial_review_restricted'
         : 'driver.financial_review_cleared', {
         operation: 'payment_review_restriction',
         rideId,
         result: result.changed ? 'changed' : 'unchanged',
+        finalStatus: transition.becameFinal ? after.status : null,
       });
     } catch (error) {
       logWarning(context, 'driver.financial_review_restriction_failed', {
@@ -90,5 +105,6 @@ const ridePaymentRestrictionTrigger = onDocumentUpdated(
 
 module.exports = {
   applyPaymentReviewRestriction,
+  paymentRestrictionTransition,
   ridePaymentRestrictionTrigger,
 };
