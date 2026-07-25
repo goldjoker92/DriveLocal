@@ -39,6 +39,8 @@ exports.confirmDriverPixReceivedSecure = rideCallables.confirmDriverPixReceivedS
 exports.cancelRideSecure = rideCallables.cancelRideSecure;
 exports.reportRidePaymentIssueSecure = rideCallables.reportRidePaymentIssueSecure;
 exports.resolveRideDisputeSecure = rideCallables.resolveRideDisputeSecure;
+exports.getAdminRideSummarySecure = rideCallables.getAdminRideSummarySecure;
+exports.listAdminDisputedRidesSecure = rideCallables.listAdminDisputedRidesSecure;
 
 const { expireRideOffersTask } = require('./rides/expireOffersTask');
 exports.expireRideOffersTask = expireRideOffersTask;
