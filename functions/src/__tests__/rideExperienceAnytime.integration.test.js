@@ -14,6 +14,7 @@ const C = require('../rides/constants');
 const AT_0007 = Date.parse('2026-08-02T03:07:00.000Z'); // 00:07 America/Fortaleza
 const DRIVER = 'moto_anytime_driver';
 const PASSENGER = 'moto_anytime_passenger';
+const AVAILABILITY_SESSION = 'work_moto_anytime_session_123456789';
 const PICKUP = {
   lat: -4.0995358,
   lng: -38.5006227,
@@ -61,9 +62,12 @@ describe('any-hour moto customer experience', () => {
       verificationStatus: 'approved',
       isBlocked: false,
       availabilityStatus: 'online',
+      availabilitySessionId: AVAILABILITY_SESSION,
+      availabilityUpdatedAtMs: AT_0007,
       activeRideId: null,
       location: { lat: PICKUP.lat, lng: PICKUP.lng },
       locationUpdatedAtMs: AT_0007,
+      locationAvailabilitySessionId: AVAILABILITY_SESSION,
       founderEligible: false,
       commissionFreeUntil: null,
       subscriptionActive: true,
@@ -118,6 +122,7 @@ describe('any-hour moto customer experience', () => {
     const offerId = `${rideId}_${DRIVER}`;
     const offered = db._store.get(`${C.DRIVER_OFFERS}/${offerId}`);
     expect(offered.pickupPreview.label).toBe('Região do embarque');
+    expect(offered.availabilitySessionId).toBe(AVAILABILITY_SESSION);
     expect(JSON.stringify(offered.pickupPreview)).not.toContain('José Sabino');
     expect(offered.exactPickup).toBeUndefined();
 
@@ -145,6 +150,7 @@ describe('any-hour moto customer experience', () => {
     expect(accepted.pickup).toEqual(PICKUP);
 
     const assignedRide = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
+    expect(assignedRide.acceptedAvailabilitySessionId).toBe(AVAILABILITY_SESSION);
     expect(assignedRide.acceptedDriverPublic).toMatchObject({
       name: 'João Moto Teste',
       vehicleType: 'moto',
