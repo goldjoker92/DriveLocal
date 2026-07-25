@@ -14,12 +14,16 @@ describe('Android live driver tracking contracts', () => {
 
     expect(service).toContain('TaskManager.defineTask');
     expect(service).toContain('Location.startLocationUpdatesAsync');
+    expect(service).toContain('ONLINE_NATIVE_INTERVAL_MS = 60_000');
     expect(service).toContain('ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000');
     expect(service).toContain('timeInterval: intervalMs');
-    expect(service).toContain('distanceInterval: activeRide ? 10 : 25');
+    expect(service).toContain('distanceInterval: activeRide ? 10 : 0');
+    expect(service).toContain('deferredUpdatesDistance: activeRide ? 10 : 0');
     expect(service).toContain('lastQueuedAtByMode');
     expect(service).toContain('auth.authStateReady');
     expect(service).toContain('stale_session_publish_dropped');
+    expect(service).toContain('DRIVER_INITIAL_LOCATION_NOT_PUBLISHED');
+    expect(service).toContain('restorePreviousSessionAfterStartFailure');
     expect(entry).toContain("import './src/services/driverLocationTracking'");
     expect(entry).toContain("import 'expo-router/entry'");
     expect(layout).toContain("import '../services/driverLocationTracking'");
@@ -56,7 +60,22 @@ describe('Android live driver tracking contracts', () => {
     expect(home).toContain('Buscando corridas próximas.');
     expect(home).toContain('A localização de trabalho está ativa.');
     expect(home).toContain('Parar de trabalhar');
+    expect(home).toContain('cockpit.remote_session_revoked');
     expect(home).not.toContain('setDriverAvailability(uid, AVAILABILITY.ONLINE)');
+  });
+
+  it('recovers accepted rides but filters offers from an old work session', () => {
+    const tracking = source('src/services/driverLocationTracking.js');
+    const rides = source('src/services/ridesService.js');
+    const layout = source('src/app/(driver)/_layout.jsx');
+
+    expect(tracking).toContain("doc(db, 'rideRequests', rideId)");
+    expect(tracking).toContain('acceptedAvailabilitySessionId');
+    expect(tracking).toContain('active_ride.session_recovered');
+    expect(rides).toContain('ride.driver_offer.stale_session_ignored');
+    expect(rides).toContain('selected.availabilitySessionId === trackingSession.availabilitySessionId');
+    expect(layout).toContain('layout.remote_session_revoked');
+    expect(layout).toContain('foreground_heartbeat_error');
   });
 
   it('renders the real passenger map from the secured ride location listener', () => {
