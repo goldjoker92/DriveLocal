@@ -1,8 +1,7 @@
 // @ts-check
-// Secure driver moderation: reject, block, unblock. All admin-only, all require
-// a human reason, all write a server timestamp and an audit record. None of them
-// ever reset approvedAt, founder status, or financial history — moderation is
-// additive state on top of the approval record.
+// Secure driver moderation: reject, block, unblock, suspend and reactivate. All
+// admin-only actions are auditable. Revocation affects new work sessions/offers;
+// an already assigned ride keeps its dedicated activeRideLocations channel.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -25,10 +24,25 @@ async function loadDriver(db, driverId) {
   return { ref, before: snap.data() || {} };
 }
 
+const ts = () => admin.firestore.FieldValue.serverTimestamp();
+
+function revokeWorkSession(clock) {
+  const nowMs = Number(clock.now());
+  return {
+    availabilityStatus: 'offline',
+    availabilitySessionId: null,
+    locationAvailabilitySessionId: null,
+    availabilityUpdatedAtMs: nowMs,
+    availabilityUpdatedAt: ts(),
+    availabilitySessionEndedAtMs: nowMs,
+    availabilitySessionEndedAt: ts(),
+  };
+}
+
 /**
- * Shared skeleton for the three admin+reason moderation actions.
+ * Shared skeleton for the admin+reason moderation actions.
  * @param {string} action audit action name
- * @param {(reason:string, adminUid:string)=>object} buildUpdate
+ * @param {(reason:string, adminUid:string, clock:object)=>object} buildUpdate
  */
 function makeModerator(action, buildUpdate) {
   return async function moderate({ db, request, context, clock }) {
@@ -54,8 +68,12 @@ function makeModerator(action, buildUpdate) {
         beforeSummary: {
           verificationStatus: before.verificationStatus || null,
           isBlocked: before.isBlocked === true,
+          availabilityStatus: before.availabilityStatus || null,
         },
-        afterSummary: { action },
+        afterSummary: {
+          action,
+          availabilityStatus: update.availabilityStatus || before.availabilityStatus || null,
+        },
       },
       clock
     );
@@ -68,42 +86,37 @@ function makeModerator(action, buildUpdate) {
 const rejectDriver = makeModerator('driver_rejected', (reason, adminUid, clock) => ({
   verificationStatus: 'rejected',
   rejectionReason: reason,
-  reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+  reviewedAt: ts(),
   reviewedAtMs: clock.now(),
   reviewedBy: adminUid,
-  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  ...revokeWorkSession(clock),
+  updatedAt: ts(),
 }));
 
-// Idempotent: re-blocking simply re-asserts the block with a fresh reason/time.
+// Idempotent: re-blocking re-asserts the block and revokes any work session.
 const blockDriver = makeModerator('driver_blocked', (reason, adminUid, clock) => ({
   isBlocked: true,
   blockReason: reason,
-  blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+  blockedAt: ts(),
   blockedAtMs: clock.now(),
   blockedBy: adminUid,
-  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  ...revokeWorkSession(clock),
+  updatedAt: ts(),
 }));
 
-// Idempotent: unblocking clears the block flag; approval/founder state persists.
+// Idempotent: unblocking clears the block flag; it never makes the driver online.
 const unblockDriver = makeModerator('driver_unblocked', (reason, adminUid, clock) => ({
   isBlocked: false,
   blockReason: null,
-  unblockedAt: admin.firestore.FieldValue.serverTimestamp(),
+  unblockedAt: ts(),
   unblockedAtMs: clock.now(),
   unblockedBy: adminUid,
-  updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  updatedAt: ts(),
 }));
 
-const ts = () => admin.firestore.FieldValue.serverTimestamp();
-
 // Suspend a driver (admin, reason mandatory). Transactional so the active-ride
-// guard is atomic. INVARIANT: suspension must never corrupt an in-progress ride —
-// if the driver holds an activeRideId we reject with a safe conflict and touch
-// nothing (no ride/wallet/hold/history change); the admin retries once the ride
-// reaches a terminal state. On success: verificationStatus -> suspended (removes
-// ride eligibility server-side), availability cleared, approval/founder/financial
-// history preserved. Idempotent: re-suspending an already-suspended driver is a
-// no-op replay.
+// guard is atomic. Existing product policy requires the admin to wait for a ride
+// to finish before suspension. On success the work session is revoked.
 async function suspendDriver({ db, request, context, clock }) {
   const adminUid = await requireAdmin(db, request);
   const payload = assertShape(request && request.data, { required: ['driverId', 'reason'] });
@@ -127,7 +140,7 @@ async function suspendDriver({ db, request, context, clock }) {
       suspendedAt: ts(),
       suspendedAtMs: nowMs,
       suspendedBy: adminUid,
-      availabilityStatus: 'offline', // clear current availability; eligibility now blocks re-online
+      ...revokeWorkSession(clock),
       updatedAt: ts(),
     };
     tx.set(driverRef, update, { merge: true });
@@ -139,16 +152,15 @@ async function suspendDriver({ db, request, context, clock }) {
       actorUid: adminUid, actorType: 'admin', action: 'driver_suspended', targetType: 'driver', targetId: driverId, reason,
       traceId: context && context.traceId,
       beforeSummary: { verificationStatus: out.before.verificationStatus || null },
-      afterSummary: { verificationStatus: 'suspended' },
+      afterSummary: { verificationStatus: 'suspended', availabilityStatus: 'offline' },
     }, clock);
     logInfo(context, 'driver.suspended', { operation: 'suspend', adminIdHash: shortHash(adminUid), targetUserIdHash: shortHash(driverId), reasonCode: 'suspended', result: 'suspended' });
   }
   return safeDriverView(driverId, out.after);
 }
 
-// Reactivate a suspended driver (admin). Idempotent. Restores approved status but
-// NEVER sets the driver online and NEVER alters wallet balances; suspension
-// history is preserved.
+// Reactivate a suspended driver. Approval is restored but availability remains
+// offline and requires a fresh explicit “Começar a trabalhar” action.
 async function reactivateDriver({ db, request, context, clock }) {
   const adminUid = await requireAdmin(db, request);
   const payload = assertShape(request && request.data, { required: ['driverId'], optional: ['reason'] });
@@ -163,7 +175,10 @@ async function reactivateDriver({ db, request, context, clock }) {
     if (before.verificationStatus !== 'suspended') return { replay: true, before, after: before };
     const nowMs = clock.now();
     const update = {
-      verificationStatus: 'approved', // eligibility restored; availability stays offline (no auto-online)
+      verificationStatus: 'approved',
+      availabilityStatus: 'offline',
+      availabilitySessionId: null,
+      locationAvailabilitySessionId: null,
       reactivatedAt: ts(),
       reactivatedAtMs: nowMs,
       reactivatedBy: adminUid,
@@ -179,11 +194,18 @@ async function reactivateDriver({ db, request, context, clock }) {
       actorUid: adminUid, actorType: 'admin', action: 'driver_reactivated', targetType: 'driver', targetId: driverId, reason: reason || 'reactivation',
       traceId: context && context.traceId,
       beforeSummary: { verificationStatus: 'suspended' },
-      afterSummary: { verificationStatus: 'approved' },
+      afterSummary: { verificationStatus: 'approved', availabilityStatus: 'offline' },
     }, clock);
     logInfo(context, 'driver.reactivated', { operation: 'reactivate', adminIdHash: shortHash(adminUid), targetUserIdHash: shortHash(driverId), result: 'reactivated' });
   }
   return safeDriverView(driverId, out.after);
 }
 
-module.exports = { rejectDriver, blockDriver, unblockDriver, suspendDriver, reactivateDriver };
+module.exports = {
+  rejectDriver,
+  blockDriver,
+  unblockDriver,
+  suspendDriver,
+  reactivateDriver,
+  revokeWorkSession,
+};
