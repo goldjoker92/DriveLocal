@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { Alert, View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { doc, onSnapshot } from 'firebase/firestore';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
@@ -24,7 +25,7 @@ import {
   hasApprovedDriverPhoto,
   rejectionReasonLabel,
 } from '../../constants/driverPhoto';
-import { auth } from '../../config/firebase';
+import { auth, db } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { getDriver } from '../../services/driverService';
 import {
@@ -55,6 +56,12 @@ import {
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
+
+function shortId(value) {
+  const text = typeof value === 'string' ? value : '';
+  if (!text) return null;
+  return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
+}
 
 function SectionTitle({ children }) {
   return (
@@ -107,6 +114,7 @@ function trackingErrorLabel(status) {
     background_denied: 'A localização em segundo plano foi recusada. Ative “Permitir o tempo todo” nas configurações do Android.',
     unsupported: 'O rastreamento do motorista está disponível somente no aplicativo Android.',
     invalid_session: 'Não foi possível iniciar sua sessão de trabalho. Tente novamente.',
+    DRIVER_INITIAL_LOCATION_NOT_PUBLISHED: 'Não foi possível confirmar sua primeira posição. Verifique a internet e tente novamente.',
   };
   return labels[status] || 'Não foi possível iniciar a localização do motorista.';
 }
@@ -135,8 +143,10 @@ function timestampMs(value) {
 
 function hasFreshRemoteWorkSession(driver, nowMs = Date.now()) {
   if (!driver?.availabilitySessionId) return false;
-  const updatedAtMs = Number(driver.availabilityUpdatedAtMs || 0)
-    || timestampMs(driver.availabilityUpdatedAt);
+  // Firestore server time is authoritative. Epoch-ms remains a compatibility
+  // fallback for deterministic tests and records written by an older build.
+  const updatedAtMs = timestampMs(driver.availabilityUpdatedAt)
+    || Number(driver.availabilityUpdatedAtMs || 0);
   return updatedAtMs > 0 && nowMs - updatedAtMs <= WORK_SESSION_MAX_AGE_MS;
 }
 
@@ -201,7 +211,7 @@ export default function DriverHome() {
         if (robotSimulationActive()) {
           console.log('[ROBOT_DRIVER] online_restore.native_tracking_skipped', {
             reason: 'robot_simulation_active',
-            driverId: uid,
+            driverId: shortId(uid),
             atMs: Date.now(),
           });
           if (active) {
@@ -243,6 +253,58 @@ export default function DriverHome() {
       active = false;
     };
   }, [router]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return undefined;
+
+    // Live reconciliation prevents a green cockpit while the server has already
+    // revoked the work session because of moderation, finance or lease expiry.
+    return onSnapshot(doc(db, 'drivers', uid), async (snapshot) => {
+      if (!snapshot.exists()) return;
+      const remote = snapshot.data();
+      setDriver(remote);
+
+      if (remote?.activeRideId) return;
+      if (availability !== AVAILABILITY.ONLINE) return;
+
+      const expectedSessionId = driver?.availabilitySessionId || null;
+      const remoteSessionMatches = Boolean(
+        remote?.availabilityStatus === AVAILABILITY.ONLINE
+        && remote?.availabilitySessionId
+        && remote.availabilitySessionId === expectedSessionId
+        && hasFreshRemoteWorkSession(remote)
+      );
+      if (remoteSessionMatches) return;
+
+      console.warn('[DRIVER_AVAILABILITY] cockpit.remote_session_revoked', {
+        scope: 'driver_availability',
+        event: 'cockpit.remote_session_revoked',
+        driverId: shortId(uid),
+        expectedSessionId: shortId(expectedSessionId),
+        remoteSessionId: shortId(remote?.availabilitySessionId),
+        remoteStatus: remote?.availabilityStatus || 'missing',
+        reason: remote?.availabilityStatus !== AVAILABILITY.ONLINE
+          ? 'remote_offline'
+          : remote?.availabilitySessionId !== expectedSessionId
+            ? 'session_mismatch'
+            : 'lease_expired',
+        atMs: Date.now(),
+      });
+      await stopDriverOnlineTracking().catch(() => undefined);
+      setAvailability(AVAILABILITY.OFFLINE);
+      setTrackingActive(false);
+      setAvailabilityError('Sua sessão de trabalho foi encerrada. Toque em “Começar a trabalhar” quando quiser ficar disponível novamente.');
+    }, (snapshotError) => {
+      console.warn('[DRIVER_AVAILABILITY] cockpit.driver_listener_failed', {
+        scope: 'driver_availability',
+        event: 'cockpit.driver_listener_failed',
+        driverId: shortId(uid),
+        reason: snapshotError?.code || snapshotError?.message || 'unknown',
+        atMs: Date.now(),
+      });
+    });
+  }, [availability, driver?.availabilitySessionId]);
 
   const nowMs = Date.now();
   const uid = auth.currentUser?.uid;
@@ -293,6 +355,13 @@ export default function DriverHome() {
         }
 
         workSession = await startDriverWorkSession();
+        console.log('[DRIVER_AVAILABILITY] cockpit.work_session_opened', {
+          scope: 'driver_availability',
+          event: 'cockpit.work_session_opened',
+          driverId: shortId(uid),
+          availabilitySessionId: shortId(workSession.availabilitySessionId),
+          atMs: Date.now(),
+        });
         const tracking = await startDriverOnlineTracking({
           driverId: uid,
           vehicleType: driver?.vehicleType,
@@ -309,7 +378,8 @@ export default function DriverHome() {
         workSession = await startDriverWorkSession();
         console.log('[ROBOT_DRIVER] go_online.native_tracking_skipped', {
           reason: 'robot_simulation_active',
-          driverId: uid,
+          driverId: shortId(uid),
+          availabilitySessionId: shortId(workSession.availabilitySessionId),
           atMs: Date.now(),
         });
       }
@@ -322,6 +392,14 @@ export default function DriverHome() {
         availabilitySessionId: workSession.availabilitySessionId,
         availabilityUpdatedAtMs: workSession.availabilityUpdatedAtMs,
       } : current);
+      console.log('[DRIVER_AVAILABILITY] cockpit.available', {
+        scope: 'driver_availability',
+        event: 'cockpit.available',
+        driverId: shortId(uid),
+        availabilitySessionId: shortId(workSession.availabilitySessionId),
+        result: 'online_and_first_location_published',
+        atMs: Date.now(),
+      });
     } catch (errorValue) {
       if (!robotSimulationActive()) {
         await stopDriverOnlineTracking().catch(() => undefined);
@@ -331,8 +409,18 @@ export default function DriverHome() {
       }
       setTrackingActive(false);
       setAvailability(AVAILABILITY.OFFLINE);
+      console.warn('[DRIVER_AVAILABILITY] cockpit.activation_failed', {
+        scope: 'driver_availability',
+        event: 'cockpit.activation_failed',
+        driverId: shortId(uid),
+        availabilitySessionId: shortId(workSession?.availabilitySessionId),
+        reason: errorValue?.code || errorValue?.message || 'unknown',
+        result: 'offline',
+        atMs: Date.now(),
+      });
       setAvailabilityError(
         errorValue?.details?.message
+        || trackingErrorLabel(errorValue?.code)
         || errorValue?.message
         || 'Não foi possível ativar sua disponibilidade e localização.'
       );
@@ -366,9 +454,27 @@ export default function DriverHome() {
         availabilityStatus: AVAILABILITY.OFFLINE,
         availabilitySessionId: null,
       } : current);
+      console.log('[DRIVER_AVAILABILITY] cockpit.unavailable', {
+        scope: 'driver_availability',
+        event: 'cockpit.unavailable',
+        driverId: shortId(uid),
+        availabilitySessionId: shortId(sessionId),
+        reason: 'driver_requested_stop',
+        result: 'offline',
+        atMs: Date.now(),
+      });
     } catch (errorValue) {
       setAvailability(AVAILABILITY.OFFLINE);
       setTrackingActive(false);
+      console.warn('[DRIVER_AVAILABILITY] cockpit.deactivation_sync_failed', {
+        scope: 'driver_availability',
+        event: 'cockpit.deactivation_sync_failed',
+        driverId: shortId(uid),
+        availabilitySessionId: shortId(sessionId),
+        reason: errorValue?.code || errorValue?.message || 'unknown',
+        result: 'local_tracking_stopped_remote_pending',
+        atMs: Date.now(),
+      });
       setAvailabilityError(
         errorValue?.details?.message
         || 'A localização foi interrompida. A indisponibilidade será sincronizada assim que a conexão voltar.'
