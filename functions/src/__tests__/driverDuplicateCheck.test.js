@@ -4,6 +4,9 @@ const {
   normalizedKeys,
   findDuplicateConflicts,
 } = require('../drivers/duplicateCheck');
+const { reviewedDuplicateOverride } = require('../drivers/approveDriver');
+const { caseId } = require('../risk/riskEngine');
+const { makeFakeFirestore } = require('./helpers/fakeFirestore');
 const riskC = require('../risk/constants');
 
 describe('driver launch duplicate checks', () => {
@@ -60,5 +63,44 @@ describe('driver launch duplicate checks', () => {
 
     expect(conflicts.find((conflict) => conflict.reasonCode === riskC.REASON.DUPLICATE_CPF)?.hard).toBe(true);
     expect(conflicts.find((conflict) => conflict.reasonCode === riskC.REASON.DUPLICATE_VEHICLE_PLATE)?.hard).toBe(false);
+  });
+
+  it('allows approval only after every duplicate case was closed without evidence', async () => {
+    const db = makeFakeFirestore();
+    const driverId = 'driver_reviewed';
+    const reasonCodes = [riskC.REASON.DUPLICATE_CPF, riskC.REASON.DUPLICATE_PHONE];
+
+    for (const reasonCode of reasonCodes) {
+      const id = caseId({
+        actorType: riskC.ACTOR_TYPE.DRIVER,
+        actorId: driverId,
+        reasonCode,
+        sourceType: 'driver_application',
+        sourceId: driverId,
+      });
+      await db.collection(riskC.COLLECTIONS.FRAUD_CASES).doc(id).set({
+        status: 'closed_no_evidence',
+      });
+    }
+
+    await expect(reviewedDuplicateOverride(db, driverId, reasonCodes))
+      .resolves.toBe('antifraud_cases_closed_no_evidence');
+  });
+
+  it('keeps approval blocked when one duplicate case is still open', async () => {
+    const db = makeFakeFirestore();
+    const driverId = 'driver_open_case';
+    const reasonCode = riskC.REASON.DUPLICATE_CPF;
+    const id = caseId({
+      actorType: riskC.ACTOR_TYPE.DRIVER,
+      actorId: driverId,
+      reasonCode,
+      sourceType: 'driver_application',
+      sourceId: driverId,
+    });
+    await db.collection(riskC.COLLECTIONS.FRAUD_CASES).doc(id).set({ status: 'open' });
+
+    await expect(reviewedDuplicateOverride(db, driverId, [reasonCode]))
+      .resolves.toBeNull();
   });
 });
