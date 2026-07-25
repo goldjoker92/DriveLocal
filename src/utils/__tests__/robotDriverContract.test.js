@@ -52,7 +52,9 @@ describe('DEV Robot Driver contracts', () => {
 
     expect(auth).toContain("clearLocalDriverTracking('login_preflight')");
     expect(auth).toContain("clearLocalDriverTracking('sign_out')");
-    expect(auth).toContain('await stopRobotDriver()');
+    // Auth cleanup must not briefly reactivate the physical GPS after stopping
+    // the DEV robot. The final state for logout/account switch is fully stopped.
+    expect(auth).toContain('await stopRobotDriver({ restoreRealTracking: false })');
     expect(auth).toContain('await stopDriverOnlineTracking()');
     expect(auth).toContain('[AUTH_TRACKING_CLEANUP]');
   });
