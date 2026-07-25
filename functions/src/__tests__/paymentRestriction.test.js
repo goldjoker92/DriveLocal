@@ -1,6 +1,9 @@
 // @ts-check
 
-const { applyPaymentReviewRestriction } = require('../risk/paymentRestriction');
+const {
+  applyPaymentReviewRestriction,
+  paymentRestrictionTransition,
+} = require('../risk/paymentRestriction');
 const { evaluateRideEligibility } = require('../drivers/eligibility');
 const { fixedClock } = require('../time/clock');
 const { makeFakeFirestore } = require('./helpers/fakeFirestore');
@@ -81,5 +84,24 @@ describe('unresolved payment restriction', () => {
     const driver = db._store.get(`${C.DRIVERS}/d1`);
     expect(driver.financialReviewRequired).toBe(false);
     expect(evaluateRideEligibility(driver, fixedClock(NOW)).canReceiveRides).toBe(true);
+  });
+
+  it('clears a matching stale-payment gate on any final settlement, not only a dispute', () => {
+    expect(paymentRestrictionTransition('payment_marked_sent', 'completed')).toEqual({
+      shouldHandle: true,
+      restrict: false,
+      enteredDispute: false,
+      becameFinal: true,
+    });
+    expect(paymentRestrictionTransition('awaiting_payment', 'cancelled').becameFinal).toBe(true);
+  });
+
+  it('does not react to ordinary non-financial lifecycle updates', () => {
+    expect(paymentRestrictionTransition('assigned', 'driver_arrived')).toEqual({
+      shouldHandle: false,
+      restrict: false,
+      enteredDispute: false,
+      becameFinal: false,
+    });
   });
 });
