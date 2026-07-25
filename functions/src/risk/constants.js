@@ -9,6 +9,7 @@ const COLLECTIONS = Object.freeze({
   FRAUD_CASES: 'fraudCases',
   FINANCIAL_ALERTS: 'financialAlerts',
   SYSTEM_HEALTH: 'systemHealth',
+  OPERATIONAL_SNAPSHOTS: 'operationalSnapshots',
 });
 
 const SEVERITY = Object.freeze({
