@@ -18,6 +18,26 @@ const DAY_LABELS_PT_BR = Object.freeze({
   sat: 'Sábado',
 });
 
+const PAYMENT_STAGE_STATUSES = new Set([
+  'awaiting_payment',
+  'payment_marked_sent',
+  'disputed',
+  'completed',
+]);
+const ACTIVE_HOLD_STATUSES = new Set([
+  'assigned',
+  'driver_arrived',
+  'in_progress',
+  'awaiting_payment',
+  'payment_marked_sent',
+  'disputed',
+]);
+
+function num(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function emptyVehicleBucket() {
   return {
     requests: 0,
@@ -43,8 +63,18 @@ function localParts(epochMs) {
     hour: '2-digit',
     hourCycle: 'h23',
   });
-  const parts = Object.fromEntries(formatter.formatToParts(new Date(epochMs)).map((p) => [p.type, p.value]));
-  const dayMap = { Sun: 'sun', Mon: 'mon', Tue: 'tue', Wed: 'wed', Thu: 'thu', Fri: 'fri', Sat: 'sat' };
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date(epochMs)).map((part) => [part.type, part.value])
+  );
+  const dayMap = {
+    Sun: 'sun',
+    Mon: 'mon',
+    Tue: 'tue',
+    Wed: 'wed',
+    Thu: 'thu',
+    Fri: 'fri',
+    Sat: 'sat',
+  };
   return {
     dayKey: dayMap[parts.weekday] || 'sun',
     hour: Math.max(0, Math.min(23, Number(parts.hour) || 0)),
@@ -53,11 +83,6 @@ function localParts(epochMs) {
 
 function vehicleTypeOf(record) {
   return record?.vehicleType === 'moto' ? 'moto' : 'car';
-}
-
-function number(value) {
-  const n = Number(value || 0);
-  return Number.isFinite(n) ? n : 0;
 }
 
 function aggregateRides(rides = []) {
@@ -86,7 +111,7 @@ function aggregateRides(rides = []) {
     const type = vehicleTypeOf(ride);
     const bucket = byVehicle[type];
     const status = String(ride?.status || 'unknown');
-    const createdAtMs = number(ride?.createdAtMs);
+    const createdAtMs = num(ride?.createdAtMs);
     const time = localParts(createdAtMs || Date.now());
     const hour = byHour[time.hour];
     const day = byDay[time.dayKey];
@@ -97,7 +122,11 @@ function aggregateRides(rides = []) {
     hour[type === 'moto' ? 'motoRequests' : 'carRequests'] += 1;
 
     if (ride?.acceptedDriverId) bucket.assigned += 1;
-    if (ride?.startedAtMs || status === 'in_progress' || status === 'awaiting_payment' || status === 'payment_marked_sent' || status === 'completed' || status === 'disputed') {
+    if (
+      ride?.startedAtMs
+      || status === 'in_progress'
+      || PAYMENT_STAGE_STATUSES.has(status)
+    ) {
       bucket.started += 1;
     }
     if (status === 'completed') {
@@ -117,15 +146,19 @@ function aggregateRides(rides = []) {
       day.noDriverAvailable += 1;
     }
 
-    const fare = number(ride?.finalFareCentavos || ride?.estimatedFareCentavos);
-    const expected = number(ride?.finalCommissionCentavos ?? ride?.estimatedCommissionCentavos);
-    const held = number(ride?.commissionHoldCentavos);
-    const captured = number(ride?.commissionCapturedCentavos);
-    const released = number(ride?.holdReleasedCentavos);
+    const fare = num(ride?.finalFareCentavos || ride?.estimatedFareCentavos);
+    const expected = num(ride?.finalCommissionCentavos ?? ride?.estimatedCommissionCentavos);
+    const held = num(ride?.commissionHoldCentavos);
+    const captured = num(ride?.commissionCapturedCentavos);
+    const released = num(ride?.holdReleasedCentavos);
 
-    bucket.fareCentavos += fare;
-    bucket.commissionExpectedCentavos += expected;
-    bucket.commissionHeldCentavos += status === 'completed' || status === 'cancelled' ? 0 : held;
+    // Fare/commission are business results only once the physical ride finished.
+    // Search failures and normal cancellations are not counted as lost commission.
+    if (PAYMENT_STAGE_STATUSES.has(status)) {
+      bucket.fareCentavos += fare;
+      bucket.commissionExpectedCentavos += expected;
+    }
+    if (ACTIVE_HOLD_STATUSES.has(status)) bucket.commissionHeldCentavos += held;
     bucket.commissionCapturedCentavos += captured;
     bucket.commissionReleasedCentavos += released;
     if (status === 'disputed') bucket.commissionDisputedCentavos += held;
@@ -134,31 +167,26 @@ function aggregateRides(rides = []) {
   });
 
   const total = Object.keys(emptyVehicleBucket()).reduce((acc, key) => {
-    acc[key] = number(byVehicle.moto[key]) + number(byVehicle.car[key]);
+    acc[key] = num(byVehicle.moto[key]) + num(byVehicle.car[key]);
     return acc;
   }, {});
-
-  const peakHours = [...byHour]
-    .sort((a, b) => b.requests - a.requests || a.hour - b.hour)
-    .slice(0, 5);
-  const peakRevenueHours = [...byHour]
-    .sort((a, b) => b.commissionCapturedCentavos - a.commissionCapturedCentavos || a.hour - b.hour)
-    .slice(0, 5);
-  const peakUnservedHours = [...byHour]
-    .sort((a, b) => b.noDriverAvailable - a.noDriverAvailable || a.hour - b.hour)
-    .slice(0, 5);
-  const days = DAY_KEYS.map((key) => byDay[key]);
-  const peakDays = [...days].sort((a, b) => b.requests - a.requests).slice(0, 7);
 
   return {
     byVehicle,
     total,
     byHour,
-    byDay: days,
-    peakHours,
-    peakRevenueHours,
-    peakUnservedHours,
-    peakDays,
+    byDay: DAY_KEYS.map((key) => byDay[key]),
+    peakHours: [...byHour]
+      .sort((a, b) => b.requests - a.requests || a.hour - b.hour)
+      .slice(0, 5),
+    peakRevenueHours: [...byHour]
+      .sort((a, b) => b.commissionCapturedCentavos - a.commissionCapturedCentavos || a.hour - b.hour)
+      .slice(0, 5),
+    peakUnservedHours: [...byHour]
+      .sort((a, b) => b.noDriverAvailable - a.noDriverAvailable || a.hour - b.hour)
+      .slice(0, 5),
+    peakDays: DAY_KEYS.map((key) => byDay[key])
+      .sort((a, b) => b.requests - a.requests),
   };
 }
 
@@ -178,7 +206,7 @@ function aggregateDrivers(drivers = [], nowMs = Date.now()) {
     walletHeldCentavos: 0,
     theoreticalMrrCentavos: { moto: 0, car: 0, total: 0 },
   };
-  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+  const sevenDays = 7 * 86400000;
 
   drivers.forEach((driver) => {
     const type = vehicleTypeOf(driver);
@@ -210,8 +238,8 @@ function aggregateDrivers(drivers = [], nowMs = Date.now()) {
       result.expiredSubscriptions.total += 1;
     }
 
-    const available = number(driver?.walletAvailableCentavos);
-    const held = number(driver?.walletHeldCentavos);
+    const available = num(driver?.walletAvailableCentavos);
+    const held = num(driver?.walletHeldCentavos);
     result.walletAvailableCentavos += available;
     result.walletHeldCentavos += held;
     if (available <= 300 && driver?.verificationStatus === 'approved') {
@@ -220,9 +248,12 @@ function aggregateDrivers(drivers = [], nowMs = Date.now()) {
     }
   });
 
-  result.theoreticalMrrCentavos.moto = result.activeSubscriptions.moto * driverC.MOTO_SUBSCRIPTION_CENTAVOS;
-  result.theoreticalMrrCentavos.car = result.activeSubscriptions.car * driverC.CAR_SUBSCRIPTION_CENTAVOS;
-  result.theoreticalMrrCentavos.total = result.theoreticalMrrCentavos.moto + result.theoreticalMrrCentavos.car;
+  result.theoreticalMrrCentavos.moto = result.activeSubscriptions.moto
+    * driverC.MOTO_SUBSCRIPTION_CENTAVOS;
+  result.theoreticalMrrCentavos.car = result.activeSubscriptions.car
+    * driverC.CAR_SUBSCRIPTION_CENTAVOS;
+  result.theoreticalMrrCentavos.total = result.theoreticalMrrCentavos.moto
+    + result.theoreticalMrrCentavos.car;
   return result;
 }
 
@@ -237,7 +268,7 @@ function aggregatePayments(payments = []) {
   };
   payments.forEach((payment) => {
     const status = payment?.status;
-    const amount = number(payment?.amountCentavos);
+    const amount = num(payment?.amountCentavos);
     if (status === 'paid' && payment?.purpose === 'driver_subscription') {
       result.subscriptionRevenueCentavos += amount;
       result.paidSubscriptions += 1;
@@ -245,7 +276,7 @@ function aggregatePayments(payments = []) {
       result.walletTopupsCentavos += amount;
       result.paidTopups += 1;
     } else if (status === 'pending') result.pendingPayments += 1;
-    else if (status === 'failed' || status === 'expired' || status === 'cancelled') result.failedPayments += 1;
+    else if (['failed', 'expired', 'cancelled'].includes(status)) result.failedPayments += 1;
   });
   return result;
 }
@@ -254,22 +285,90 @@ function aggregateAlerts(alerts = []) {
   const result = { open: 0, critical: 0, high: 0, amountAtRiskCentavos: 0, byReason: {} };
   alerts.forEach((alert) => {
     if (alert?.status !== 'resolved') result.open += 1;
-    if (alert?.severity === 'critical') result.critical += 1;
-    if (alert?.severity === 'high') result.high += 1;
-    result.amountAtRiskCentavos += number(alert?.amountAtRiskCentavos);
+    if (alert?.status !== 'resolved' && alert?.severity === 'critical') result.critical += 1;
+    if (alert?.status !== 'resolved' && alert?.severity === 'high') result.high += 1;
+    if (alert?.status !== 'resolved') result.amountAtRiskCentavos += num(alert?.amountAtRiskCentavos);
     const reason = String(alert?.reasonCode || 'UNKNOWN');
-    result.byReason[reason] = number(result.byReason[reason]) + 1;
+    result.byReason[reason] = num(result.byReason[reason]) + 1;
   });
   return result;
 }
 
-function buildAdminAnalytics({ rides = [], drivers = [], payments = [], alerts = [], nowMs = Date.now(), rangeDays = 30 }) {
+function aggregateSupplySnapshots(snapshots = []) {
+  const byHour = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    sampleCount: 0,
+    onlineTotal: 0,
+    availableTotal: 0,
+    onlineMoto: 0,
+    availableMoto: 0,
+    onlineCar: 0,
+    availableCar: 0,
+  }));
+  let latest = null;
+
+  snapshots.forEach((snapshot) => {
+    const timestampMs = num(snapshot?.timestampMs || snapshot?.createdAtMs);
+    if (!timestampMs) return;
+    const hour = byHour[localParts(timestampMs).hour];
+    hour.sampleCount += 1;
+    hour.onlineTotal += num(snapshot?.online?.total);
+    hour.availableTotal += num(snapshot?.available?.total);
+    hour.onlineMoto += num(snapshot?.online?.moto);
+    hour.availableMoto += num(snapshot?.available?.moto);
+    hour.onlineCar += num(snapshot?.online?.car);
+    hour.availableCar += num(snapshot?.available?.car);
+    if (!latest || timestampMs > latest.timestampMs) latest = { timestampMs, ...snapshot };
+  });
+
+  const averagesByHour = byHour.map((row) => {
+    const divisor = row.sampleCount || 1;
+    return {
+      hour: row.hour,
+      sampleCount: row.sampleCount,
+      averageOnline: row.onlineTotal / divisor,
+      averageAvailable: row.availableTotal / divisor,
+      averageOnlineMoto: row.onlineMoto / divisor,
+      averageAvailableMoto: row.availableMoto / divisor,
+      averageOnlineCar: row.onlineCar / divisor,
+      averageAvailableCar: row.availableCar / divisor,
+    };
+  });
+  return { latest, averagesByHour };
+}
+
+function buildDemandSupply(ridesByHour = [], supplyByHour = []) {
+  return ridesByHour.map((rideHour) => {
+    const supply = supplyByHour.find((row) => row.hour === rideHour.hour) || {};
+    const available = num(supply.averageAvailable);
+    return {
+      hour: rideHour.hour,
+      requests: num(rideHour.requests),
+      noDriverAvailable: num(rideHour.noDriverAvailable),
+      averageOnlineDrivers: num(supply.averageOnline),
+      averageAvailableDrivers: available,
+      requestsPerAvailableDriver: available > 0 ? num(rideHour.requests) / available : null,
+    };
+  });
+}
+
+function buildAdminAnalytics({
+  rides = [],
+  drivers = [],
+  payments = [],
+  alerts = [],
+  supplySnapshots = [],
+  nowMs = Date.now(),
+  rangeDays = 30,
+}) {
   const rideAnalytics = aggregateRides(rides);
   const driverAnalytics = aggregateDrivers(drivers, nowMs);
   const paymentAnalytics = aggregatePayments(payments);
   const alertAnalytics = aggregateAlerts(alerts);
+  const supply = aggregateSupplySnapshots(supplySnapshots);
   const commissionRevenueCentavos = rideAnalytics.total.commissionCapturedCentavos;
-  const confirmedRevenueCentavos = commissionRevenueCentavos + paymentAnalytics.subscriptionRevenueCentavos;
+  const confirmedRevenueCentavos = commissionRevenueCentavos
+    + paymentAnalytics.subscriptionRevenueCentavos;
   const expectedCommissionCentavos = rideAnalytics.total.commissionExpectedCentavos;
   const captureRate = expectedCommissionCentavos > 0
     ? commissionRevenueCentavos / expectedCommissionCentavos
@@ -294,6 +393,10 @@ function buildAdminAnalytics({ rides = [], drivers = [], payments = [], alerts =
     drivers: driverAnalytics,
     payments: paymentAnalytics,
     alerts: alertAnalytics,
+    supply: {
+      ...supply,
+      demandVsSupply: buildDemandSupply(rideAnalytics.byHour, supply.averagesByHour),
+    },
   };
 }
 
@@ -301,10 +404,14 @@ module.exports = {
   TIME_ZONE,
   DAY_KEYS,
   DAY_LABELS_PT_BR,
+  PAYMENT_STAGE_STATUSES,
+  ACTIVE_HOLD_STATUSES,
   localParts,
   aggregateRides,
   aggregateDrivers,
   aggregatePayments,
   aggregateAlerts,
+  aggregateSupplySnapshots,
+  buildDemandSupply,
   buildAdminAnalytics,
 };
