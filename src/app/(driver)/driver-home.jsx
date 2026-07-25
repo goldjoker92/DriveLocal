@@ -327,7 +327,7 @@ export default function DriverHome() {
       // Stop locally first: queued GPS events immediately lose their session and
       // cannot publish after the user pressed “Parar de trabalhar”.
       if (robotSimulationActive()) {
-        await stopRobotDriver();
+        await stopRobotDriver({ restoreRealTracking: false });
       } else {
         await stopDriverOnlineTracking();
       }
