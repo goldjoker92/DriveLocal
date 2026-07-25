@@ -50,9 +50,12 @@ exports.processRideNotificationEvent = notificationCallables.processRideNotifica
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
 
-// Launch antifraud and business observability. Analytics are admin-only; the
-// scheduled reconciliation never mutates balances or ride states automatically.
+// Launch antifraud and business observability. Analytics are admin-only. The two
+// scheduled scans only create traceable alerts/cases; they never mutate balances,
+// settle commissions or permanently block an account automatically.
 const riskCallables = require('./risk/callables');
 exports.getAdminBusinessAnalyticsSecure = riskCallables.getAdminBusinessAnalyticsSecure;
 const { financialReconciliationTask } = require('./risk/reconciliation');
 exports.financialReconciliationTask = financialReconciliationTask;
+const { operationalRiskScanTask } = require('./risk/operationalScan');
+exports.operationalRiskScanTask = operationalRiskScanTask;
