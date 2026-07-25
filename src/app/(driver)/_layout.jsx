@@ -9,6 +9,7 @@ import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
 import { getDriver } from '../../services/driverService';
 import {
+  getDriverTrackingSession,
   refreshDriverOnlineHeartbeat,
   updateActiveRideTrackingStatus,
 } from '../../services/driverLocationTracking';
@@ -89,6 +90,21 @@ export default function DriverLayout() {
       }
 
       if (offer.status !== 'offered' || Number(offer.expiresAtMs || 0) <= Date.now()) return;
+
+      const trackingSession = await getDriverTrackingSession();
+      if (
+        !trackingSession?.availabilitySessionId
+        || offer.availabilitySessionId !== trackingSession.availabilitySessionId
+      ) {
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log('[RIDE_OFFER] stale work-session offer ignored', {
+            offerId: offer.offerId,
+            atMs: Date.now(),
+          });
+        }
+        return;
+      }
+
       const alreadyOnOfferScreen = segments.includes('ride-request');
       if (alreadyOnOfferScreen && lastOfferId.current === offer.offerId) return;
       lastOfferId.current = offer.offerId;
