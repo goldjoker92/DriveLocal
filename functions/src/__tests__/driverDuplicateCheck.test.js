@@ -4,7 +4,10 @@ const {
   normalizedKeys,
   findDuplicateConflicts,
 } = require('../drivers/duplicateCheck');
-const { reviewedDuplicateOverride } = require('../drivers/approveDriver');
+const {
+  duplicateConflictSourceId,
+  reviewedDuplicateOverride,
+} = require('../drivers/approveDriver');
 const { caseId } = require('../risk/riskEngine');
 const { makeFakeFirestore } = require('./helpers/fakeFirestore');
 const riskC = require('../risk/constants');
@@ -65,42 +68,101 @@ describe('driver launch duplicate checks', () => {
     expect(conflicts.find((conflict) => conflict.reasonCode === riskC.REASON.DUPLICATE_VEHICLE_PLATE)?.hard).toBe(false);
   });
 
-  it('allows approval only after every duplicate case was closed without evidence', async () => {
+  it('creates a deterministic non-reversible source for the exact matching set', () => {
+    const conflict = {
+      field: 'cpf',
+      reasonCode: riskC.REASON.DUPLICATE_CPF,
+      matchingDriverIds: ['driver-b', 'driver-a'],
+    };
+    const source = duplicateConflictSourceId(conflict);
+    expect(source).toBe(duplicateConflictSourceId({
+      ...conflict,
+      matchingDriverIds: ['driver-a', 'driver-b'],
+    }));
+    expect(source).not.toContain('driver-a');
+    expect(source).not.toContain('driver-b');
+    expect(source).not.toBe(duplicateConflictSourceId({
+      ...conflict,
+      matchingDriverIds: ['driver-a', 'driver-b', 'driver-c'],
+    }));
+  });
+
+  it('allows approval only after every exact duplicate case was closed without evidence', async () => {
     const db = makeFakeFirestore();
     const driverId = 'driver_reviewed';
-    const reasonCodes = [riskC.REASON.DUPLICATE_CPF, riskC.REASON.DUPLICATE_PHONE];
+    const conflicts = [
+      {
+        field: 'cpf',
+        reasonCode: riskC.REASON.DUPLICATE_CPF,
+        matchingDriverIds: ['existing-cpf'],
+      },
+      {
+        field: 'phone',
+        reasonCode: riskC.REASON.DUPLICATE_PHONE,
+        matchingDriverIds: ['existing-phone'],
+      },
+    ];
 
-    for (const reasonCode of reasonCodes) {
+    for (const conflict of conflicts) {
       const id = caseId({
         actorType: riskC.ACTOR_TYPE.DRIVER,
         actorId: driverId,
-        reasonCode,
+        reasonCode: conflict.reasonCode,
         sourceType: 'driver_application',
-        sourceId: driverId,
+        sourceId: duplicateConflictSourceId(conflict),
       });
       await db.collection(riskC.COLLECTIONS.FRAUD_CASES).doc(id).set({
         status: 'closed_no_evidence',
       });
     }
 
-    await expect(reviewedDuplicateOverride(db, driverId, reasonCodes))
+    await expect(reviewedDuplicateOverride(db, driverId, conflicts))
       .resolves.toBe('antifraud_cases_closed_no_evidence');
   });
 
-  it('keeps approval blocked when one duplicate case is still open', async () => {
+  it('requires a new review when the matching account set changes', async () => {
+    const db = makeFakeFirestore();
+    const driverId = 'driver_changed_conflict';
+    const reviewedConflict = {
+      field: 'cpf',
+      reasonCode: riskC.REASON.DUPLICATE_CPF,
+      matchingDriverIds: ['existing-a'],
+    };
+    const reviewedCaseId = caseId({
+      actorType: riskC.ACTOR_TYPE.DRIVER,
+      actorId: driverId,
+      reasonCode: reviewedConflict.reasonCode,
+      sourceType: 'driver_application',
+      sourceId: duplicateConflictSourceId(reviewedConflict),
+    });
+    await db.collection(riskC.COLLECTIONS.FRAUD_CASES).doc(reviewedCaseId).set({
+      status: 'closed_no_evidence',
+    });
+
+    await expect(reviewedDuplicateOverride(db, driverId, [{
+      ...reviewedConflict,
+      matchingDriverIds: ['existing-a', 'new-existing-account'],
+    }])).resolves.toBeNull();
+  });
+
+  it('keeps approval blocked when one exact duplicate case is still open', async () => {
     const db = makeFakeFirestore();
     const driverId = 'driver_open_case';
-    const reasonCode = riskC.REASON.DUPLICATE_CPF;
+    const conflict = {
+      field: 'cpf',
+      reasonCode: riskC.REASON.DUPLICATE_CPF,
+      matchingDriverIds: ['other'],
+    };
     const id = caseId({
       actorType: riskC.ACTOR_TYPE.DRIVER,
       actorId: driverId,
-      reasonCode,
+      reasonCode: conflict.reasonCode,
       sourceType: 'driver_application',
-      sourceId: driverId,
+      sourceId: duplicateConflictSourceId(conflict),
     });
     await db.collection(riskC.COLLECTIONS.FRAUD_CASES).doc(id).set({ status: 'open' });
 
-    await expect(reviewedDuplicateOverride(db, driverId, [reasonCode]))
+    await expect(reviewedDuplicateOverride(db, driverId, [conflict]))
       .resolves.toBeNull();
   });
 });
