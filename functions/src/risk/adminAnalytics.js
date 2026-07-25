@@ -50,8 +50,9 @@ async function getAdminBusinessAnalytics({ db, request, context, clock }) {
       .where('createdAtMs', '>=', startMs)
       .limit(LIMITS.payments)
       .get(),
+    // Financial health is current-state data, not period revenue. An unresolved
+    // alert stays visible even if it was first opened before the selected period.
     db.collection(riskC.COLLECTIONS.FINANCIAL_ALERTS)
-      .where('createdAtMs', '>=', startMs)
       .limit(LIMITS.alerts)
       .get(),
     db.collection(riskC.COLLECTIONS.FRAUD_CASES)
