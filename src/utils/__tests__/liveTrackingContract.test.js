@@ -14,13 +14,12 @@ describe('Android live driver tracking contracts', () => {
 
     expect(service).toContain('TaskManager.defineTask');
     expect(service).toContain('Location.startLocationUpdatesAsync');
-    expect(service).toContain('const ACTIVE_RIDE_INTERVAL_MS = 5_000');
+    expect(service).toContain('ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000');
     expect(service).toContain('timeInterval: intervalMs');
-    expect(service).toContain('distanceInterval: 0');
-    expect(service).toContain('const ONLINE_MIN_PUBLISH_GAP_MS = 20_000');
-    expect(service).toContain('const ACTIVE_RIDE_MIN_PUBLISH_GAP_MS = 3_000');
+    expect(service).toContain('distanceInterval: activeRide ? 10 : 25');
     expect(service).toContain('lastQueuedAtByMode');
     expect(service).toContain('auth.authStateReady');
+    expect(service).toContain('stale_session_publish_dropped');
     expect(entry).toContain("import './src/services/driverLocationTracking'");
     expect(entry).toContain("import 'expo-router/entry'");
     expect(layout).toContain("import '../services/driverLocationTracking'");
@@ -32,21 +31,32 @@ describe('Android live driver tracking contracts', () => {
     const activeRide = source('src/app/(driver)/active-ride.jsx');
 
     expect(home).toContain('Localização durante o trabalho');
-    expect(home).toContain('requestPermissions: permission.status !== \'granted\'');
+    expect(home).toContain("requestPermissions: permission.status !== 'granted'");
     expect(activeRide).toContain('Localização da corrida');
     expect(activeRide).toContain('attachActiveRideTracking');
     expect(activeRide).toContain('detachActiveRideTracking');
   });
 
-  it('uses the exact backend online availability value and fails closed for old builds', () => {
+  it('starts unavailable and uses one explicit work action', () => {
     const cockpit = source('src/utils/driverCockpit.js');
     const home = source('src/app/(driver)/driver-home.jsx');
+    const availability = source('src/services/driverAvailabilityService.js');
+    const auth = source('src/services/authService.js');
 
     expect(cockpit).toContain("ONLINE: 'online'");
-    expect(cockpit).toContain("AVAILABLE: 'online'");
-    expect(home).toContain('setDriverAvailability(uid, AVAILABILITY.ONLINE)');
-    expect(home).toContain("data?.availabilityStatus === 'available'");
-    expect(home).not.toContain("setDriverAvailability(uid, 'available')");
+    expect(cockpit).toContain("OFFLINE: 'offline'");
+    expect(auth).toContain("availabilityStatus: 'offline'");
+    expect(auth).toContain('availabilitySessionId: null');
+    expect(availability).toContain("'setDriverAvailabilitySecure'");
+    expect(home).toContain('🔴 Você está indisponível');
+    expect(home).toContain('Ative sua disponibilidade quando quiser começar a trabalhar.');
+    expect(home).toContain('Sua localização será usada somente durante seu período de trabalho.');
+    expect(home).toContain('Começar a trabalhar');
+    expect(home).toContain('🟢 Você está disponível');
+    expect(home).toContain('Buscando corridas próximas.');
+    expect(home).toContain('A localização de trabalho está ativa.');
+    expect(home).toContain('Parar de trabalhar');
+    expect(home).not.toContain('setDriverAvailability(uid, AVAILABILITY.ONLINE)');
   });
 
   it('renders the real passenger map from the secured ride location listener', () => {
@@ -77,7 +87,7 @@ describe('Android live driver tracking contracts', () => {
     expect(eas).toContain('"environment": "development"');
   });
 
-  it('restricts live location to validated current points and active ride parties', () => {
+  it('restricts live location to current ride parties and the active work session', () => {
     const rules = source('backend/firebase/rules/firestore.rules');
     const lifecycle = source('functions/src/rides/lifecycle.js');
 
@@ -86,8 +96,10 @@ describe('Android live driver tracking contracts', () => {
     expect(rules).toContain('isRidePassenger(rideId)');
     expect(rules).toContain("ride.status in ['assigned', 'driver_arrived', 'in_progress']");
     expect(rules).toContain('driverOperationalUpdateValid');
-    expect(rules).toContain("request.resource.data.availabilityStatus in ['online', 'offline']");
+    expect(rules).toContain("resource.data.availabilityStatus == 'online'");
+    expect(rules).toContain('request.resource.data.locationAvailabilitySessionId == resource.data.availabilitySessionId');
     expect(rules).toContain('request.resource.data.locationUpdatedAt == request.time');
+    expect(rules).toContain('request.resource.data.availabilityUpdatedAt == request.time');
     expect(lifecycle).toContain('clearActiveRideLocationTx');
     expect(lifecycle).toContain('tx.delete');
   });
