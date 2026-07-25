@@ -54,6 +54,8 @@ import {
 } from '../../utils/driverCockpit';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 
+const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
+
 function SectionTitle({ children }) {
   return (
     <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>{children}</Text>
@@ -120,6 +122,24 @@ function photoBadge(status, activePublicPhoto) {
   return { label: 'Foto necessária', tone: 'neutral' };
 }
 
+function timestampMs(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value.toMillis === 'function') return Number(value.toMillis()) || 0;
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (Number.isFinite(Number(value.seconds))) {
+    return Number(value.seconds) * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6);
+  }
+  return 0;
+}
+
+function hasFreshRemoteWorkSession(driver, nowMs = Date.now()) {
+  if (!driver?.availabilitySessionId) return false;
+  const updatedAtMs = Number(driver.availabilityUpdatedAtMs || 0)
+    || timestampMs(driver.availabilityUpdatedAt);
+  return updatedAtMs > 0 && nowMs - updatedAtMs <= WORK_SESSION_MAX_AGE_MS;
+}
+
 export default function DriverHome() {
   const router = useRouter();
   const [driver, setDriver] = useState(null);
@@ -143,6 +163,13 @@ export default function DriverHome() {
         if (!active) return;
         setDriver(data);
 
+        // A ride already accepted always wins over availability restoration. The
+        // dedicated active-ride screen owns its higher-frequency tracking.
+        if (data?.activeRideId) {
+          router.replace({ pathname: '/active-ride', params: { rideId: data.activeRideId } });
+          return;
+        }
+
         const remoteSessionId = data?.availabilitySessionId || null;
         const online = data?.availabilityStatus === AVAILABILITY.ONLINE;
         if (!online) {
@@ -154,11 +181,11 @@ export default function DriverHome() {
           return;
         }
 
-        // Legacy online values and online sessions without a matching local
-        // session are closed instead of silently resurrecting a ghost driver.
-        if (!remoteSessionId) {
+        // Legacy flags and expired leases are closed instead of silently
+        // resurrecting a ghost driver when the cockpit opens.
+        if (!remoteSessionId || !hasFreshRemoteWorkSession(data)) {
           await stopDriverOnlineTracking().catch(() => undefined);
-          await stopDriverWorkSession().catch(() => undefined);
+          await stopDriverWorkSession(remoteSessionId).catch(() => undefined);
           if (active) {
             setAvailability(AVAILABILITY.OFFLINE);
             setTrackingActive(false);
@@ -215,7 +242,7 @@ export default function DriverHome() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [router]);
 
   const nowMs = Date.now();
   const uid = auth.currentUser?.uid;
