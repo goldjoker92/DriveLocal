@@ -1,5 +1,7 @@
 // Admin client service — the ONLY app-side entry point for secure admin
-// operations. Sensitive mutations always go through authenticated callables.
+// operations. Sensitive mutations and aggregate business reads always go through
+// authenticated callables. Raw financial ledgers and precise passenger locations
+// are never downloaded by the dashboard.
 
 import { httpsCallable } from 'firebase/functions';
 import {
@@ -49,7 +51,15 @@ export const resolveRideDispute = (rideId, outcome, reason, note) =>
   });
 
 // --- Wallet adjustment ------------------------------------------------------
-export function adjustDriverWallet({ driverId, operation, amountCentavos, reasonCode, note, correctionSign, originalLedgerEntryId }) {
+export function adjustDriverWallet({
+  driverId,
+  operation,
+  amountCentavos,
+  reasonCode,
+  note,
+  correctionSign,
+  originalLedgerEntryId,
+}) {
   return call('adjustDriverWalletSecure', {
     driverId,
     operation,
@@ -61,6 +71,11 @@ export function adjustDriverWallet({ driverId, operation, amountCentavos, reason
     idempotencyKey: idempotencyKey('wadj'),
   });
 }
+
+// --- Business / antifraud analytics ----------------------------------------
+// Server returns aggregates only. Supported launch windows: 1, 7, 30 or 90 days.
+export const getAdminBusinessAnalytics = (rangeDays = 30) =>
+  call('getAdminBusinessAnalyticsSecure', { rangeDays });
 
 // --- Bounded admin reads ----------------------------------------------------
 export async function listDriversByStatus(status, max = DEFAULT_LIMIT) {
