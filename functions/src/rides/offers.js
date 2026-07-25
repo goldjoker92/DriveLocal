@@ -108,6 +108,7 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
       driverId: cand.driverId,
       serviceAreaId: ride.serviceAreaId,
       vehicleType: ride.vehicleType,
+      availabilitySessionId: cand.availabilitySessionId,
       estimatedFareCentavos: ride.estimatedFareCentavos,
       pickupPreview: preview,
       distanceToPickupMeters: cand.distanceToPickupMeters,
