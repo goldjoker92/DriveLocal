@@ -9,11 +9,29 @@ const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateIdentifier, validateNonEmptyString } = require('../validation/validators');
 const { writeAuditLog } = require('../audit/auditLog');
 const { requireAdmin } = require('../auth/adminAuth');
-const { bestEffortRiskSignal } = require('../risk/riskEngine');
+const { bestEffortRiskSignal, caseId: buildCaseId } = require('../risk/riskEngine');
 const riskC = require('../risk/constants');
 const { safeDriverView } = require('./eligibility');
 const { scanDriverDuplicates } = require('./duplicateCheck');
 const C = require('./constants');
+
+async function reviewedDuplicateOverride(db, driverId, reasonCodes) {
+  if (reasonCodes.length === 0) return null;
+  const snapshots = await Promise.all(reasonCodes.map((reasonCode) => {
+    const id = buildCaseId({
+      actorType: riskC.ACTOR_TYPE.DRIVER,
+      actorId: driverId,
+      reasonCode,
+      sourceType: 'driver_application',
+      sourceId: driverId,
+    });
+    return db.collection(riskC.COLLECTIONS.FRAUD_CASES).doc(id).get();
+  }));
+  const allClosedWithoutEvidence = snapshots.every((snapshot) =>
+    snapshot.exists && (snapshot.data() || {}).status === 'closed_no_evidence'
+  );
+  return allClosedWithoutEvidence ? 'antifraud_cases_closed_no_evidence' : null;
+}
 
 async function approveDriver({ db, request, context, clock }) {
   const adminUid = await requireAdmin(db, request);
@@ -22,7 +40,7 @@ async function approveDriver({ db, request, context, clock }) {
     optional: ['duplicateOverrideReason'],
   });
   const driverId = validateIdentifier(payload.driverId, 'driverId');
-  const overrideReason = payload.duplicateOverrideReason != null
+  const explicitOverrideReason = payload.duplicateOverrideReason != null
     ? validateNonEmptyString(payload.duplicateOverrideReason, 'duplicateOverrideReason').slice(0, 280)
     : null;
   const driverRef = db.collection(C.DRIVERS).doc(driverId);
@@ -50,8 +68,13 @@ async function approveDriver({ db, request, context, clock }) {
   }
 
   const conflicts = duplicateResult.conflicts || [];
-  if (conflicts.length > 0 && !overrideReason) {
-    const reasonCodes = [...new Set(conflicts.map((conflict) => conflict.reasonCode))];
+  const reasonCodes = [...new Set(conflicts.map((conflict) => conflict.reasonCode))];
+  const reviewedOverrideReason = conflicts.length > 0 && !explicitOverrideReason
+    ? await reviewedDuplicateOverride(db, driverId, reasonCodes)
+    : null;
+  const effectiveOverrideReason = explicitOverrideReason || reviewedOverrideReason;
+
+  if (conflicts.length > 0 && !effectiveOverrideReason) {
     await driverRef.set({
       duplicateCheckStatus: 'review_required',
       duplicateReasonCodes: reasonCodes,
@@ -139,12 +162,12 @@ async function approveDriver({ db, request, context, clock }) {
       commissionFreeUntil: freePeriodEnd,
       subscriptionFreeUntil: isFounder ? freePeriodEnd : null,
       duplicateCheckStatus,
-      duplicateReasonCodes: conflicts.map((conflict) => conflict.reasonCode),
+      duplicateReasonCodes: reasonCodes,
       duplicateConflictCount: conflicts.length,
       duplicateCheckScannedCount: duplicateResult.scannedCount,
       duplicateCheckReviewedAtMs: nowMs,
       duplicateCheckReviewedAt: admin.firestore.FieldValue.serverTimestamp(),
-      duplicateOverrideReason: conflicts.length > 0 ? overrideReason : null,
+      duplicateOverrideReason: conflicts.length > 0 ? effectiveOverrideReason : null,
       duplicateReviewedBy: adminUid,
       reviewedBy: adminUid,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -190,6 +213,7 @@ async function approveDriver({ db, request, context, clock }) {
         founderNumber: outcome.after.founderNumber,
         driverPhotoPublicVersion: outcome.after.driverPhotoPublicVersion || null,
         duplicateCheckStatus: outcome.after.duplicateCheckStatus,
+        duplicateOverrideSource: reviewedOverrideReason ? 'closed_risk_cases' : explicitOverrideReason ? 'explicit_admin_reason' : null,
       },
     }, clock);
   }
@@ -197,4 +221,4 @@ async function approveDriver({ db, request, context, clock }) {
   return safeDriverView(driverId, outcome.after);
 }
 
-module.exports = { approveDriver };
+module.exports = { approveDriver, reviewedDuplicateOverride };
