@@ -1,7 +1,7 @@
 // @ts-check
 // Keeps an unresolved payment from becoming a way to avoid DriveLocal commission
 // while continuing to accept new work. The restriction affects NEW acceptances
-// only; it never changes the wallet/hold or interrupts the current ride. Any final
+// only; it never changes the wallet/hold or interrupts settlement. Any final
 // settlement clears only the restriction linked to that exact ride.
 
 const admin = require('firebase-admin');
@@ -27,6 +27,18 @@ function paymentReviewRideIds(driver = {}) {
   return ids.slice(-MAX_TRACKED_PAYMENT_REVIEWS);
 }
 
+function revokedAvailability(nowMs) {
+  return {
+    availabilityStatus: 'offline',
+    availabilitySessionId: null,
+    locationAvailabilitySessionId: null,
+    availabilityUpdatedAtMs: nowMs,
+    availabilityUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    availabilitySessionEndedAtMs: nowMs,
+    availabilitySessionEndedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
 async function applyPaymentReviewRestriction({ db, driverId, rideId, disputed, nowMs }) {
   if (!driverId || !rideId) return { changed: false };
   const driverRef = db.collection(rideC.DRIVERS).doc(driverId);
@@ -47,6 +59,9 @@ async function applyPaymentReviewRestriction({ db, driverId, rideId, disputed, n
         financialReviewRideId: rideId,
         financialReviewSinceMs: nowMs,
         financialReviewSince: admin.firestore.FieldValue.serverTimestamp(),
+        // The current payment remains intact, but no new work session or offer may
+        // survive while the financial review is unresolved.
+        ...revokedAvailability(nowMs),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
       return { changed: true, restricted: true, remainingReviewCount: nextIds.length };
@@ -65,6 +80,8 @@ async function applyPaymentReviewRestriction({ db, driverId, rideId, disputed, n
         : null,
       financialReviewResolvedAtMs: nowMs,
       financialReviewResolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+      // Clearing a review restores eligibility only. The driver explicitly starts
+      // a new work session from the cockpit when ready.
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
     return {
@@ -144,6 +161,7 @@ const ridePaymentRestrictionTrigger = onDocumentUpdated(
 module.exports = {
   MAX_TRACKED_PAYMENT_REVIEWS,
   paymentReviewRideIds,
+  revokedAvailability,
   applyPaymentReviewRestriction,
   paymentRestrictionTransition,
   ridePaymentRestrictionTrigger,
