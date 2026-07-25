@@ -8,6 +8,7 @@
 // canReceiveRides is COMPUTED here on demand and is never stored as a
 // client-authoritative flag.
 
+const { activeRiskRestrictionState } = require('../risk/restrictions');
 const C = require('./constants');
 
 /**
@@ -94,23 +95,15 @@ function evaluateRideEligibility(d = {}, clock) {
   const commissionFreeUntilMs = toMillis(d.commissionFreeUntil);
   const subscriptionExpiresAtMs = toMillis(d.subscriptionExpiresAt);
   const subscriptionFreeUntilMs = toMillis(d.subscriptionFreeUntil || d.founderFreeUntil);
-  const riskRestrictionUntilMs = toMillis(d.riskRestrictionUntilMs);
 
   const commissionFree = commissionFreeUntilMs > now;
-
-  const activeSubscription =
-    d.subscriptionActive === true &&
-    subscriptionExpiresAtMs > now;
-
+  const activeSubscription = d.subscriptionActive === true && subscriptionExpiresAtMs > now;
   const founderCovered = isFounder && subscriptionFreeUntilMs > now;
-
   const freeRidesRemaining = !isFounder && Number(d.freeRideCountUsed || 0) < C.FREE_RIDE_LIMIT;
-
   const subscriptionCovered = founderCovered || freeRidesRemaining || activeSubscription;
   const financialReviewRequired = d.financialReviewRequired === true;
-  const temporaryRiskRestriction = d.riskBlockedFromNewAcceptances === true
-    && (riskRestrictionUntilMs === 0 || riskRestrictionUntilMs > now);
-  const riskRestricted = financialReviewRequired || temporaryRiskRestriction;
+  const temporaryRestriction = activeRiskRestrictionState(d, now);
+  const riskRestricted = financialReviewRequired || temporaryRestriction.active;
 
   return {
     isFounder,
@@ -119,6 +112,7 @@ function evaluateRideEligibility(d = {}, clock) {
     requiresSubscription: !subscriptionCovered,
     financialReviewRequired,
     riskRestricted,
+    riskRestrictionUntilMs: temporaryRestriction.untilMs,
     // Derived on the fly — never persisted as an authoritative flag.
     canReceiveRides: approved && !blocked && !riskRestricted && subscriptionCovered,
   };
