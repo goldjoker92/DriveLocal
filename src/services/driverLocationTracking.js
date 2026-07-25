@@ -22,8 +22,9 @@ const DEV_OVERRIDE_KEY = '@drivelocal/driver-location-dev-override-v1';
 const LAST_PUBLISH_KEY = '@drivelocal/driver-location-last-publish-v2';
 
 // Native sampling is intentionally more frequent than Firestore publication.
-// The pure policy decides whether the point carries useful new information.
-const ONLINE_NATIVE_INTERVAL_MS = 30_000;
+// A time-driven online sample guarantees an idle-driver heartbeat in background;
+// the pure policy still limits Firestore writes to one useful point/heartbeat.
+const ONLINE_NATIVE_INTERVAL_MS = 60_000;
 const ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000;
 const ONLINE_QUEUE_GAP_MS = 15_000;
 const ACTIVE_RIDE_QUEUE_GAP_MS = 3_000;
@@ -36,8 +37,30 @@ function validIdentifier(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
+function shortId(value) {
+  const text = typeof value === 'string' ? value : '';
+  if (!text) return null;
+  return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
+}
+
 function trackingMode(session) {
   return session?.rideId ? 'active_ride' : 'online';
+}
+
+function traceTracking(event, session = null, details = {}, level = 'log') {
+  const payload = {
+    scope: 'driver_location',
+    event,
+    mode: trackingMode(session),
+    driverId: shortId(session?.driverId),
+    availabilitySessionId: shortId(session?.availabilitySessionId),
+    rideId: shortId(session?.rideId),
+    rideStatus: session?.rideStatus || null,
+    atMs: Date.now(),
+    ...details,
+  };
+  const method = console[level] || console.log;
+  method(`[DRIVER_LOCATION] ${event}`, payload);
 }
 
 function sessionIdentity(session) {
@@ -144,13 +167,13 @@ async function authenticatedUid() {
   return auth.currentUser?.uid || null;
 }
 
-function reportThrottle(mode, reason) {
+function reportThrottle(mode, reason, session = null) {
   const nowMs = Date.now();
   if (nowMs - lastThrottleLogAtMs < 5_000) return;
   lastThrottleLogAtMs = nowMs;
   writeSafeStatus(`${mode}_throttled`, { reason }).catch(() => undefined);
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(`[DRIVER_LOCATION] throttled mode=${mode} reason=${reason}`);
+    traceTracking('publish.throttled', session, { reason, result: 'skipped' });
   }
 }
 
@@ -187,7 +210,13 @@ async function publishRideLocation(session, payload, nowMs) {
 async function publishLocationUnlocked(session, locationObject, { force = false } = {}) {
   const payload = safeTrackingPayload(locationObject);
   const currentUid = await authenticatedUid();
-  if (!payload || !currentUid || currentUid !== session?.driverId) return false;
+  if (!payload || !currentUid || currentUid !== session?.driverId) {
+    traceTracking('publish.rejected', session, {
+      reason: !payload ? 'invalid_payload' : !currentUid ? 'unauthenticated' : 'authenticated_driver_mismatch',
+      result: 'dropped',
+    }, 'warn');
+    return false;
+  }
 
   // A queued native point is allowed to finish only if the exact local work/ride
   // session still exists. Stopping work removes the session before stopping the
@@ -195,6 +224,11 @@ async function publishLocationUnlocked(session, locationObject, { force = false 
   const currentSession = await readSession();
   if (!sameSession(currentSession, session)) {
     await writeSafeStatus('stale_session_publish_dropped');
+    traceTracking('publish.rejected', session, {
+      reason: 'stale_local_session',
+      currentSessionId: shortId(currentSession?.availabilitySessionId),
+      result: 'dropped',
+    });
     return false;
   }
 
@@ -209,7 +243,7 @@ async function publishLocationUnlocked(session, locationObject, { force = false 
   });
   const mode = trackingMode(currentSession);
   if (!decision.publish) {
-    reportThrottle(mode, decision.reason);
+    reportThrottle(mode, decision.reason, currentSession);
     return false;
   }
 
@@ -223,12 +257,10 @@ async function publishLocationUnlocked(session, locationObject, { force = false 
     try {
       await updateDoc(doc(db, 'drivers', currentUid), driverUpdate);
     } catch (error) {
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        console.log(
-          '[DRIVER_LOCATION] driver heartbeat skipped during active ride',
-          error?.code || error?.message || 'unknown'
-        );
-      }
+      traceTracking('driver_heartbeat.skipped_during_ride', currentSession, {
+        reason: error?.code || error?.message || 'unknown',
+        result: 'ride_location_preserved',
+      }, 'warn');
     }
   } else {
     await updateDoc(doc(db, 'drivers', currentUid), driverUpdate);
@@ -244,11 +276,11 @@ async function publishLocationUnlocked(session, locationObject, { force = false 
     reason: decision.reason,
     policyMode: decision.mode,
   });
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log(
-      `[DRIVER_LOCATION] published mode=${decision.mode} reason=${decision.reason} atMs=${nowMs}`
-    );
-  }
+  traceTracking('publish.succeeded', currentSession, {
+    reason: decision.reason,
+    policyMode: decision.mode,
+    result: 'published',
+  });
   return true;
 }
 
@@ -261,7 +293,7 @@ function publishLocation(session, locationObject, options = {}) {
   // Fast guard for Android batch replays. The detailed distance/time decision runs
   // once the selected event reaches the serialized queue.
   if (!force && nowMs - lastQueuedAtByMode[mode] < queueGapMs) {
-    reportThrottle(mode, 'queue_gap');
+    reportThrottle(mode, 'queue_gap', session);
     return Promise.resolve(false);
   }
   lastQueuedAtByMode[mode] = nowMs;
@@ -275,6 +307,10 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK)) {
   TaskManager.defineTask(DRIVER_LOCATION_TASK, async ({ data, error }) => {
     if (error || !data) {
       await writeSafeStatus('task_error');
+      traceTracking('background_task.failed', null, {
+        reason: error?.message || 'missing_task_data',
+        result: 'not_published',
+      }, 'error');
       return;
     }
 
@@ -282,16 +318,19 @@ if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK)) {
       const session = await readSession();
       const locations = Array.isArray(data.locations) ? data.locations : [];
       const latest = locations[locations.length - 1];
-      if (!session || !latest || session.trackingPaused === true) return;
+      if (!session || !latest || session.trackingPaused === true) {
+        if (session?.trackingPaused === true) {
+          traceTracking('background_task.skipped', session, { reason: 'tracking_paused' });
+        }
+        return;
+      }
       await publishLocation(session, latest);
     } catch (taskError) {
       await writeSafeStatus('publish_error');
-      if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        console.log(
-          '[DRIVER_LOCATION] background publish error',
-          taskError?.code || taskError?.message || 'unknown'
-        );
-      }
+      traceTracking('background_task.failed', await readSession(), {
+        reason: taskError?.code || taskError?.message || 'unknown',
+        result: 'not_published',
+      }, 'error');
     }
   });
 }
@@ -345,9 +384,11 @@ async function ensureNativeTaskStarted(session) {
   await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, {
     accuracy: activeRide ? Location.Accuracy.High : Location.Accuracy.Balanced,
     timeInterval: intervalMs,
-    distanceInterval: activeRide ? 10 : 25,
+    // Online waiting must be time-driven even when the vehicle is perfectly still.
+    // Firestore publication remains distance/time throttled by driverLocationPolicy.
+    distanceInterval: activeRide ? 10 : 0,
     deferredUpdatesInterval: intervalMs,
-    deferredUpdatesDistance: activeRide ? 10 : 25,
+    deferredUpdatesDistance: activeRide ? 10 : 0,
     pausesUpdatesAutomatically: false,
     foregroundService: {
       notificationTitle: 'DriveLocal — localização ativa',
@@ -357,6 +398,11 @@ async function ensureNativeTaskStarted(session) {
       notificationColor: '#2563EB',
       killServiceOnDestroy: false,
     },
+  });
+  traceTracking('native_task.started', session, {
+    intervalMs,
+    distanceInterval: activeRide ? 10 : 0,
+    result: 'active',
   });
 }
 
@@ -369,6 +415,31 @@ async function publishImmediate(session, options) {
     accuracy: session?.rideId ? Location.Accuracy.High : Location.Accuracy.Balanced,
   });
   return publishLocation(session, current, options);
+}
+
+async function restorePreviousSessionAfterStartFailure(previousSession, failedSession) {
+  if (
+    !previousSession
+    || previousSession.driverId !== failedSession.driverId
+    || previousSession.availabilitySessionId !== failedSession.availabilitySessionId
+  ) return false;
+
+  try {
+    await writeSession(previousSession);
+    await ensureNativeTaskStarted(previousSession);
+    await writeSafeStatus('session_start_previous_session_restored');
+    traceTracking('session_start.rollback_succeeded', previousSession, {
+      reason: 'previous_session_restored',
+      result: 'restored',
+    });
+    return true;
+  } catch (error) {
+    traceTracking('session_start.rollback_failed', previousSession, {
+      reason: error?.code || error?.message || 'unknown',
+      result: 'stopped',
+    }, 'error');
+    return false;
+  }
 }
 
 async function startSession({
@@ -384,14 +455,29 @@ async function startSession({
     || !validIdentifier(availabilitySessionId)
     || (rideId != null && !validIdentifier(rideId))
   ) {
+    traceTracking('session_start.rejected', {
+      driverId,
+      availabilitySessionId,
+      rideId,
+      rideStatus,
+    }, { reason: 'invalid_session_identifiers', result: 'rejected' }, 'warn');
     return { status: 'invalid_session' };
   }
 
   const permission = requestPermissions
     ? await requestDriverTrackingPermissions()
     : await getDriverTrackingPermissionState();
-  if (permission.status !== 'granted') return permission;
+  if (permission.status !== 'granted') {
+    traceTracking('session_start.rejected', {
+      driverId,
+      availabilitySessionId,
+      rideId,
+      rideStatus,
+    }, { reason: permission.status, result: 'permission_missing' }, 'warn');
+    return permission;
+  }
 
+  const previousSession = await readSession();
   const session = {
     driverId,
     availabilitySessionId,
@@ -401,17 +487,63 @@ async function startSession({
     trackingPaused: false,
     updatedAtMs: Date.now(),
   };
-  await writeSession(session);
 
-  const override = await readDevOverride();
-  if (override && override.driverId === driverId && override.rideId === rideId) {
-    await writeSafeStatus('dev_simulation_override_preserved');
-    return { status: 'active', rideId, source: 'dev_simulation', availabilitySessionId };
+  traceTracking('session_start.started', session, {
+    source: rideId ? 'active_ride' : 'work_session',
+    requestPermissions,
+  });
+
+  try {
+    await writeSession(session);
+
+    const override = await readDevOverride();
+    if (override && override.driverId === driverId && override.rideId === rideId) {
+      await writeSafeStatus('dev_simulation_override_preserved');
+      traceTracking('session_start.succeeded', session, {
+        source: 'dev_simulation',
+        result: 'active',
+      });
+      return { status: 'active', rideId, source: 'dev_simulation', availabilitySessionId };
+    }
+
+    await ensureNativeTaskStarted(session);
+    const published = await publishImmediate(session, { force: true });
+    if (!published) {
+      const error = new Error('DRIVER_INITIAL_LOCATION_NOT_PUBLISHED');
+      error.code = 'DRIVER_INITIAL_LOCATION_NOT_PUBLISHED';
+      throw error;
+    }
+
+    await writeSafeStatus('session_start_succeeded', {
+      rideId: rideId || null,
+      availabilitySessionId: shortId(availabilitySessionId),
+    });
+    traceTracking('session_start.succeeded', session, {
+      source: 'native',
+      result: 'active',
+    });
+    return { status: 'active', rideId, source: 'native', availabilitySessionId };
+  } catch (error) {
+    const currentSession = await readSession();
+    if (sameSession(currentSession, session)) await clearSession();
+    await AsyncStorage.removeItem(LAST_PUBLISH_KEY);
+    lastQueuedAtByMode[trackingMode(session)] = 0;
+    await stopNativeTask().catch(() => undefined);
+
+    const restored = await restorePreviousSessionAfterStartFailure(previousSession, session);
+    if (!restored) {
+      await clearSession().catch(() => undefined);
+      await writeSafeStatus('session_start_failed', {
+        reason: error?.code || error?.message || 'unknown',
+      });
+    }
+    traceTracking('session_start.failed', session, {
+      reason: error?.code || error?.message || 'unknown',
+      rollback: restored ? 'previous_session_restored' : 'fully_stopped',
+      result: 'error',
+    }, 'error');
+    throw error;
   }
-
-  await ensureNativeTaskStarted(session);
-  await publishImmediate(session, { force: true });
-  return { status: 'active', rideId, source: 'native', availabilitySessionId };
 }
 
 export function startDriverOnlineTracking({
@@ -438,9 +570,30 @@ export async function attachActiveRideTracking({
   requestPermissions = false,
 }) {
   const existing = await readSession();
-  const workSessionId = availabilitySessionId || (
+  let workSessionId = availabilitySessionId || (
     existing?.driverId === driverId ? existing.availabilitySessionId : null
   );
+
+  // A confirmed ride is recoverable even if AsyncStorage was cleared or the app
+  // process was recreated. The acceptance transaction freezes the work-session id
+  // on the ride, which is safer than inventing a new availability session mid-ride.
+  if (!workSessionId && validIdentifier(rideId)) {
+    const rideSnap = await getDoc(doc(db, 'rideRequests', rideId));
+    const ride = rideSnap.exists() ? rideSnap.data() : null;
+    if (
+      ride?.acceptedDriverId === driverId
+      && validIdentifier(ride?.acceptedAvailabilitySessionId)
+    ) {
+      workSessionId = ride.acceptedAvailabilitySessionId;
+      traceTracking('active_ride.session_recovered', {
+        driverId,
+        availabilitySessionId: workSessionId,
+        rideId,
+        rideStatus,
+      }, { source: 'ride_acceptance_snapshot', result: 'recovered' });
+    }
+  }
+
   return startSession({
     driverId,
     vehicleType,
@@ -461,16 +614,30 @@ export async function refreshDriverOnlineHeartbeat() {
 
   const currentUid = await authenticatedUid();
   if (!currentUid || currentUid !== session.driverId) {
+    traceTracking('foreground_heartbeat.rejected', session, {
+      reason: 'authenticated_driver_mismatch',
+      result: 'not_published',
+    }, 'warn');
     return { status: 'session_mismatch' };
   }
 
   const permission = await getDriverTrackingPermissionState();
-  if (permission.status !== 'granted') return permission;
+  if (permission.status !== 'granted') {
+    traceTracking('foreground_heartbeat.rejected', session, {
+      reason: permission.status,
+      result: 'not_published',
+    }, 'warn');
+    return permission;
+  }
 
   const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   if (!started) {
     await ensureNativeTaskStarted(session);
     await writeSafeStatus('foreground_native_task_restarted');
+    traceTracking('foreground_heartbeat.native_task_repaired', session, {
+      reason: 'native_task_missing',
+      result: 'restarted',
+    });
   }
 
   const published = await publishImmediate(session, { force: false });
@@ -500,6 +667,7 @@ export async function beginDevLocationSimulation({ driverId, vehicleType, rideId
   });
   await writeDevOverride({ driverId, rideId });
   await writeSafeStatus('dev_simulation_override_active');
+  traceTracking('dev_simulation.started', session, { result: 'active' });
   return { status: 'active', source: 'dev_simulation' };
 }
 
@@ -553,6 +721,7 @@ export async function restoreRealDriverTrackingAfterSimulation() {
   await ensureNativeTaskStarted(session);
   await publishImmediate(session, { force: true });
   await writeSafeStatus('dev_simulation_native_tracking_restored');
+  traceTracking('dev_simulation.native_tracking_restored', session, { result: 'active' });
   return { status: 'active', rideId: session.rideId || null, source: 'native' };
 }
 
@@ -588,11 +757,19 @@ export async function detachActiveRideTracking(rideId) {
     if (!canResumeOnline) {
       if (driver?.activeRideId) {
         await writeSafeStatus('active_ride_tracking_paused_for_payment');
+        traceTracking('active_ride.detached', session, {
+          reason: 'payment_or_terminal_transition_pending',
+          result: 'paused',
+        });
         return { status: 'paused' };
       }
       await clearSession();
       await AsyncStorage.removeItem(LAST_PUBLISH_KEY);
       await writeSafeStatus('active_ride_detached_session_revoked');
+      traceTracking('active_ride.detached', session, {
+        reason: 'work_session_not_reusable',
+        result: 'stopped',
+      });
       return { status: 'stopped' };
     }
 
@@ -607,15 +784,24 @@ export async function detachActiveRideTracking(rideId) {
     await ensureNativeTaskStarted(onlineSession);
     await publishImmediate(onlineSession, { force: true });
     await writeSafeStatus('active_ride_detached_online_resumed');
+    traceTracking('active_ride.detached', onlineSession, {
+      reason: 'work_session_still_valid',
+      result: 'online_resumed',
+    });
     return { status: 'active' };
-  } catch (_error) {
+  } catch (error) {
     await writeSafeStatus('active_ride_detach_reconciliation_failed');
+    traceTracking('active_ride.detach_failed', session, {
+      reason: error?.code || error?.message || 'unknown',
+      result: 'paused',
+    }, 'error');
     return { status: 'paused' };
   }
 }
 
 export async function stopDriverOnlineTracking() {
   const session = await readSession();
+  traceTracking('tracking_stop.started', session, { result: 'stopping' });
 
   // Invalidate the local session first. Any publication already waiting in the
   // queue re-reads AsyncStorage and drops itself before touching Firestore.
@@ -635,6 +821,7 @@ export async function stopDriverOnlineTracking() {
 
   await stopNativeTask();
   await writeSafeStatus('stopped');
+  traceTracking('tracking_stop.succeeded', session, { result: 'stopped' });
 }
 
 export async function restoreDriverOnlineTracking({
@@ -648,6 +835,13 @@ export async function restoreDriverOnlineTracking({
     || session.driverId !== driverId
     || session.availabilitySessionId !== availabilitySessionId
   ) {
+    traceTracking('online_restore.rejected', {
+      driverId,
+      availabilitySessionId,
+    }, {
+      reason: !session ? 'local_session_missing' : 'local_session_mismatch',
+      result: 'no_session',
+    });
     return { status: 'no_session' };
   }
   return startSession({
@@ -669,6 +863,7 @@ export async function updateActiveRideTrackingStatus(rideStatus) {
     updatedAtMs: Date.now(),
   };
   await writeSession(next);
+  traceTracking('active_ride.status_updated', next, { result: 'updated' });
   return { status: 'updated', rideStatus: next.rideStatus };
 }
 
