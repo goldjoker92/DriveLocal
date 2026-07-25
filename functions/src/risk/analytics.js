@@ -5,6 +5,7 @@
 
 const driverC = require('../drivers/constants');
 const { toMillis } = require('../drivers/eligibility');
+const { hasFreshAvailabilitySession } = require('../rides/candidates');
 
 const TIME_ZONE = 'America/Fortaleza';
 const DAY_KEYS = Object.freeze(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
@@ -214,7 +215,7 @@ function aggregateDrivers(drivers = [], nowMs = Date.now()) {
     if (driver?.verificationStatus === 'approved') result.approved += 1;
     if (driver?.verificationStatus === 'pending_review') result.pendingReview += 1;
     if (driver?.verificationStatus === 'suspended' || driver?.isBlocked === true) result.suspended += 1;
-    if (driver?.availabilityStatus === 'online') result.online += 1;
+    if (hasFreshAvailabilitySession(driver, nowMs)) result.online += 1;
 
     const expiry = toMillis(driver?.subscriptionExpiresAt);
     const freeUntil = toMillis(driver?.subscriptionFreeUntil || driver?.founderFreeUntil);
