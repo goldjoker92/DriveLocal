@@ -51,8 +51,8 @@ const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
 
 // Launch antifraud and business observability. Analytics are admin-only. Scheduled
-// scans and the location trigger only create traceable alerts/cases; they never
-// mutate balances, settle commissions or permanently block an account.
+// scans and triggers create traceable alerts/restrictions; they never alter the
+// amount of a hold, settle a commission or permanently ban an account by themselves.
 const riskCallables = require('./risk/callables');
 exports.getAdminBusinessAnalyticsSecure = riskCallables.getAdminBusinessAnalyticsSecure;
 const { financialReconciliationTask } = require('./risk/reconciliation');
@@ -61,3 +61,5 @@ const { operationalRiskScanTask } = require('./risk/operationalScan');
 exports.operationalRiskScanTask = operationalRiskScanTask;
 const { driverLocationRiskTrigger } = require('./risk/locationRisk');
 exports.driverLocationRiskTrigger = driverLocationRiskTrigger;
+const { ridePaymentRestrictionTrigger } = require('./risk/paymentRestriction');
+exports.ridePaymentRestrictionTrigger = ridePaymentRestrictionTrigger;
