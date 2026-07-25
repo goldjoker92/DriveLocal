@@ -15,6 +15,11 @@ const {
 const { requireAdmin } = require('../auth/adminAuth');
 const { writeAuditLog } = require('../audit/auditLog');
 const { logInfo, shortHash } = require('../logging/logger');
+const {
+  addTemporaryRestriction,
+  removeTemporaryRestriction,
+  restrictionSummary,
+} = require('./restrictions');
 const C = require('./constants');
 
 const CASE_OUTCOMES = Object.freeze([
@@ -76,12 +81,13 @@ async function listAdminRiskCases({ db, request, context }) {
     });
   }
 
-  // Bounded read + in-memory filter avoids launch-time composite-index coupling.
-  // At city scale this remains cheap; a materialized queue can replace it later.
-  const snapshot = await db.collection(C.COLLECTIONS.FRAUD_CASES).limit(MAX_CASES).get();
+  // Query the requested status before applying the cap. Reading an arbitrary first
+  // page and filtering afterwards could hide open cases behind resolved documents.
+  const base = db.collection(C.COLLECTIONS.FRAUD_CASES);
+  const query = status === 'all' ? base.limit(MAX_CASES) : base.where('status', '==', status).limit(MAX_CASES);
+  const snapshot = await query.get();
   const cases = snapshot.docs
     .map(safeCase)
-    .filter((entry) => status === 'all' || entry.status === status)
     .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
     .slice(0, requestedLimit);
 
@@ -149,10 +155,7 @@ async function decideAdminRiskCase({ db, request, context, clock }) {
     if (before.decision?.idempotencyKey === idempotencyKey) {
       return { replay: true, before, after: before };
     }
-    if (
-      before.status === 'fraud_confirmed'
-      && outcome !== 'fraud_confirmed'
-    ) {
+    if (before.status === 'fraud_confirmed' && outcome !== 'fraud_confirmed') {
       throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
         internalMessage: `confirmed fraud case ${caseId} cannot be silently downgraded`,
         safeMetadata: { reason: 'CONFIRMED_FRAUD_REQUIRES_SEPARATE_UNBLOCK_REVIEW' },
@@ -181,9 +184,12 @@ async function decideAdminRiskCase({ db, request, context, clock }) {
       if (outcome === 'warning_recorded') {
         profileUpdate.riskWarningCount = Number(profile.riskWarningCount || 0) + 1;
       } else if (outcome === 'temporary_restriction') {
-        profileUpdate.riskRestrictionCaseId = caseId;
-        profileUpdate.riskRestrictionUntilMs = restrictionUntilMs;
-        profileUpdate.riskRestrictionUntil = new Date(restrictionUntilMs);
+        const restrictions = addTemporaryRestriction(profile, caseId, restrictionUntilMs, nowMs);
+        const summary = restrictionSummary(restrictions);
+        profileUpdate.riskRestrictions = restrictions;
+        profileUpdate.riskRestrictionCaseId = summary.caseId;
+        profileUpdate.riskRestrictionUntilMs = summary.untilMs;
+        profileUpdate.riskRestrictionUntil = new Date(summary.untilMs);
         if (before.actorType === C.ACTOR_TYPE.DRIVER) {
           profileUpdate.riskBlockedFromNewAcceptances = true;
         } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
@@ -202,17 +208,16 @@ async function decideAdminRiskCase({ db, request, context, clock }) {
           profileUpdate.riskBlockedFromNewRides = true;
         }
       } else if (outcome === 'close_no_evidence') {
-        // Clear only restrictions created by this exact case. Another open case or
-        // a manually confirmed block must not be accidentally removed.
-        if (profile.riskRestrictionCaseId === caseId) {
-          profileUpdate.riskRestrictionCaseId = null;
-          profileUpdate.riskRestrictionUntilMs = null;
-          profileUpdate.riskRestrictionUntil = null;
-          if (before.actorType === C.ACTOR_TYPE.DRIVER) {
-            profileUpdate.riskBlockedFromNewAcceptances = false;
-          } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
-            profileUpdate.riskBlockedFromNewRides = false;
-          }
+        const restrictions = removeTemporaryRestriction(profile, caseId, nowMs);
+        const summary = restrictionSummary(restrictions);
+        profileUpdate.riskRestrictions = restrictions;
+        profileUpdate.riskRestrictionCaseId = summary.caseId;
+        profileUpdate.riskRestrictionUntilMs = summary.untilMs;
+        profileUpdate.riskRestrictionUntil = summary.untilMs ? new Date(summary.untilMs) : null;
+        if (before.actorType === C.ACTOR_TYPE.DRIVER) {
+          profileUpdate.riskBlockedFromNewAcceptances = restrictions.length > 0 || profile.isBlocked === true;
+        } else if (before.actorType === C.ACTOR_TYPE.PASSENGER) {
+          profileUpdate.riskBlockedFromNewRides = restrictions.length > 0 || profile.isBlocked === true;
         }
       }
       tx.set(profileRef, profileUpdate, { merge: true });
