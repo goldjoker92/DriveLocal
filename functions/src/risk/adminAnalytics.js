@@ -11,12 +11,14 @@ const paymentC = require('../payments/constants');
 const rideC = require('../rides/constants');
 const riskC = require('./constants');
 const { buildAdminAnalytics } = require('./analytics');
+const { aggregateRiskCases } = require('./caseAnalytics');
 
 const LIMITS = Object.freeze({
   rides: 2500,
   drivers: 1500,
   payments: 2000,
   alerts: 500,
+  riskCases: 500,
   supplySnapshots: 2200,
 });
 const ALLOWED_RANGE_DAYS = new Set([1, 7, 30, 90]);
@@ -38,7 +40,7 @@ async function getAdminBusinessAnalytics({ db, request, context, clock }) {
 
   const nowMs = Number(clock.now());
   const startMs = nowMs - rangeDays * 86400000;
-  const [ridesSnap, driversSnap, paymentsSnap, alertsSnap, supplySnap] = await Promise.all([
+  const [ridesSnap, driversSnap, paymentsSnap, alertsSnap, casesSnap, supplySnap] = await Promise.all([
     db.collection(rideC.RIDE_REQUESTS)
       .where('createdAtMs', '>=', startMs)
       .limit(LIMITS.rides)
@@ -51,6 +53,9 @@ async function getAdminBusinessAnalytics({ db, request, context, clock }) {
     db.collection(riskC.COLLECTIONS.FINANCIAL_ALERTS)
       .where('createdAtMs', '>=', startMs)
       .limit(LIMITS.alerts)
+      .get(),
+    db.collection(riskC.COLLECTIONS.FRAUD_CASES)
+      .limit(LIMITS.riskCases)
       .get(),
     db.collection(riskC.COLLECTIONS.OPERATIONAL_SNAPSHOTS)
       .where('createdAtMs', '>=', startMs)
@@ -67,12 +72,14 @@ async function getAdminBusinessAnalytics({ db, request, context, clock }) {
     nowMs,
     rangeDays,
   });
+  result.riskCases = aggregateRiskCases(docs(casesSnap));
 
   result.truncated = {
     rides: ridesSnap.size >= LIMITS.rides,
     drivers: driversSnap.size >= LIMITS.drivers,
     payments: paymentsSnap.size >= LIMITS.payments,
     alerts: alertsSnap.size >= LIMITS.alerts,
+    riskCases: casesSnap.size >= LIMITS.riskCases,
     supplySnapshots: supplySnap.size >= LIMITS.supplySnapshots,
   };
 
