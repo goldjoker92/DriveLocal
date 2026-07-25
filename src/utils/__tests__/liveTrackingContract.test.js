@@ -97,6 +97,7 @@ describe('Android live driver tracking contracts', () => {
     expect(rules).toContain("ride.status in ['assigned', 'driver_arrived', 'in_progress']");
     expect(rules).toContain('driverOperationalUpdateValid');
     expect(rules).toContain("resource.data.availabilityStatus == 'online'");
+    expect(rules).toContain("resource.data.availabilityUpdatedAt > request.time - duration.value(7, 'm')");
     expect(rules).toContain('request.resource.data.locationAvailabilitySessionId == resource.data.availabilitySessionId');
     expect(rules).toContain('request.resource.data.locationUpdatedAt == request.time');
     expect(rules).toContain('request.resource.data.availabilityUpdatedAt == request.time');
