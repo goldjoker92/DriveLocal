@@ -1,6 +1,10 @@
 // @ts-check
 
-const { buildSupplySnapshot, hourSnapshotId } = require('../risk/supplySnapshots');
+const {
+  buildSupplySnapshot,
+  hourSnapshotId,
+  canReceiveGenericLaunchRide,
+} = require('../risk/supplySnapshots');
 const {
   aggregateSupplySnapshots,
   buildDemandSupply,
@@ -8,14 +12,31 @@ const {
 
 const AT_18H = Date.parse('2026-08-08T21:10:00.000Z'); // 18:10 Fortaleza
 
+function eligibleDriver(overrides = {}) {
+  return {
+    verificationStatus: 'approved',
+    isBlocked: false,
+    availabilityStatus: 'online',
+    activeRideId: null,
+    founderEligible: false,
+    freeRideCountUsed: 0,
+    walletAvailableCentavos: 1000,
+    location: { lat: -4.1, lng: -38.5 },
+    locationUpdatedAtMs: AT_18H,
+    availabilityUpdatedAtMs: AT_18H,
+    ...overrides,
+  };
+}
+
 describe('hourly driver supply analytics', () => {
-  it('counts online, available and busy moto/car drivers without ids', () => {
+  it('counts only approved and dispatchable moto/car supply without ids', () => {
     const result = buildSupplySnapshot([
-      { vehicleType: 'moto', verificationStatus: 'approved', availabilityStatus: 'online', activeRideId: null },
-      { vehicleType: 'moto', verificationStatus: 'approved', availabilityStatus: 'online', activeRideId: 'r1' },
-      { vehicleType: 'car', verificationStatus: 'approved', availabilityStatus: 'online', activeRideId: null },
-      { vehicleType: 'car', verificationStatus: 'approved', availabilityStatus: 'offline', activeRideId: null },
-      { vehicleType: 'car', verificationStatus: 'approved', availabilityStatus: 'online', isBlocked: true },
+      eligibleDriver({ vehicleType: 'moto' }),
+      eligibleDriver({ vehicleType: 'moto', activeRideId: 'r1' }),
+      eligibleDriver({ vehicleType: 'car' }),
+      eligibleDriver({ vehicleType: 'car', availabilityStatus: 'offline' }),
+      eligibleDriver({ vehicleType: 'car', isBlocked: true }),
+      eligibleDriver({ vehicleType: 'car', verificationStatus: 'draft' }),
     ], AT_18H);
 
     expect(result.online).toEqual({ moto: 2, car: 1, total: 3 });
@@ -23,6 +44,18 @@ describe('hourly driver supply analytics', () => {
     expect(result.busy).toEqual({ moto: 1, car: 0, total: 1 });
     expect(result.approved).toEqual({ moto: 2, car: 2, total: 4 });
     expect(JSON.stringify(result)).not.toContain('r1');
+  });
+
+  it('excludes stale location, financial review and unusable wallet from availability', () => {
+    const stale = eligibleDriver({ locationUpdatedAtMs: AT_18H - 2 * 3600000 });
+    const review = eligibleDriver({ financialReviewRequired: true });
+    const emptyWallet = eligibleDriver({ walletAvailableCentavos: 300, freeRideCountUsed: 5, subscriptionActive: true, subscriptionExpiresAt: AT_18H + 864e5 });
+    const freeCommission = eligibleDriver({ walletAvailableCentavos: 0, commissionFreeUntil: AT_18H + 864e5 });
+
+    expect(canReceiveGenericLaunchRide(stale, AT_18H)).toBe(false);
+    expect(canReceiveGenericLaunchRide(review, AT_18H)).toBe(false);
+    expect(canReceiveGenericLaunchRide(emptyWallet, AT_18H)).toBe(false);
+    expect(canReceiveGenericLaunchRide(freeCommission, AT_18H)).toBe(true);
   });
 
   it('uses one deterministic document per UTC hour', () => {
