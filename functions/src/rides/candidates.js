@@ -23,13 +23,17 @@ function driverLocation(d) {
 }
 
 function locationAgeMs(d, nowMs) {
-  const ts = Number(d.locationUpdatedAtMs || 0);
+  // Server timestamps are authoritative. Epoch-ms remains a compatibility
+  // fallback for legacy records and deterministic in-memory test fixtures.
+  const ts = toMillis(d.locationUpdatedAt)
+    || Number(d.locationUpdatedAtMs || 0);
   return ts > 0 ? Math.max(0, nowMs - ts) : Infinity;
 }
 
 function availabilityAgeMs(d, nowMs) {
-  const ts = Number(d.availabilityUpdatedAtMs || 0)
-    || toMillis(d.availabilityUpdatedAt);
+  // Never let a misconfigured phone clock extend a work session indefinitely.
+  const ts = toMillis(d.availabilityUpdatedAt)
+    || Number(d.availabilityUpdatedAtMs || 0);
   return ts > 0 ? Math.max(0, nowMs - ts) : Infinity;
 }
 
