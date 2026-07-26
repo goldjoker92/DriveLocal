@@ -51,6 +51,7 @@ module.exports = Object.freeze({
     RIDE_COMPLETED: 'ride_completed',
     RIDE_CANCELLED: 'ride_cancelled',
     RIDE_DISPUTED: 'ride_disputed',
+    RIDE_QUICK_MESSAGE: 'ride_quick_message',
   }),
 
   NOTIFICATION_STATUS: Object.freeze({
