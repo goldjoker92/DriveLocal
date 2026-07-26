@@ -1,23 +1,36 @@
-// Active driver ride screen (route "/active-ride"). Uses the driver's secured
-// winning offer and attaches the background location service to this ride.
-// Payment feedback stays on-screen: success closes after 5 seconds; failures remain.
+// Active driver ride screen (route "/active-ride"). The secured accepted-offer
+// projection is the only UI data source. High-frequency GPS and lifecycle actions
+// remain delegated to the existing services; this screen owns hierarchy and feedback.
 
-import { useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
+import DriverActiveRideNavigationCard from '../../components/DriverActiveRideNavigationCard';
+import DriverActiveRidePrimaryFooter from '../../components/DriverActiveRidePrimaryFooter';
+import DriverActiveRideStageCard from '../../components/DriverActiveRideStageCard';
 import PixPaymentSummary from '../../components/PixPaymentSummary';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
-import { typography, fontFamily } from '../../constants/typography';
+import { fontFamily, typography } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { formatBRL } from '../../utils/format';
 import { logRideClientEvent } from '../../utils/clientRideLog';
-import { openGoogleMapsRoute, openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
+import {
+  deriveDriverActiveRideNavigation,
+  deriveDriverActiveRidePrimaryAction,
+  deriveDriverActiveRideStage,
+  driverActiveRideNavigationMode,
+} from '../../utils/driverActiveRideScreen';
+import {
+  openGoogleMapsRoute,
+  openGoogleMapsToPoint,
+  openWazeToPoint,
+} from '../../utils/maps';
 import {
   attachActiveRideTracking,
   detachActiveRideTracking,
@@ -34,19 +47,30 @@ import {
 } from '../../services/devRideSimulation';
 import { getRobotDriverState } from '../../services/robotDriverEngine';
 import {
+  cancelRide,
+  confirmDriverPixReceived,
+  finishRide,
   listenToMyOffer,
   markDriverArrived,
-  startRide,
-  finishRide,
-  confirmDriverPixReceived,
-  cancelRide,
   reportPaymentIssue,
+  startRide,
 } from '../../services/ridesService';
 
 const TRACKED_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
-const PAYMENT_STATUSES = new Set(['awaiting_payment', 'payment_marked_sent', 'completed', 'disputed']);
+const PAYMENT_STATUSES = new Set([
+  'awaiting_payment',
+  'payment_marked_sent',
+  'completed',
+  'disputed',
+]);
 const ROBOT_NAVIGATION_STATUSES = new Set(['running', 'paused', 'completed']);
-const DEV_SIMULATION_OVERRIDE_STATUSES = new Set(['running', 'paused', 'completed', 'interrupted', 'error']);
+const DEV_SIMULATION_OVERRIDE_STATUSES = new Set([
+  'running',
+  'paused',
+  'completed',
+  'interrupted',
+  'error',
+]);
 const SUCCESS_VISIBLE_MS = 5000;
 
 function statusFromEvent(eventType) {
@@ -151,13 +175,17 @@ export default function ActiveRide() {
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid || !rideId) return undefined;
+
     return listenToMyOffer(
       uid,
       (nextOffer) => {
         if (!nextOffer) return;
         setOffer(nextOffer);
-        if (nextOffer.driverRideStatus) setStatus(nextOffer.driverRideStatus);
-        else if (nextOffer.exactDestination) setStatus((current) => current === 'assigned' ? 'in_progress' : current);
+        if (nextOffer.driverRideStatus) {
+          setStatus(nextOffer.driverRideStatus);
+        } else if (nextOffer.exactDestination) {
+          setStatus((current) => current === 'assigned' ? 'in_progress' : current);
+        }
       },
       () => setError('Não foi possível carregar a corrida.'),
       rideId
@@ -170,7 +198,7 @@ export default function ActiveRide() {
       rideId,
       status,
       amountCentavos: paymentAmount,
-      hasPayload: !!paymentPayload,
+      hasPayload: Boolean(paymentPayload),
     });
   }, [rideId, status, paymentAmount, paymentPayload]);
 
@@ -196,10 +224,15 @@ export default function ActiveRide() {
 
     getDevRideSimulationState().then((next) => {
       if (!active) return;
-      if (!next?.rideId || next.rideId === rideId) setDevSimulation(next || { status: 'idle' });
+      if (!next?.rideId || next.rideId === rideId) {
+        setDevSimulation(next || { status: 'idle' });
+      }
     });
+
     const unsubscribe = subscribeDevRideSimulation((next) => {
-      if (!next?.rideId || next.rideId === rideId) setDevSimulation(next || { status: 'idle' });
+      if (!next?.rideId || next.rideId === rideId) {
+        setDevSimulation(next || { status: 'idle' });
+      }
     });
 
     return () => {
@@ -212,6 +245,7 @@ export default function ActiveRide() {
     if (!rideId) return;
     const cleanupKey = `${rideId}:${stage}`;
     if (cleanupDoneRef.current.has(cleanupKey)) return;
+
     const existing = cleanupInFlightRef.current.get(cleanupKey);
     if (existing) return existing;
 
@@ -238,8 +272,7 @@ export default function ActiveRide() {
       await detachActiveRideTracking(rideId);
 
       // Robot Driver owns its synthetic waiting position and must not be replaced
-      // by the phone's real GPS after every ride. The per-ride DEV route simulator,
-      // on the other hand, must restore native tracking after its override ends.
+      // by the phone's real GPS after every ride. Local DEV simulation does restore it.
       if (localDevSimulationActive && !robotActive) {
         await restoreRealDriverTrackingAfterSimulation();
       }
@@ -295,6 +328,7 @@ export default function ActiveRide() {
   async function enableRideTracking() {
     const uid = auth.currentUser?.uid;
     if (!uid || !rideId || !offer?.vehicleType) return;
+
     const consented = await confirmRideTrackingDisclosure();
     if (!consented) return;
 
@@ -318,25 +352,31 @@ export default function ActiveRide() {
     if (!rideId || busy) return;
     setBusy(key);
     setError('');
+
     try {
-      const res = await fn(rideId);
-      if (res?.status) setStatus(res.status);
-      if (res && ['awaiting_payment', 'completed', 'cancelled', 'disputed'].includes(res.status)) {
-        await cleanupTrackingAfterRide(cleanupStageForStatus(res.status));
+      const result = await fn(rideId);
+      if (result?.status) setStatus(result.status);
+
+      if (
+        result
+        && ['awaiting_payment', 'completed', 'cancelled', 'disputed'].includes(result.status)
+      ) {
+        await cleanupTrackingAfterRide(cleanupStageForStatus(result.status));
       }
-      // Success and payment failure remain visible. Only cancellation leaves now.
-      if (res?.status === 'cancelled') {
+
+      // Success and payment failure remain visible. Only cancellation exits now.
+      if (result?.status === 'cancelled') {
         router.replace('/driver-home');
       }
-    } catch (e) {
-      const message = e?.message || 'Não foi possível concluir. Tente novamente.';
+    } catch (actionError) {
+      const message = actionError?.message || 'Não foi possível concluir. Tente novamente.';
       setError(message);
       logRideClientEvent('pix.driver.ui_action_failed', {
         rideId,
         action: key,
         status,
         amountCentavos: paymentAmount,
-        error: e,
+        error: actionError,
       }, 'error');
     } finally {
       setBusy('');
@@ -346,6 +386,7 @@ export default function ActiveRide() {
   async function startSimulation(target, mode) {
     const uid = auth.currentUser?.uid;
     if (!DEV_RIDE_SIMULATOR_ENABLED || !uid || !rideId || !offer?.vehicleType || busy) return;
+
     setBusy('simulation');
     setError('');
     try {
@@ -367,6 +408,7 @@ export default function ActiveRide() {
 
   async function restoreRealGps() {
     if (!DEV_RIDE_SIMULATOR_ENABLED || busy) return;
+
     setBusy('restore-gps');
     setError('');
     try {
@@ -384,8 +426,12 @@ export default function ActiveRide() {
 
   async function openNav(point, which, targetKind) {
     if (!point) return;
-    setError('');
+    if (!offer?.vehicleType) {
+      setError('Aguarde o tipo do veículo antes de abrir a navegação.');
+      return;
+    }
 
+    setError('');
     const simulatedOrigin = DEV_RIDE_SIMULATOR_ENABLED
       ? getDevSimulatedCurrentPoint(rideId)
       : null;
@@ -431,17 +477,17 @@ export default function ActiveRide() {
       });
 
       if (which === 'waze') {
-        await openWazeToPoint(point, offer?.vehicleType);
+        await openWazeToPoint(point, offer.vehicleType);
       } else if (simulatedOrigin) {
         await openGoogleMapsRoute({
           origin: simulatedOrigin,
           destination: point,
-          vehicleType: offer?.vehicleType,
+          vehicleType: offer.vehicleType,
         });
       } else {
-        await openGoogleMapsToPoint(point, offer?.vehicleType);
+        await openGoogleMapsToPoint(point, offer.vehicleType);
       }
-    } catch (_e) {
+    } catch (_error) {
       setError(which === 'waze'
         ? 'Não foi possível abrir o Waze. Tente o Google Maps.'
         : 'Não foi possível abrir o Google Maps. Tente o Waze.');
@@ -458,17 +504,75 @@ export default function ActiveRide() {
   const paymentCompleted = status === 'completed';
   const headerTitle = PAYMENT_STATUSES.has(status) ? 'Pagamento Pix' : 'Corrida ativa';
 
+  const stage = useMemo(() => deriveDriverActiveRideStage(status), [status]);
+  const navigation = useMemo(
+    () => deriveDriverActiveRideNavigation({ status, pickup, destination }),
+    [status, pickup, destination]
+  );
+  const navigationMode = useMemo(
+    () => driverActiveRideNavigationMode(offer?.vehicleType),
+    [offer?.vehicleType]
+  );
+  const primaryAction = useMemo(
+    () => deriveDriverActiveRidePrimaryAction({
+      status,
+      busy,
+      hasPickup: Boolean(pickup),
+      hasDestination: Boolean(destination),
+      hasPaymentPayload: Boolean(paymentPayload),
+    }),
+    [status, busy, pickup, destination, paymentPayload]
+  );
+
+  const trackingState = !TRACKED_STATUSES.has(status)
+    ? 'stopped'
+    : trackingActive
+      ? 'active'
+      : trackingStatus === 'checking'
+        ? 'checking'
+        : 'attention';
+
+  async function runPrimaryAction() {
+    if (!primaryAction || primaryAction.disabled) return;
+
+    logRideClientEvent('driver.active_ride.primary_action_pressed', {
+      rideId,
+      status,
+      action: primaryAction.key,
+    });
+
+    const actions = {
+      arrive: () => act('arrive', markDriverArrived),
+      start: () => act('start', startRide),
+      finish: () => act('finish', finishRide),
+      confirm: () => act('confirm', confirmDriverPixReceived),
+    };
+
+    const handler = actions[primaryAction.key];
+    if (handler) await handler();
+  }
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
+    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         <Header title={headerTitle} onBack={() => router.back()} />
 
-        {!rideId ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>Corrida inválida.</Text> : null}
+        {!rideId ? (
+          <Text style={styles.invalidRide}>Corrida inválida.</Text>
+        ) : null}
+
+        {rideId ? (
+          <DriverActiveRideStageCard stage={stage} trackingState={trackingState} />
+        ) : null}
 
         {TRACKED_STATUSES.has(status) ? (
-          <AppCard>
-            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Localização ao vivo</Text>
-            <Text style={[{ fontFamily, color: trackingActive ? colors.success : colors.warning }, typography.small]}>
+          <AppCard style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Localização ao vivo</Text>
+            <Text style={[styles.sectionCopy, trackingActive ? styles.successText : styles.warningText]}>
               {trackingActive
                 ? 'Ativa — o passageiro pode acompanhar seu deslocamento.'
                 : trackingStatus === 'checking'
@@ -476,133 +580,104 @@ export default function ActiveRide() {
                   : trackingErrorLabel(trackingStatus)}
             </Text>
             {!trackingActive && trackingStatus !== 'checking' ? (
-              <AppButton title="Ativar localização da corrida" onPress={enableRideTracking} />
+              <AppButton
+                title="Ativar localização da corrida"
+                onPress={enableRideTracking}
+                disabled={Boolean(busy)}
+              />
             ) : null}
           </AppCard>
         ) : null}
 
+        <DriverActiveRideNavigationCard
+          navigation={navigation}
+          modeLabel={navigationMode.label}
+          onOpenWaze={() => openNav(navigation?.point, 'waze', navigation?.kind)}
+          onOpenGoogleMaps={() => openNav(navigation?.point, 'gmaps', navigation?.kind)}
+          disabled={Boolean(busy) || !offer?.vehicleType}
+        />
+
         {DEV_RIDE_SIMULATOR_ENABLED && TRACKED_STATUSES.has(status) ? (
-          <AppCard>
-            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>🧪 Simulação DEV — dois telefones</Text>
-            <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+          <AppCard style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>🧪 Simulação DEV — dois telefones</Text>
+            <Text style={styles.sectionCopy}>
               Somente o deslocamento é simulado. Aceitar, chegar, iniciar, finalizar e confirmar o Pix continuam manuais e usam o fluxo real.
             </Text>
-            <Text style={[{ fontFamily, color: simulationRunning ? colors.warning : colors.textMuted }, typography.small]}>
+            <Text style={[styles.sectionCopy, simulationRunning ? styles.warningText : null]}>
               {simulationStatusLabel(devSimulation)}
             </Text>
+
             {Number.isFinite(devSimulation?.stepCount) && devSimulation.stepCount > 0 ? (
-              <Text style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>
+              <Text style={styles.caption}>
                 Passo {devSimulation.stepIndex || 0}/{devSimulation.stepCount}
               </Text>
             ) : null}
             {devSimulation?.traceId ? (
-              <Text selectable style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>
-                Trace: {devSimulation.traceId}
-              </Text>
+              <Text selectable style={styles.caption}>Trace: {devSimulation.traceId}</Text>
             ) : null}
             {devSimulation?.errorCode ? (
-              <Text selectable style={[{ fontFamily, color: colors.danger }, typography.caption]}>
-                Código: {devSimulation.errorCode}
-              </Text>
+              <Text selectable style={styles.errorCaption}>Código: {devSimulation.errorCode}</Text>
             ) : null}
 
             {(status === 'assigned' || status === 'driver_arrived') && pickup ? (
               <AppButton
                 title={busy === 'simulation' ? 'Iniciando…' : 'Simular trajeto até o passageiro'}
                 onPress={() => startSimulation(pickup, 'to_pickup')}
-                disabled={!!busy}
+                disabled={Boolean(busy)}
               />
             ) : null}
             {status === 'in_progress' && destination ? (
               <AppButton
                 title={busy === 'simulation' ? 'Iniciando…' : 'Simular trajeto até o destino'}
                 onPress={() => startSimulation(destination, 'to_destination')}
-                disabled={!!busy}
+                disabled={Boolean(busy)}
               />
             ) : null}
             {simulationRunning ? (
-              <AppButton title="Pausar deslocamento" variant="ghost" onPress={pauseDevRideSimulation} disabled={!!busy} />
+              <AppButton
+                title="Pausar deslocamento"
+                variant="ghost"
+                onPress={pauseDevRideSimulation}
+                disabled={Boolean(busy)}
+              />
             ) : null}
             {simulationPaused ? (
-              <AppButton title="Continuar deslocamento" variant="ghost" onPress={resumeDevRideSimulation} disabled={!!busy} />
+              <AppButton
+                title="Continuar deslocamento"
+                variant="ghost"
+                onPress={resumeDevRideSimulation}
+                disabled={Boolean(busy)}
+              />
             ) : null}
             {devSimulation?.status && devSimulation.status !== 'idle' ? (
               <AppButton
                 title={busy === 'restore-gps' ? 'Restaurando…' : 'Encerrar simulação e restaurar GPS real'}
                 variant="ghost"
                 onPress={restoreRealGps}
-                disabled={!!busy}
+                disabled={Boolean(busy)}
               />
             ) : null}
           </AppCard>
         ) : null}
 
-        {(status === 'assigned' || status === 'driver_arrived') && pickup ? (
-          <AppCard>
-            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Ir buscar o passageiro</Text>
-            <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{pickup.label || 'Local de embarque'}</Text>
-            <View style={{ gap: spacing.sm }}>
-              <AppButton title="Abrir no Waze" onPress={() => openNav(pickup, 'waze', 'pickup')} />
-              <AppButton title="Abrir no Google Maps" onPress={() => openNav(pickup, 'gmaps', 'pickup')} />
-            </View>
-          </AppCard>
-        ) : null}
-
-        {status === 'assigned' ? (
-          <AppButton title={busy === 'arrive' ? 'Enviando…' : 'Cheguei ao local'} onPress={() => act('arrive', markDriverArrived)} disabled={!!busy || !pickup} />
-        ) : null}
-        {status === 'driver_arrived' ? (
-          <AppButton title={busy === 'start' ? 'Enviando…' : 'Passageiro embarcou'} onPress={() => act('start', startRide)} disabled={!!busy} />
-        ) : null}
-
-        {status === 'in_progress' ? (
-          <AppCard>
-            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Levar ao destino</Text>
-            {destination ? (
-              <>
-                <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{destination.label || 'Destino da corrida'}</Text>
-                <View style={{ gap: spacing.sm }}>
-                  <AppButton title="Abrir no Waze" onPress={() => openNav(destination, 'waze', 'destination')} />
-                  <AppButton title="Abrir no Google Maps" onPress={() => openNav(destination, 'gmaps', 'destination')} />
-                </View>
-              </>
-            ) : (
-              <Text style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>Carregando destino…</Text>
-            )}
-            <AppButton title={busy === 'finish' ? 'Enviando…' : 'Finalizar corrida'} onPress={() => act('finish', finishRide)} disabled={!!busy || !destination} />
-          </AppCard>
-        ) : null}
-
         {paymentCompleted ? (
-          <AppCard>
-            <View
-              style={{
-                width: 88,
-                height: 88,
-                borderRadius: 44,
-                alignSelf: 'center',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: colors.success,
-              }}
-            >
-              <Text style={{ fontFamily, color: '#FFFFFF', fontSize: 52, lineHeight: 58 }}>✓</Text>
+          <AppCard style={styles.sectionCard}>
+            <View style={styles.successIcon}>
+              <Text style={styles.successIconText}>✓</Text>
             </View>
-            <Text style={[{ fontFamily, color: colors.success, textAlign: 'center' }, typography.h3]}>
-              Pagamento confirmado
-            </Text>
-            <Text style={[{ fontFamily, color: colors.text, textAlign: 'center' }, typography.bodyBold]}>
+            <Text style={styles.successTitle}>Pagamento confirmado</Text>
+            <Text style={styles.successAmount}>
               {paymentAmount != null ? formatBRL(paymentAmount) : 'Valor registrado'}
             </Text>
-            <Text style={[{ fontFamily, color: colors.textMuted, textAlign: 'center' }, typography.small]}>
+            <Text style={styles.successCopy}>
               Passageiro e motorista receberam a confirmação. Esta tela fechará em 5 segundos.
             </Text>
           </AppCard>
         ) : null}
 
         {paymentOpen || paymentFailed ? (
-          <AppCard>
-            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Pagamento</Text>
+          <AppCard style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Pagamento</Text>
             <PixPaymentSummary
               amountCentavos={paymentAmount}
               payload={paymentPayload}
@@ -610,35 +685,28 @@ export default function ActiveRide() {
             />
 
             {status === 'payment_marked_sent' ? (
-              <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>
+              <Text style={[styles.sectionCopy, styles.warningText]}>
                 O passageiro informou que pagou. Verifique sua conta antes de confirmar.
               </Text>
             ) : null}
 
             {paymentFailed ? (
               <>
-                <Text style={[{ fontFamily, color: colors.danger }, typography.bodyBold]}>
-                  Pagamento não confirmado
-                </Text>
-                <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+                <Text style={styles.paymentFailureTitle}>Pagamento não confirmado</Text>
+                <Text style={styles.sectionCopy}>
                   A tela permanece aberta e o valor continua registrado para conferência e suporte.
                 </Text>
               </>
             ) : (
               <>
-                <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+                <Text style={styles.sectionCopy}>
                   Confirme somente depois de verificar o Pix na sua conta.
                 </Text>
-                <AppButton
-                  title={busy === 'confirm' ? 'Enviando…' : 'Pagamento recebido'}
-                  onPress={() => act('confirm', confirmDriverPixReceived)}
-                  disabled={!!busy || !paymentPayload}
-                />
                 <AppButton
                   title="Problema no pagamento"
                   variant="ghost"
                   onPress={() => act('issue', (id) => reportPaymentIssue(id, 'motorista_reportou'))}
-                  disabled={!!busy}
+                  disabled={Boolean(busy)}
                 />
               </>
             )}
@@ -646,20 +714,117 @@ export default function ActiveRide() {
         ) : null}
 
         {status === 'assigned' || status === 'driver_arrived' ? (
-          <AppButton title="Cancelar corrida" variant="ghost" onPress={() => act('cancel', (id) => cancelRide(id, 'motorista_cancelou'))} disabled={!!busy} />
+          <AppButton
+            title="Cancelar corrida"
+            variant="ghost"
+            onPress={() => act('cancel', (id) => cancelRide(id, 'motorista_cancelou'))}
+            disabled={Boolean(busy)}
+          />
         ) : null}
 
         {error ? (
-          <AppCard>
-            <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
+          <AppCard style={styles.sectionCard}>
+            <Text style={styles.errorText}>{error}</Text>
             {PAYMENT_STATUSES.has(status) ? (
-              <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>
+              <Text style={styles.caption}>
                 Nenhum dado de pagamento foi apagado. Confira o valor e tente novamente.
               </Text>
             ) : null}
           </AppCard>
         ) : null}
       </ScrollView>
+
+      <DriverActiveRidePrimaryFooter
+        action={primaryAction}
+        onPress={runPrimaryAction}
+      />
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  scroll: { flex: 1 },
+  content: {
+    flexGrow: 1,
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
+  invalidRide: {
+    fontFamily,
+    color: colors.danger,
+    ...typography.small,
+  },
+  sectionCard: { gap: spacing.md },
+  sectionTitle: {
+    fontFamily,
+    color: colors.text,
+    ...typography.bodyBold,
+  },
+  sectionCopy: {
+    fontFamily,
+    color: colors.textMuted,
+    ...typography.small,
+    lineHeight: 19,
+  },
+  caption: {
+    fontFamily,
+    color: colors.textFaint,
+    ...typography.caption,
+  },
+  errorCaption: {
+    fontFamily,
+    color: colors.danger,
+    ...typography.caption,
+  },
+  successText: { color: colors.success },
+  warningText: { color: colors.warning },
+  errorText: {
+    fontFamily,
+    color: colors.danger,
+    ...typography.small,
+  },
+  paymentFailureTitle: {
+    fontFamily,
+    color: colors.danger,
+    ...typography.bodyBold,
+  },
+  successIcon: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.success,
+  },
+  successIconText: {
+    fontFamily,
+    color: colors.white,
+    fontSize: 52,
+    lineHeight: 58,
+  },
+  successTitle: {
+    fontFamily,
+    color: colors.success,
+    textAlign: 'center',
+    ...typography.h3,
+  },
+  successAmount: {
+    fontFamily,
+    color: colors.text,
+    textAlign: 'center',
+    ...typography.bodyBold,
+  },
+  successCopy: {
+    fontFamily,
+    color: colors.textMuted,
+    textAlign: 'center',
+    ...typography.small,
+  },
+});
