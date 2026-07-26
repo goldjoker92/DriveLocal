@@ -15,6 +15,7 @@ import DriverDeviceHealthGuard from '../components/DriverDeviceHealthGuard';
 import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
 import RideQuickMessagesGuard from '../components/RideQuickMessagesGuard';
 import AccountPrivacyShortcut from '../components/AccountPrivacyShortcut';
+import SupportShortcut from '../components/SupportShortcut';
 import { colors } from '../constants/colors';
 import { useRideNotifications } from '../hooks/useRideNotifications';
 import {
@@ -48,6 +49,8 @@ export default function RootLayout() {
             <DriverPassengerWaitGuard route={pathname} />
             {/* Server-catalogued messages only; no free text or contact exposure. */}
             <RideQuickMessagesGuard route={pathname} />
+            {/* Support is callable-only and automatically receives safe ride context. */}
+            <SupportShortcut route={pathname} />
             {/* Temporary compact entry until the full cockpit redesign lands. */}
             <AccountPrivacyShortcut route={pathname} />
             <Stack
