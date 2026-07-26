@@ -73,7 +73,7 @@ function dataPayload(event) {
     eventType: String(event.eventType),
     rideId: String(event.rideId),
     offerId: event.offerId ? String(event.offerId) : '',
-    messageCode: event.messageCode ? String(event.messageCode) : '',
+    ...(event.messageCode ? { messageCode: String(event.messageCode) } : {}),
     recipientRole: String(event.recipientRole),
     route: event.route ? String(event.route) : '',
     traceId: event.traceId ? String(event.traceId) : '',
