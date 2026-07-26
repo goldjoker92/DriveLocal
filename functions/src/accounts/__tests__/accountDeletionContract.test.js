@@ -6,7 +6,7 @@ function source(relativePath) {
 }
 
 describe('account deletion integration contracts', () => {
-  it('exports both the authenticated request and the server processor', () => {
+  it('exports both the authenticated request and the retryable server processor', () => {
     const index = source('src/index.js');
     const bindings = source('src/accounts/callables.js');
 
@@ -14,6 +14,8 @@ describe('account deletion integration contracts', () => {
     expect(index).toContain('processAccountDeletionRequest');
     expect(bindings).toContain('onDocumentCreated');
     expect(bindings).toContain('ACCOUNT_DELETION_REQUESTS');
+    expect(bindings).toContain('retry: true');
+    expect(bindings).toContain('timeoutSeconds: 540');
   });
 
   it('deletes operational PII and both private/public driver storage prefixes', () => {
@@ -37,6 +39,20 @@ describe('account deletion integration contracts', () => {
     expect(policy).toContain('qrCodeBase64: deleteField');
     expect(policy).toContain('idempotencyKey: deleteField');
     expect(policy).toContain('driverId: anonymousSubjectId');
+    expect(policy).toContain("update.status = 'cancelled'");
+  });
+
+  it('blocks late provider callbacks from recreating deleted wallet or subscription state', () => {
+    const verification = source('src/payments/verifyAndApply.js');
+    const barrierIndex = verification.indexOf('if (accountDeletedPayment(pay))');
+    const walletIndex = verification.indexOf('applyWalletTopup({');
+    const subscriptionIndex = verification.indexOf('applySubscription({');
+
+    expect(barrierIndex).toBeGreaterThan(-1);
+    expect(barrierIndex).toBeLessThan(walletIndex);
+    expect(barrierIndex).toBeLessThan(subscriptionIndex);
+    expect(verification).toContain('payment.account_deleted_ignored');
+    expect(verification).toContain('account_deleted_provider_payment');
   });
 
   it('deletes Firebase Auth only after profile, storage and record cleanup', () => {
