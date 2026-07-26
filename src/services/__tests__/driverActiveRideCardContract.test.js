@@ -10,6 +10,7 @@ describe('block 15 permanent active ride card contract', () => {
     const layout = source('src/app/(driver)/_layout.jsx');
 
     expect(layout).toContain("import DriverActiveRideCard from '../../components/DriverActiveRideCard'");
+    expect(layout).toContain('const [activeRideId, setActiveRideId] = useState(null)');
     expect(layout).toContain('const [activeOffer, setActiveOffer] = useState(null)');
     expect(layout).toContain("if (offer.status === 'accepted')");
     expect(layout).toContain('setActiveOffer(offer)');
@@ -21,6 +22,20 @@ describe('block 15 permanent active ride card contract', () => {
     const stackIndex = layout.indexOf('<Stack screenOptions');
     expect(cardIndex).toBeGreaterThan(-1);
     expect(stackIndex).toBeGreaterThan(cardIndex);
+  });
+
+  it('restores the exact accepted offer from the authoritative driver activeRideId', () => {
+    const layout = source('src/app/(driver)/_layout.jsx');
+    const recovery = source('src/services/networkRecoveryPolicy.js');
+
+    expect(layout).toContain('setActiveRideId(remote?.activeRideId || null)');
+    expect(layout).toContain('restore_listener.started');
+    expect(layout).toContain('restore_listener.succeeded');
+    expect(layout).toContain('restore_listener.failed');
+    expect(layout).toContain('offer.rideId === activeRideId');
+    expect(layout).toContain('activeRideId\n    );');
+    expect(recovery).toContain("'disputed'");
+    expect(recovery).not.toMatch(/TERMINAL_RIDE_STATUSES[^\n]*disputed/);
   });
 
   it('uses only the accepted driver offer projection and real fare data', () => {
@@ -55,11 +70,15 @@ describe('block 15 permanent active ride card contract', () => {
 
   it('logs restoration without names, addresses, exact fare or photo paths', () => {
     const component = source('src/components/DriverActiveRideCard.jsx');
+    const layout = source('src/app/(driver)/_layout.jsx');
 
     expect(component).toContain('[DRIVER_ACTIVE_RIDE] card.rendered');
     expect(component).toContain('passenger_photo.load_requested');
     expect(component).toContain('passenger_photo.load_succeeded');
     expect(component).toContain('passenger_photo.load_failed');
+    expect(layout).toContain('[DRIVER_ACTIVE_RIDE] restore_listener.started');
+    expect(layout).toContain('[DRIVER_ACTIVE_RIDE] restore_listener.succeeded');
+    expect(layout).toContain('[DRIVER_ACTIVE_RIDE] restore_listener.failed');
     expect(component).not.toContain('passengerFirstName: card.passengerFirstName');
     expect(component).not.toContain('pickupLabel: card.pickupLabel');
     expect(component).not.toContain('destinationLabel: card.destinationLabel');
