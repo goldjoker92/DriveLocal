@@ -69,11 +69,13 @@ describe('permanent driver active ride card', () => {
     expect(card.rideId).toBeNull();
   });
 
-  it('uses closed vehicle labels and safe real-data fallbacks', () => {
+  it('uses closed vehicle labels and neutral real-data fallbacks', () => {
     expect(driverActiveRideVehicle('moto')).toEqual({ type: 'moto', emoji: '🏍', label: 'Moto' });
     expect(driverActiveRideVehicle('car')).toEqual({ type: 'car', emoji: '🚗', label: 'Carro' });
+    expect(driverActiveRideVehicle(null)).toEqual({ type: 'unknown', emoji: '🚘', label: 'Veículo' });
 
     const card = deriveDriverActiveRideCard(acceptedOffer({
+      vehicleType: null,
       acceptedPassengerPublic: null,
       exactPickup: null,
       estimatedFareCentavos: null,
@@ -83,6 +85,7 @@ describe('permanent driver active ride card', () => {
     expect(card.passengerFirstName).toBe('Passageiro');
     expect(card.pickupLabel).toBe('Local de embarque');
     expect(card.destinationLabel).toBe('Destino em carregamento…');
-    expect(card.fareCentavos).toBe(0);
+    expect(card.fareCentavos).toBeNull();
+    expect(card.vehicle.label).toBe('Veículo');
   });
 });
