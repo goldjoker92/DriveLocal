@@ -30,12 +30,21 @@ const STATUS_LABEL = {
   manual_review: 'Em análise. Aguarde a confirmação.',
 };
 
-export default function DriverPixPaymentSheet({ payment, onClose }) {
+export default function DriverPixPaymentSheet({ payment, onClose, onStatusChange }) {
   const [status, setStatus] = useState(payment ? payment.status : null);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef(null);
 
   const localPaymentId = payment ? payment.localPaymentId : null;
+
+  useEffect(() => {
+    setStatus(payment ? payment.status : null);
+    setCopied(false);
+  }, [payment?.localPaymentId, payment?.status]);
+
+  useEffect(() => {
+    if (status && onStatusChange) onStatusChange(status);
+  }, [status, onStatusChange]);
 
   useEffect(() => {
     if (!localPaymentId || isFinalPaymentStatus(status)) return undefined;
