@@ -156,7 +156,8 @@ export function expandWalletTransaction(transaction = {}) {
         detail: transaction.rideId ? 'Corrida cancelada ou reserva liberada' : null,
       })];
     case 'commission_capture': {
-      const captured = optionalCentavos(transaction.amountCentavos) ?? optionalCentavos(transaction.capturedCentavos);
+      const captured = optionalCentavos(transaction.amountCentavos)
+        ?? optionalCentavos(transaction.capturedCentavos);
       const released = optionalCentavos(transaction.releasedCentavos);
       const rows = [];
       if (captured != null && captured > 0) {
@@ -284,11 +285,17 @@ export function deriveDriverWalletView(liveDriver, snapshot, nowMs = Date.now())
     driver.walletHeldCentavos ?? serverWallet.heldCentavos
   );
   const serverPolicy = snapshot?.topupPolicy || {};
-  const locked = typeof serverPolicy.locked === 'boolean'
-    ? serverPolicy.locked
-    : commercial.freePeriodActive;
   const unlockAtMs = optionalTimestamp(serverPolicy.unlockAtMs)
     || optionalTimestamp(commercial.freePeriodUntilMs);
+  const policyLocked = typeof serverPolicy.locked === 'boolean'
+    ? serverPolicy.locked
+    : commercial.freePeriodActive;
+  // A snapshot may remain mounted across the exact end of the free period. The
+  // known server unlock timestamp must release the UI without requiring a restart.
+  const locked = policyLocked && (!unlockAtMs || unlockAtMs > nowMs);
+  const projectedPresets = safeArray(serverPolicy.presetCentavos)
+    .map((value) => optionalCentavos(value))
+    .filter((value) => value != null);
 
   return {
     version: DRIVER_WALLET_VIEW_VERSION,
@@ -298,8 +305,8 @@ export function deriveDriverWalletView(liveDriver, snapshot, nowMs = Date.now())
     balancesReady: balanceCentavos != null && availableCentavos != null && heldCentavos != null,
     topupLocked: locked,
     topupUnlockAtMs: unlockAtMs,
-    topupPresets: safeArray(serverPolicy.presetCentavos).length > 0
-      ? serverPolicy.presetCentavos
+    topupPresets: projectedPresets.length > 0
+      ? projectedPresets
       : [...WALLET_TOPUP_PRESETS],
     topupMinCentavos: optionalCentavos(serverPolicy.minCentavos) ?? WALLET_TOPUP_MIN_CENTAVOS,
     topupMaxCentavos: optionalCentavos(serverPolicy.maxCentavos) ?? WALLET_TOPUP_MAX_CENTAVOS,
