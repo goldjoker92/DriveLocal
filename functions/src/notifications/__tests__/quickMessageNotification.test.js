@@ -55,6 +55,28 @@ describe('quick message notifications', () => {
     expect(payload).not.toHaveProperty('email');
   });
 
+  it('does not add an empty messageCode to classic ride notifications', () => {
+    const payload = dataPayload({
+      notificationId: 'notification-2',
+      eventType: C.NOTIFICATION_EVENT.RIDE_ARRIVED,
+      rideId: 'ride-2',
+      offerId: null,
+      recipientRole: 'passenger',
+      route: '/driver-accepted',
+      traceId: 'trace-2',
+    });
+    expect(payload).toEqual({
+      notificationId: 'notification-2',
+      eventType: C.NOTIFICATION_EVENT.RIDE_ARRIVED,
+      rideId: 'ride-2',
+      offerId: '',
+      recipientRole: 'passenger',
+      route: '/driver-accepted',
+      traceId: 'trace-2',
+    });
+    expect(payload).not.toHaveProperty('messageCode');
+  });
+
   it('keeps the existing ride-status channel and Android priority', () => {
     const message = buildMulticastMessage(event(), ['token-1']);
     expect(message).toMatchObject({
