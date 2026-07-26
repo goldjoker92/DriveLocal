@@ -23,7 +23,7 @@ async function seedPayment(db, id, driverId, amountCentavos) {
 }
 
 describe('paid subscription renewal application', () => {
-  it('extends an active plan from its current expiration and applies only once', async () => {
+  it('extends an active Timestamp plan from its current expiration and applies only once', async () => {
     const db = makeFakeFirestore();
     const currentExpiry = NOW + 12 * DAY_MS;
     await db.collection('drivers').doc('d1').set({
@@ -31,7 +31,7 @@ describe('paid subscription renewal application', () => {
       vehicleType: 'moto',
       subscriptionActive: true,
       subscriptionStatus: 'active',
-      subscriptionExpiresAt: currentExpiry,
+      subscriptionExpiresAt: { toMillis: () => currentExpiry },
       approvedAtMs: NOW - 40 * DAY_MS,
       founderEligible: false,
       founderNumber: null,
@@ -72,7 +72,7 @@ describe('paid subscription renewal application', () => {
     expect(countCollection(db, 'subscriptionPayments')).toBe(1);
   });
 
-  it('starts an expired plan from the provider-confirmed processing time', async () => {
+  it('starts an expired Date plan from the provider-confirmed processing time', async () => {
     const db = makeFakeFirestore();
     const processingMs = NOW + 2 * DAY_MS;
     await db.collection('drivers').doc('d1').set({
@@ -80,7 +80,7 @@ describe('paid subscription renewal application', () => {
       vehicleType: 'car',
       subscriptionActive: false,
       subscriptionStatus: 'required',
-      subscriptionExpiresAt: NOW - DAY_MS,
+      subscriptionExpiresAt: new Date(NOW - DAY_MS),
       commissionFreeUntil: NOW - DAY_MS,
       freeRideCountUsed: 5,
     });
