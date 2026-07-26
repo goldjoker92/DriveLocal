@@ -6,49 +6,11 @@
 //     whether an approved driver may currently receive rides.
 //
 // canReceiveRides is COMPUTED here on demand and is never stored as a
-// client-authoritative flag.
+// client-authoritative flag. Commercial dates, rates and subscription grace come
+// exclusively from commercialPolicy.js so dispatch and acceptance cannot diverge.
 
 const { activeRiskRestrictionState } = require('../risk/restrictions');
-const C = require('./constants');
-
-/**
- * Normalizes Firestore Timestamp / Date / epoch-ms values to epoch-ms.
- *
- * Never use Number(timestamp) for Firestore Timestamp objects: Timestamp.valueOf
- * returns a comparison string, not epoch milliseconds. That made founder free
- * windows and paid subscriptions look expired in backend dispatch even though
- * the mobile app displayed them as active.
- *
- * @param {unknown} value
- * @returns {number}
- */
-function toMillis(value) {
-  if (value == null) return 0;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  if (value instanceof Date) return value.getTime();
-
-  if (typeof value === 'object') {
-    const candidate = /** @type {{toMillis?:()=>number,toDate?:()=>Date,seconds?:number,nanoseconds?:number}} */ (value);
-
-    if (typeof candidate.toMillis === 'function') {
-      const millis = Number(candidate.toMillis());
-      return Number.isFinite(millis) ? millis : 0;
-    }
-
-    if (typeof candidate.toDate === 'function') {
-      const date = candidate.toDate();
-      const millis = date instanceof Date ? date.getTime() : 0;
-      return Number.isFinite(millis) ? millis : 0;
-    }
-
-    if (Number.isFinite(candidate.seconds)) {
-      const nanos = Number.isFinite(candidate.nanoseconds) ? Number(candidate.nanoseconds) : 0;
-      return Number(candidate.seconds) * 1000 + Math.floor(nanos / 1e6);
-    }
-  }
-
-  return 0;
-}
+const { resolveCommercialPolicy, toMillis } = require('./commercialPolicy');
 
 /**
  * Minimal, safe projection of a driver document for callable responses.
@@ -74,47 +36,51 @@ function safeDriverView(driverId, d = {}) {
 }
 
 /**
- * Authoritative ride-eligibility evaluation. Commission-free eligibility is
- * independent from subscription eligibility.
- *   - founders: subscription-covered until subscriptionFreeUntil, then need an
- *     active subscription;
- *   - non-founders: covered for their first FREE_RIDE_LIMIT rides, then need an
- *     active subscription;
- *   - unresolved payment review or an active admin risk restriction blocks NEW
- *     offers, without changing the wallet or the old ride hold.
+ * Authoritative ride-eligibility evaluation.
+ *
+ * Commercial invariants:
+ *   - all drivers are at 0% commission for 60 days from approval;
+ *   - founders #1..#100 are subscription-covered for those 60 days;
+ *   - drivers #101+ have at most five completed rides without subscription and
+ *     only while the same 60-day window is active;
+ *   - after day 60, an active paid subscription is mandatory for everyone.
+ *
+ * Unresolved payment review or an active admin risk restriction blocks NEW
+ * offers without changing an accepted ride or its frozen financial snapshot.
+ *
  * @param {object} d driver document data
  * @param {{now:()=>number|Date|object}} clock
  */
 function evaluateRideEligibility(d = {}, clock) {
   const rawNow = clock && typeof clock.now === 'function' ? clock.now() : Date.now();
   const now = toMillis(rawNow) || Date.now();
-  const isFounder = d.founderEligible === true;
+  const commercial = resolveCommercialPolicy(d, now);
   const approved = d.verificationStatus === 'approved';
   const blocked = d.isBlocked === true;
-
-  const commissionFreeUntilMs = toMillis(d.commissionFreeUntil);
-  const subscriptionExpiresAtMs = toMillis(d.subscriptionExpiresAt);
-  const subscriptionFreeUntilMs = toMillis(d.subscriptionFreeUntil || d.founderFreeUntil);
-
-  const commissionFree = commissionFreeUntilMs > now;
-  const activeSubscription = d.subscriptionActive === true && subscriptionExpiresAtMs > now;
-  const founderCovered = isFounder && subscriptionFreeUntilMs > now;
-  const freeRidesRemaining = !isFounder && Number(d.freeRideCountUsed || 0) < C.FREE_RIDE_LIMIT;
-  const subscriptionCovered = founderCovered || freeRidesRemaining || activeSubscription;
   const financialReviewRequired = d.financialReviewRequired === true;
   const temporaryRestriction = activeRiskRestrictionState(d, now);
   const riskRestricted = financialReviewRequired || temporaryRestriction.active;
 
   return {
-    isFounder,
-    commissionFree,
-    subscriptionCovered,
-    requiresSubscription: !subscriptionCovered,
+    isFounder: commercial.founder,
+    commissionFree: commercial.freePeriodActive,
+    commissionBps: commercial.commissionBps,
+    standardCommissionBps: commercial.standardCommissionBps,
+    freePeriodUntilMs: commercial.freePeriodUntilMs,
+    subscriptionCovered: commercial.subscriptionCovered,
+    requiresSubscription: commercial.subscriptionRequired,
+    subscriptionCoverageSource: commercial.subscriptionCoverageSource,
+    freeRidesRemaining: commercial.freeRidesRemaining,
+    commercialPolicyVersion: commercial.policyVersion,
     financialReviewRequired,
     riskRestricted,
     riskRestrictionUntilMs: temporaryRestriction.untilMs,
     // Derived on the fly — never persisted as an authoritative flag.
-    canReceiveRides: approved && !blocked && !riskRestricted && subscriptionCovered,
+    canReceiveRides:
+      approved
+      && !blocked
+      && !riskRestricted
+      && commercial.subscriptionCovered,
   };
 }
 
