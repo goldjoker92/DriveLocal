@@ -8,8 +8,8 @@ function source(relativePath) {
 describe('account privacy client contracts', () => {
   it('requires password reauthentication before the deletion callable', () => {
     const service = source('src/services/accountDeletionService.js');
-    const reauthIndex = service.indexOf('reauthenticateWithCredential');
-    const tokenIndex = service.indexOf('getIdToken(true)');
+    const reauthIndex = service.indexOf('await reauthenticateWithCredential');
+    const tokenIndex = service.indexOf('await user.getIdToken(true)');
     const callableIndex = service.indexOf("httpsCallable(functions, 'requestAccountDeletionSecure')");
 
     expect(reauthIndex).toBeGreaterThan(-1);
@@ -30,6 +30,7 @@ describe('account privacy client contracts', () => {
     expect(screen).toContain('Digite EXCLUIR');
     expect(screen).toContain('Senha atual');
     expect(screen).toContain('requestAccountDeletion(password)');
+    expect(screen).toContain('corrida ativa ou enquanto uma disputa estiver aberta');
   });
 
   it('exposes the privacy center from both user dashboards', () => {
