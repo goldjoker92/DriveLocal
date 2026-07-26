@@ -4,22 +4,11 @@ import AppCard from './AppCard';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
+import { safeAcceptedPassengerFirstName } from '../utils/passengerPublicIdentity';
 import {
   getAcceptedPassengerPhotoDownloadUrl,
   isAcceptedPassengerPhotoPath,
 } from '../services/passengerPublicPhotoService';
-
-export function safeAcceptedPassengerFirstName(identity) {
-  const normalized = typeof identity?.firstName === 'string'
-    ? identity.firstName.normalize('NFKC').trim().replace(/\s+/g, ' ')
-    : '';
-  if (!normalized || normalized.includes('@')) return 'Passageiro';
-  const firstToken = normalized.split(' ')[0]
-    .replace(/[^\p{L}\p{M}'’-]/gu, '')
-    .replace(/^['’\-]+|['’\-]+$/g, '')
-    .slice(0, 40);
-  return /\p{L}/u.test(firstToken) ? firstToken : 'Passageiro';
-}
 
 function shortRideId(value) {
   const text = typeof value === 'string' ? value : '';
