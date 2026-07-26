@@ -20,7 +20,7 @@ import { getPaymentStatus, isFinalPaymentStatus } from '../services/paymentsServ
 const POLL_INTERVAL_MS = 5000;
 
 // PT-BR labels for each normalized status.
-const STATUS_LABEL = {
+const DEFAULT_STATUS_LABELS = {
   pending: 'Aguardando pagamento…',
   paid: 'Pagamento confirmado!',
   expired: 'Pix expirado. Gere um novo.',
@@ -30,7 +30,13 @@ const STATUS_LABEL = {
   manual_review: 'Em análise. Aguarde a confirmação.',
 };
 
-export default function DriverPixPaymentSheet({ payment, onClose, onStatusChange }) {
+export default function DriverPixPaymentSheet({
+  payment,
+  onClose,
+  onStatusChange,
+  title = 'Pagar com Pix',
+  statusLabels,
+}) {
   const [status, setStatus] = useState(payment ? payment.status : null);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef(null);
@@ -73,19 +79,21 @@ export default function DriverPixPaymentSheet({ payment, onClose, onStatusChange
   if (!payment) return null;
 
   function onCopy() {
+    if (!payment.qrCode) return;
     // Web: use the Clipboard API. Native: the code is selectable (long-press to
     // copy) — no extra dependency required.
     if (Platform.OS === 'web' && globalThis.navigator && globalThis.navigator.clipboard) {
-      globalThis.navigator.clipboard.writeText(payment.qrCode || '');
+      globalThis.navigator.clipboard.writeText(payment.qrCode);
     }
     setCopied(true);
   }
 
-  const label = STATUS_LABEL[status] || STATUS_LABEL.pending;
+  const labels = { ...DEFAULT_STATUS_LABELS, ...(statusLabels || {}) };
+  const label = labels[status] || labels.pending;
 
   return (
     <AppCard>
-      <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Pagar com Pix</Text>
+      <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>{title}</Text>
 
       <Text style={[{ fontFamily, color: colors.text, alignSelf: 'center' }, typography.bodyBold]}>
         {formatBRL(payment.amountCentavos)}
@@ -126,7 +134,11 @@ export default function DriverPixPaymentSheet({ payment, onClose, onStatusChange
         </Text>
       ) : null}
 
-      <AppButton title={copied ? 'Código copiado' : 'Copiar código Pix'} onPress={onCopy} />
+      <AppButton
+        title={copied ? 'Código copiado' : 'Copiar código Pix'}
+        onPress={onCopy}
+        disabled={!payment.qrCode}
+      />
 
       <Text style={[{ fontFamily, color: colors.textMuted, alignSelf: 'center' }, typography.small]}>
         {label}
