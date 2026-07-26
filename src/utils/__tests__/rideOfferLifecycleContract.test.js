@@ -55,12 +55,17 @@ describe('ride offer lifecycle contract', () => {
     expect(decline).toContain('{ activeRideId: null, updatedAt: ts() }');
   });
 
-  it('mirrors assigned and terminal ride states without timestamp coercion', () => {
+  it('mirrors assigned and terminal ride states with centralized timestamp normalization', () => {
     const acceptance = source('functions/src/rides/acceptOffer.js');
+    const commercialPolicy = source('functions/src/drivers/commercialPolicy.js');
     const lifecycle = source('functions/src/rides/lifecycle.js');
 
     expect(acceptance).toContain('driverRideStatus: C.RIDE_STATUS.ASSIGNED');
-    expect(acceptance).toContain('toMillis(driver.commissionFreeUntil)');
+    expect(acceptance).toContain("require('../drivers/commercialPolicy')");
+    expect(acceptance).toContain('buildCommercialPolicySnapshot(driver, nowMs)');
+    expect(acceptance).toContain('commercialPolicySnapshot');
+    expect(commercialPolicy).toContain('function toMillis(value)');
+    expect(commercialPolicy).toContain('toMillis(driver.commissionFreeUntil || driver.founderExpiresAt)');
     expect(lifecycle).toContain('setDriverOfferStatusTx');
     expect(lifecycle).toContain('C.RIDE_STATUS.COMPLETED');
     expect(lifecycle).toContain('C.RIDE_STATUS.CANCELLED');
