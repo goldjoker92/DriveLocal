@@ -24,7 +24,7 @@ export const ADMIN_ALERT_TITLES = Object.freeze({
 export const ADMIN_ALERT_ACTIONS = Object.freeze({
   review_support_ticket: 'ABRIR TICKETS',
   review_ride_dispute: 'ABRIR DISPUTAS',
-  review_payment: 'ABRIR RECARGAS',
+  review_payment: 'ABRIR PAINEL',
   review_risk_case: 'ABRIR ANTIFRAUDE',
   review_account_deletion: 'ABRIR PAINEL',
 });
