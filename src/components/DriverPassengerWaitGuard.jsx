@@ -116,7 +116,7 @@ export default function DriverPassengerWaitGuard({ route }) {
         waitElapsedMs: elapsedMs,
       });
     } catch (requestError) {
-      const serverRemainingMs = Number(requestError?.details?.remainingMs);
+      const serverRemainingMs = Number(requestError?.details?.metadata?.remainingMs);
       setError(Number.isFinite(serverRemainingMs) && serverRemainingMs > 0
         ? `Aguarde mais ${formatWaitDuration(serverRemainingMs)}.`
         : 'Não foi possível registrar o passageiro como ausente. Verifique a corrida e tente novamente.');
