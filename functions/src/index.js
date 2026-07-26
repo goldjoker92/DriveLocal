@@ -13,6 +13,10 @@ exports.health = health;
 const clientErrorCallables = require('./clientErrors/callables');
 exports.reportClientErrorSecure = clientErrorCallables.reportClientErrorSecure;
 
+const accountCallables = require('./accounts/callables');
+exports.requestAccountDeletionSecure = accountCallables.requestAccountDeletionSecure;
+exports.processAccountDeletionRequest = accountCallables.processAccountDeletionRequest;
+
 const driverCallables = require('./drivers/callables');
 exports.approveDriverSecure = driverCallables.approveDriverSecure;
 exports.rejectDriverSecure = driverCallables.rejectDriverSecure;
