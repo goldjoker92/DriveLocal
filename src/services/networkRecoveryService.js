@@ -22,6 +22,7 @@ const RIDE_RECOVERY_KEY = '@drivelocal/ride-recovery-v1';
 const PENDING_ACTIONS_KEY = '@drivelocal/pending-network-actions-v1';
 const CONNECTIVITY_PROBE_TIMEOUT_MS = 12 * 1000;
 const CONNECTIVITY_PROBE_MIN_INTERVAL_MS = 8 * 1000;
+const IDENTICAL_HINT_WRITE_GRACE_MS = 30 * 1000;
 
 let networkState = Object.freeze({
   status: NETWORK_STATUS.UNKNOWN,
@@ -36,6 +37,7 @@ const subscribers = new Set();
 let probeInFlight = null;
 let lastProbeStartedAtMs = 0;
 let pendingActionsMutation = Promise.resolve();
+let pendingActionsCache = null;
 
 function trace(event, details = {}, level = 'log') {
   const method = console[level] || console.log;
@@ -60,7 +62,7 @@ function publish(patch) {
     try {
       listener(networkState);
     } catch (_error) {
-      // One visual subscriber must never break connectivity tracking for the app.
+      // A visual subscriber must never break the shared state.
     }
   });
   return networkState;
@@ -87,9 +89,7 @@ export function markNetworkActivitySucceeded(source = 'unknown') {
     lastFailureCategory: null,
     lastSource: source,
   });
-  if (recovered) {
-    trace('connection.recovered', { source, result: 'online' });
-  }
+  if (recovered) trace('connection.recovered', { source, result: 'online' });
   return next;
 }
 
@@ -171,7 +171,7 @@ export async function runNetworkAwareAction(
       durationMs: Date.now() - startedAtMs,
       result: isConnectivityError(error) ? 'confirmation_uncertain' : 'rejected',
     }, 'warn');
-    error.networkCategory = category;
+    if (error && typeof error === 'object') error.networkCategory = category;
     throw error;
   }
 }
@@ -194,15 +194,28 @@ async function readJson(key, fallback) {
   }
 }
 
+async function loadPendingActions(nowMs) {
+  const source = pendingActionsCache || await readJson(PENDING_ACTIONS_KEY, {});
+  const pruned = Object.fromEntries(
+    Object.entries(source).filter(([, value]) => Number(value?.expiresAtMs || 0) > nowMs)
+  );
+  pendingActionsCache = pruned;
+  return pruned;
+}
+
 function mutatePendingActions(mutator) {
   const operation = pendingActionsMutation.then(async () => {
     const nowMs = Date.now();
-    const current = await readJson(PENDING_ACTIONS_KEY, {});
-    const pruned = Object.fromEntries(
-      Object.entries(current).filter(([, value]) => Number(value?.expiresAtMs || 0) > nowMs)
-    );
-    const result = await mutator(pruned, nowMs);
-    await AsyncStorage.setItem(PENDING_ACTIONS_KEY, JSON.stringify(pruned));
+    const actions = await loadPendingActions(nowMs);
+    const result = await mutator(actions, nowMs);
+    pendingActionsCache = { ...actions };
+    try {
+      await AsyncStorage.setItem(PENDING_ACTIONS_KEY, JSON.stringify(pendingActionsCache));
+    } catch (_error) {
+      // Keep the in-memory key for this process. Local persistence failure must not
+      // turn an already-confirmed server action into a false business failure.
+      trace('idempotency.persistence_failed', { result: 'memory_only' }, 'warn');
+    }
     return result;
   });
   pendingActionsMutation = operation.catch(() => undefined);
@@ -210,7 +223,8 @@ function mutatePendingActions(mutator) {
 }
 
 async function pendingIdempotencyKey(actionKey, prefix) {
-  const actionHash = stableLocalOwnerHash(actionKey);
+  const ownerHash = stableLocalOwnerHash(auth.currentUser?.uid || 'anonymous');
+  const actionHash = stableLocalOwnerHash(`${ownerHash}:${actionKey}`);
   return mutatePendingActions((actions, nowMs) => {
     const existing = actions[actionHash];
     if (existing?.idempotencyKey && Number(existing.expiresAtMs || 0) > nowMs) {
@@ -253,13 +267,11 @@ export async function runRecoverableAction({
       () => execute(pending.idempotencyKey),
       { timeoutMs }
     );
-    await clearPendingAction(pending.actionHash, pending.idempotencyKey);
+    await clearPendingAction(pending.actionHash, pending.idempotencyKey).catch(() => undefined);
     return result;
   } catch (error) {
     if (!isConnectivityError(error)) {
-      // A definitive server/business rejection is not uncertain and must not poison
-      // a future, legitimately different attempt with an old idempotency key.
-      await clearPendingAction(pending.actionHash, pending.idempotencyKey);
+      await clearPendingAction(pending.actionHash, pending.idempotencyKey).catch(() => undefined);
     }
     throw error;
   }
@@ -280,8 +292,8 @@ export async function probeConnectivity({ force = false } = {}) {
   }
   probeInFlight = (async () => {
     try {
-      // Force-refresh talks to Firebase Auth and therefore acts as a bounded network
-      // probe without adding a native connectivity dependency or an external tracker.
+      // Force-refresh talks to Firebase Auth and acts as a bounded network probe
+      // without adding a native connectivity dependency or external tracker.
       await withTimeout('connectivity_probe', () => user.getIdToken(true), CONNECTIVITY_PROBE_TIMEOUT_MS);
       return markNetworkActivitySucceeded('auth_probe');
     } catch (error) {
@@ -304,12 +316,24 @@ export async function saveRideRecoveryHint({ uid, role, rideId, status }) {
     await clearRideRecoveryHint({ uid, rideId });
     return null;
   }
+  const nowMs = Date.now();
+  const ownerHash = stableLocalOwnerHash(uid);
+  const current = await readJson(RIDE_RECOVERY_KEY, null);
+  if (
+    current?.ownerHash === ownerHash
+    && current?.role === role
+    && current?.rideId === rideId
+    && current?.status === status
+    && nowMs - Number(current?.recordedAtMs || 0) < IDENTICAL_HINT_WRITE_GRACE_MS
+  ) {
+    return current;
+  }
   const hint = sanitizeRideRecoveryHint({
-    ownerHash: stableLocalOwnerHash(uid),
+    ownerHash,
     role,
     rideId,
     status,
-    recordedAtMs: Date.now(),
+    recordedAtMs: nowMs,
   });
   if (!hint) return null;
   await AsyncStorage.setItem(RIDE_RECOVERY_KEY, JSON.stringify(hint));
@@ -333,7 +357,7 @@ export async function clearRideRecoveryHint({ uid = null, rideId = null } = {}) 
   if (!raw) return;
   if (uid && raw.ownerHash !== stableLocalOwnerHash(uid)) return;
   if (rideId && raw.rideId !== rideId) return;
-  await AsyncStorage.removeItem(RIDE_RECOVERY_KEY);
+  await AsyncStorage.removeItem(RIDE_RECOVERY_KEY).catch(() => undefined);
   trace('ride_hint.cleared', { result: 'terminal_or_account_change' });
 }
 
@@ -351,8 +375,6 @@ export function networkErrorMessage(error, fallback = 'Não foi possível conclu
   return error?.details?.message || error?.message || fallback;
 }
 
-// Test-only reset keeps executable unit tests isolated without exposing pending
-// action contents to production callers.
 export async function __resetNetworkRecoveryForTests() {
   networkState = Object.freeze({
     status: NETWORK_STATUS.UNKNOWN,
@@ -366,5 +388,6 @@ export async function __resetNetworkRecoveryForTests() {
   probeInFlight = null;
   lastProbeStartedAtMs = 0;
   pendingActionsMutation = Promise.resolve();
+  pendingActionsCache = null;
   await AsyncStorage.multiRemove([RIDE_RECOVERY_KEY, PENDING_ACTIONS_KEY]);
 }
