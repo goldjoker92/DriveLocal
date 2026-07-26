@@ -10,6 +10,9 @@ if (admin.apps.length === 0) {
 const { health } = require('./diagnostics/health');
 exports.health = health;
 
+const clientErrorCallables = require('./clientErrors/callables');
+exports.reportClientErrorSecure = clientErrorCallables.reportClientErrorSecure;
+
 const driverCallables = require('./drivers/callables');
 exports.approveDriverSecure = driverCallables.approveDriverSecure;
 exports.rejectDriverSecure = driverCallables.rejectDriverSecure;
