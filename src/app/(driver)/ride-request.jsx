@@ -24,6 +24,10 @@ import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 
 const KNOWN_VEHICLE_TYPES = new Set(['moto', 'car']);
 
+function hasFiniteOfferNumber(value) {
+  return value != null && value !== '' && Number.isFinite(Number(value));
+}
+
 export default function RideRequest() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -90,8 +94,8 @@ export default function RideRequest() {
           status: nextOffer.status,
           vehicleType: nextOffer.vehicleType,
           hasPickupRegion: Boolean(nextOffer.pickupPreview?.label),
-          hasPickupDistance: Number.isFinite(Number(nextOffer.distanceToPickupMeters)),
-          hasFare: Number.isFinite(Number(nextOffer.estimatedFareCentavos)),
+          hasPickupDistance: hasFiniteOfferNumber(nextOffer.distanceToPickupMeters),
+          hasFare: hasFiniteOfferNumber(nextOffer.estimatedFareCentavos),
         });
       }
       if (nextOffer?.status === 'accepted' && nextOffer.exactPickup) {
@@ -363,7 +367,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   acceptedCard: { gap: spacing.md },
-  flex: { flex: 1 },
   stack: { gap: spacing.sm },
   privacyCopy: {
     fontFamily,
