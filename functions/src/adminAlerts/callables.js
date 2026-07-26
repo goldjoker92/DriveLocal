@@ -7,14 +7,14 @@ const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const admin = require('firebase-admin');
 
 const { withCallableBoundary } = require('../errors/boundary');
-const { createLoggerContext, logError } = require('../logging/logger');
+const { createLoggerContext, logError, shortHash } = require('../logging/logger');
 const { systemClock } = require('../time/clock');
 const { ACCOUNT_DELETION_REQUESTS } = require('../accounts/deletionPolicy');
 const riskC = require('../risk/constants');
 const paymentC = require('../payments/constants');
 const rideC = require('../rides/constants');
 const { SUPPORT_TICKETS } = require('../support/policy');
-const { SOURCE_TYPE } = require('./policy');
+const { SOURCE_TYPE, alertDescriptor } = require('./policy');
 const { syncAdminAlert, listAdminAlerts, updateAdminAlert } = require('./alerts');
 
 const REGION = 'southamerica-east1';
@@ -40,6 +40,13 @@ function dataWithDocumentId(sourceType, sourceId, snapshot) {
   return data;
 }
 
+function sourceTransitionIsActionable(sourceType, beforeData, afterData) {
+  return Boolean(
+    alertDescriptor(sourceType, beforeData)
+    || alertDescriptor(sourceType, afterData)
+  );
+}
+
 function bindSourceTrigger(functionName, document, sourceType) {
   return onDocumentWritten(
     {
@@ -52,6 +59,10 @@ function bindSourceTrigger(functionName, document, sourceType) {
     async (event) => {
       const sourceId = String(event.params?.sourceId || '');
       if (!sourceId) return;
+      const beforeData = dataWithDocumentId(sourceType, sourceId, event.data?.before);
+      const afterData = dataWithDocumentId(sourceType, sourceId, event.data?.after);
+      if (!sourceTransitionIsActionable(sourceType, beforeData, afterData)) return;
+
       const context = createLoggerContext({
         functionName,
         actorType: 'system',
@@ -61,14 +72,14 @@ function bindSourceTrigger(functionName, document, sourceType) {
           db: admin.firestore(),
           sourceType,
           sourceId,
-          sourceData: dataWithDocumentId(sourceType, sourceId, event.data?.after),
+          sourceData: afterData,
           context,
           clock: systemClock,
         });
       } catch (error) {
         logError(context, 'admin_alert.source_sync_failed', {
           sourceType,
-          sourceRefHash: require('../logging/logger').shortHash(`${sourceType}:${sourceId}`),
+          sourceRefHash: shortHash(`${sourceType}:${sourceId}`),
           errorCode: error?.code || error?.name || 'SOURCE_SYNC_FAILED',
         });
         throw error;
@@ -116,4 +127,5 @@ module.exports = {
   riskCaseAdminAlertTrigger,
   accountDeletionAdminAlertTrigger,
   dataWithDocumentId,
+  sourceTransitionIsActionable,
 };
