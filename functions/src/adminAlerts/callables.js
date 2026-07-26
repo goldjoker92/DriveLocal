@@ -10,6 +10,7 @@ const { withCallableBoundary } = require('../errors/boundary');
 const { createLoggerContext, logError, shortHash } = require('../logging/logger');
 const { systemClock } = require('../time/clock');
 const { ACCOUNT_DELETION_REQUESTS } = require('../accounts/deletionPolicy');
+const { COLLECTION: CLIENT_ERROR_REPORTS } = require('../clientErrors/reportClientError');
 const riskC = require('../risk/constants');
 const paymentC = require('../payments/constants');
 const rideC = require('../rides/constants');
@@ -37,6 +38,7 @@ function dataWithDocumentId(sourceType, sourceId, snapshot) {
   if (sourceType === SOURCE_TYPE.RIDE_DISPUTE) return { ...data, rideId: sourceId };
   if (sourceType === SOURCE_TYPE.PAYMENT_REVIEW) return { ...data, paymentRequestId: sourceId };
   if (sourceType === SOURCE_TYPE.RISK_CASE) return { ...data, caseId: sourceId };
+  if (sourceType === SOURCE_TYPE.CLIENT_ERROR) return { ...data, reportId: sourceId };
   return data;
 }
 
@@ -118,6 +120,12 @@ const accountDeletionAdminAlertTrigger = bindSourceTrigger(
   SOURCE_TYPE.ACCOUNT_DELETION
 );
 
+const clientErrorAdminAlertTrigger = bindSourceTrigger(
+  'clientErrorAdminAlertTrigger',
+  `${CLIENT_ERROR_REPORTS}/{sourceId}`,
+  SOURCE_TYPE.CLIENT_ERROR
+);
+
 module.exports = {
   listAdminAlertsSecure: bind('listAdminAlertsSecure', listAdminAlerts),
   updateAdminAlertSecure: bind('updateAdminAlertSecure', updateAdminAlert),
@@ -126,6 +134,7 @@ module.exports = {
   paymentReviewAdminAlertTrigger,
   riskCaseAdminAlertTrigger,
   accountDeletionAdminAlertTrigger,
+  clientErrorAdminAlertTrigger,
   dataWithDocumentId,
   sourceTransitionIsActionable,
 };
