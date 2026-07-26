@@ -25,6 +25,7 @@ const SOURCE_TYPE = Object.freeze({
   PAYMENT_REVIEW: 'payment_review',
   RISK_CASE: 'risk_case',
   ACCOUNT_DELETION: 'account_deletion',
+  CLIENT_ERROR: 'client_error',
 });
 
 const RESOLUTION_CODES = Object.freeze([
@@ -145,12 +146,32 @@ function descriptorForAccountDeletion(data = {}) {
   };
 }
 
+function descriptorForClientError(data = {}) {
+  if (data.status !== 'open') return null;
+  const occurrenceCount = Math.max(0, Number(data.occurrenceCount || 0));
+  const fatal = data.isFatal === true || data.severity === 'fatal';
+  const repeatedError = data.severity === 'error' && occurrenceCount >= 3;
+  if (!fatal && !repeatedError) return null;
+  return {
+    alertType: fatal ? 'client_error_fatal' : 'client_error_repeated',
+    severity: fatal ? SEVERITY.CRITICAL : SEVERITY.HIGH,
+    titleCode: fatal ? 'client_error_fatal' : 'client_error_repeated',
+    actionCode: 'review_client_error',
+    targetRoute: '/dashboard',
+    // reportId is already an actor-hash + fingerprint + time bucket, never a UID.
+    targetId: data.reportId || null,
+    reasonCode: fatal ? 'FATAL_CLIENT_ERROR' : 'REPEATED_CLIENT_ERROR',
+    amountCentavos: null,
+  };
+}
+
 function alertDescriptor(sourceType, data) {
   if (sourceType === SOURCE_TYPE.SUPPORT_TICKET) return descriptorForSupport(data);
   if (sourceType === SOURCE_TYPE.RIDE_DISPUTE) return descriptorForRide(data);
   if (sourceType === SOURCE_TYPE.PAYMENT_REVIEW) return descriptorForPayment(data);
   if (sourceType === SOURCE_TYPE.RISK_CASE) return descriptorForRisk(data);
   if (sourceType === SOURCE_TYPE.ACCOUNT_DELETION) return descriptorForAccountDeletion(data);
+  if (sourceType === SOURCE_TYPE.CLIENT_ERROR) return descriptorForClientError(data);
   return null;
 }
 
