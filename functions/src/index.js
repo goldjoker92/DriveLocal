@@ -57,6 +57,10 @@ const {
   cancellationNotificationStatusTrigger,
 } = require('./rides/cancellationNotificationStatus');
 exports.cancellationNotificationStatusTrigger = cancellationNotificationStatusTrigger;
+const {
+  acceptedPassengerIdentityTrigger,
+} = require('./rides/passengerIdentityProjection');
+exports.acceptedPassengerIdentityTrigger = acceptedPassengerIdentityTrigger;
 
 const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
