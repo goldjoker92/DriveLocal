@@ -23,6 +23,16 @@ describe('structured logger identity privacy', () => {
     expect(JSON.stringify(safe)).not.toContain('raw-firebase-user-id');
   });
 
+  it('keeps anonymous logger context shape stable', () => {
+    const context = createLoggerContext({
+      traceId: 'trace_anonymous',
+      functionName: 'anonymousFunction',
+      actorType: 'anonymous',
+    });
+
+    expect(context).not.toHaveProperty('actorUidHash');
+  });
+
   it('redacts exact identity keys without hiding safe hash fields', () => {
     const safe = redactSensitiveData({
       uid: 'uid-1',
@@ -46,6 +56,20 @@ describe('structured logger identity privacy', () => {
       driverIdHash: 'hash-driver',
       actorUidHash: 'hash-actor',
       rideId: 'ride-operational-reference',
+    });
+  });
+
+  it('redacts free-form internal error messages while keeping error codes', () => {
+    const safe = redactSensitiveData({
+      errorCode: 'INVALID_ARGUMENT',
+      retryable: false,
+      internalMessage: 'raw uid and provider detail must not reach Cloud Logging',
+    });
+
+    expect(safe).toEqual({
+      errorCode: 'INVALID_ARGUMENT',
+      retryable: false,
+      internalMessage: REDACTED,
     });
   });
 });
