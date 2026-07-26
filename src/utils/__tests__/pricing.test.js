@@ -169,6 +169,14 @@ describe('commission-free window (founder + launch)', () => {
 });
 
 describe('founder & subscription eligibility (D6)', () => {
+  const nonFounderInsideLaunchWindow = (used) => ({
+    approvalNumber: 101,
+    founderEligible: false,
+    approvedAtMs: NOW - DAY,
+    commissionFreeUntil: NOW + DAY,
+    freeRideCountUsed: used,
+  });
+
   it('founder covered during the founder free period (does not use the 5-ride grace)', () => {
     const founder = { founderEligible: true, subscriptionFreeUntil: NOW + 60 * DAY, freeRideCountUsed: 99 };
     const e = getSubscriptionEligibility(founder, NOW);
@@ -189,18 +197,29 @@ describe('founder & subscription eligibility (D6)', () => {
     };
     expect(getSubscriptionEligibility(founder, NOW).required).toBe(false);
   });
-  it('non-founder rides 0..4 are allowed without a subscription', () => {
+  it('non-founder rides 0..4 are allowed inside the 60-day launch window', () => {
     for (let used = 0; used <= 4; used += 1) {
-      expect(getSubscriptionEligibility({ freeRideCountUsed: used }, NOW).required).toBe(false);
-      expect(passesSubscriptionOrTrial({ freeRideCountUsed: used }, NOW)).toBe(true);
+      const driver = nonFounderInsideLaunchWindow(used);
+      expect(getSubscriptionEligibility(driver, NOW).required).toBe(false);
+      expect(passesSubscriptionOrTrial(driver, NOW)).toBe(true);
     }
-    expect(getSubscriptionEligibility({ freeRideCountUsed: 4 }, NOW).freeRidesRemaining).toBe(1);
+    expect(getSubscriptionEligibility(nonFounderInsideLaunchWindow(4), NOW).freeRidesRemaining).toBe(1);
   });
   it('after 5 completed rides, a subscription is required for the next ride', () => {
-    const e = getSubscriptionEligibility({ freeRideCountUsed: 5 }, NOW);
+    const driver = nonFounderInsideLaunchWindow(5);
+    const e = getSubscriptionEligibility(driver, NOW);
     expect(e.required).toBe(true);
     expect(e.reason).toBe('SUBSCRIPTION_REQUIRED');
-    expect(passesSubscriptionOrTrial({ freeRideCountUsed: 5 }, NOW)).toBe(false);
+    expect(passesSubscriptionOrTrial(driver, NOW)).toBe(false);
+  });
+  it('day 60 requires a subscription even when grace rides remain', () => {
+    const driver = {
+      ...nonFounderInsideLaunchWindow(1),
+      commissionFreeUntil: NOW,
+    };
+    expect(getSubscriptionEligibility(driver, NOW).required).toBe(true);
+    expect(getSubscriptionEligibility(driver, NOW).freeRidesRemaining).toBe(0);
+    expect(passesSubscriptionOrTrial(driver, NOW)).toBe(false);
   });
   it('an active subscription covers a driver past the free rides', () => {
     const driver = {
