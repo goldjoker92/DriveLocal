@@ -6,7 +6,7 @@ function source(relativePath) {
 }
 
 describe('admin alert integration contracts', () => {
-  it('exports two callables and five independent retryable triggers', () => {
+  it('exports two callables and six independent retryable triggers', () => {
     const callables = source('src/adminAlerts/callables.js');
     const index = source('src/index.js');
 
@@ -17,12 +17,15 @@ describe('admin alert integration contracts', () => {
     expect(callables).toContain('paymentReviewAdminAlertTrigger');
     expect(callables).toContain('riskCaseAdminAlertTrigger');
     expect(callables).toContain('accountDeletionAdminAlertTrigger');
+    expect(callables).toContain('clientErrorAdminAlertTrigger');
+    expect(callables).toContain('sourceTransitionIsActionable');
     expect(callables).toContain('retry: true');
 
     expect(index).toContain('exports.listAdminAlertsSecure');
     expect(index).toContain('exports.updateAdminAlertSecure');
     expect(index).toContain('exports.supportTicketAdminAlertTrigger');
     expect(index).toContain('exports.accountDeletionAdminAlertTrigger');
+    expect(index).toContain('exports.clientErrorAdminAlertTrigger');
   });
 
   it('uses deterministic source hashing and never stores source identity fields', () => {
@@ -40,6 +43,8 @@ describe('admin alert integration contracts', () => {
     expect(policy).not.toContain('phone:');
     expect(policy).not.toContain('cpf:');
     expect(policy).not.toContain('pixKey:');
+    expect(policy).not.toContain('message: data.message');
+    expect(policy).not.toContain('stack: data.stack');
   });
 
   it('versions every deterministic queue index used by listAdminAlerts', () => {
