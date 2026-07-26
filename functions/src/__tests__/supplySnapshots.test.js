@@ -11,11 +11,15 @@ const {
 } = require('../risk/analytics');
 
 const AT_18H = Date.parse('2026-08-08T21:10:00.000Z'); // 18:10 Fortaleza
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function eligibleDriver(overrides = {}) {
   const availabilitySessionId = 'work_supply_session_123456789';
   return {
     verificationStatus: 'approved',
+    approvalNumber: 101,
+    approvedAtMs: AT_18H - 30 * DAY_MS,
+    commissionFreeUntil: AT_18H + 30 * DAY_MS,
     isBlocked: false,
     availabilityStatus: 'online',
     availabilitySessionId,
@@ -57,8 +61,14 @@ describe('hourly driver supply analytics', () => {
     const staleLocation = eligibleDriver({ locationUpdatedAtMs: AT_18H - 2 * 3600000 });
     const staleSession = eligibleDriver({ availabilityUpdatedAtMs: AT_18H - 10 * 60 * 1000 });
     const review = eligibleDriver({ financialReviewRequired: true });
-    const emptyWallet = eligibleDriver({ walletAvailableCentavos: 300, freeRideCountUsed: 5, subscriptionActive: true, subscriptionExpiresAt: AT_18H + 864e5 });
-    const freeCommission = eligibleDriver({ walletAvailableCentavos: 0, commissionFreeUntil: AT_18H + 864e5 });
+    const emptyWallet = eligibleDriver({
+      commissionFreeUntil: AT_18H - 1,
+      freeRideCountUsed: 5,
+      subscriptionActive: true,
+      subscriptionExpiresAt: AT_18H + DAY_MS,
+      walletAvailableCentavos: 300,
+    });
+    const freeCommission = eligibleDriver({ walletAvailableCentavos: 0, commissionFreeUntil: AT_18H + DAY_MS });
 
     expect(canReceiveGenericLaunchRide(staleLocation, AT_18H)).toBe(false);
     expect(canReceiveGenericLaunchRide(staleSession, AT_18H)).toBe(false);
