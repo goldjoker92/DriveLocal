@@ -25,7 +25,7 @@ const {
 
 function createRiskProfileDb({ exists = true } = {}) {
   const oldRef = {
-    id: 'driver_raw-firebase-uid',
+    id: 'old-risk-profile',
     get: jest.fn(async () => ({
       exists,
       data: () => ({
@@ -42,10 +42,10 @@ function createRiskProfileDb({ exists = true } = {}) {
       }),
     })),
   };
-  const newRef = { id: 'driver_deleted_driver_random' };
-  const doc = jest.fn((id) => (
-    id === 'driver_raw-firebase-uid' ? oldRef : newRef
-  ));
+  const newRef = { id: 'new-risk-profile' };
+  const doc = jest.fn()
+    .mockImplementationOnce(() => oldRef)
+    .mockImplementationOnce(() => newRef);
   const collection = jest.fn((name) => {
     if (name !== riskC.COLLECTIONS.RISK_PROFILES) {
       throw new Error(`unexpected collection ${name}`);
@@ -117,7 +117,7 @@ describe('account deletion processor helpers', () => {
   });
 
   it('is a no-op when the original risk profile does not exist', async () => {
-    const { db, batch } = createRiskProfileDb({ exists: false });
+    const { db, batch, doc } = createRiskProfileDb({ exists: false });
 
     await expect(pseudonymizeRiskProfile(
       db,
@@ -126,6 +126,7 @@ describe('account deletion processor helpers', () => {
       'deleted_passenger_random',
     )).resolves.toBe(false);
 
+    expect(doc).toHaveBeenCalledTimes(1);
     expect(batch.set).not.toHaveBeenCalled();
     expect(batch.delete).not.toHaveBeenCalled();
     expect(batch.commit).not.toHaveBeenCalled();
