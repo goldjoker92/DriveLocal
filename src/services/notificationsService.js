@@ -9,7 +9,9 @@
 // The device token is registered or disabled through the secure callable
 // Cloud Function syncNotificationTokenSecure.
 //
-// No mock notification tokens are used.
+// No mock notification tokens are used. Diagnostic persistence deliberately
+// stores only a safe status; the FCM token is never written to AsyncStorage or
+// printed in logs.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
@@ -22,6 +24,66 @@ import { functions } from "../config/firebase";
 import { NOTIFICATION_CHANNELS } from "../constants/notificationChannels";
 
 const INSTALLATION_ID_KEY = "drivelocal.installationId";
+const NOTIFICATION_STATUS_KEY = "drivelocal.notificationRegistrationStatus.v1";
+const REGISTRATION_FRESH_MS = 24 * 60 * 60 * 1000;
+
+function safeRole(role) {
+  return ["driver", "passenger", "admin"].includes(role) ? role : null;
+}
+
+function safeReasonCode(value) {
+  const text = String(value || "unknown").trim();
+  const normalized = text.replace(/[^A-Za-z0-9_.:/-]/g, "_").slice(0, 80);
+  return normalized || "unknown";
+}
+
+function traceNotificationReadiness(event, details = {}, level = "log") {
+  const method = console[level] || console.log;
+  method(`[DRIVER_NOTIFICATIONS] ${event}`, {
+    scope: "driver_notifications",
+    event,
+    atMs: Date.now(),
+    ...details,
+  });
+}
+
+async function writeNotificationRegistrationState(status, details = {}) {
+  const safeState = {
+    status,
+    atMs: Date.now(),
+    role: safeRole(details.role),
+    appVersion: details.appVersion || null,
+    canAskAgain: typeof details.canAskAgain === "boolean" ? details.canAskAgain : null,
+    reasonCode: details.reasonCode ? safeReasonCode(details.reasonCode) : null,
+  };
+
+  try {
+    await AsyncStorage.setItem(NOTIFICATION_STATUS_KEY, JSON.stringify(safeState));
+  } catch (_error) {
+    // Diagnostics must never make notification registration fail.
+  }
+
+  return safeState;
+}
+
+async function readNotificationRegistrationState() {
+  try {
+    const raw = await AsyncStorage.getItem(NOTIFICATION_STATUS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.status !== "string") return null;
+    return {
+      status: parsed.status,
+      atMs: Number(parsed.atMs || 0) || 0,
+      role: safeRole(parsed.role),
+      appVersion: parsed.appVersion || null,
+      canAskAgain: typeof parsed.canAskAgain === "boolean" ? parsed.canAskAgain : null,
+      reasonCode: parsed.reasonCode ? safeReasonCode(parsed.reasonCode) : null,
+    };
+  } catch (_error) {
+    return null;
+  }
+}
 
 /**
  * Returns a stable identifier for this application installation.
@@ -54,20 +116,11 @@ async function getInstallationId() {
  * - Ride status updates use HIGH importance.
  * - Both channels use vibration.
  *
- * Do not set `sound: 'default'` here.
- *
- * In the current Expo notifications implementation, a value passed to `sound`
- * can be interpreted as the name of a custom native sound file. Passing
- * "default" therefore produces:
- *
- * expo-notifications: Custom sound 'default' not found in native app.
- *
- * Omitting the property prevents that native warning.
+ * Do not set `sound: 'default'` here. In the current Expo notifications
+ * implementation it can be interpreted as a custom native sound file name.
  */
 export async function ensureAndroidChannels() {
-  if (Platform.OS !== "android") {
-    return;
-  }
+  if (Platform.OS !== "android") return;
 
   await Notifications.setNotificationChannelAsync(
     NOTIFICATION_CHANNELS.RIDE_OFFERS,
@@ -94,53 +147,153 @@ const appVersion =
   Constants.expoConfig?.version ?? Constants.nativeAppVersion ?? null;
 
 /**
+ * Reads the safe local registration receipt plus the current Android permission.
+ * It never asks for permission and never requests or returns the FCM token.
+ */
+export async function getPushNotificationDiagnosticState({
+  nowMs = Date.now(),
+  freshForMs = REGISTRATION_FRESH_MS,
+} = {}) {
+  if (Platform.OS !== "android") {
+    return { status: "unsupported", permissionGranted: false, canAskAgain: false };
+  }
+
+  if (!Device.isDevice) {
+    return { status: "device_unsupported", permissionGranted: false, canAskAgain: false };
+  }
+
+  let permission;
+  try {
+    permission = await Notifications.getPermissionsAsync();
+  } catch (error) {
+    return {
+      status: "diagnostic_failed",
+      permissionGranted: false,
+      canAskAgain: null,
+      reasonCode: safeReasonCode(error?.code || error?.name || "permission_read_failed"),
+    };
+  }
+
+  const permissionGranted = permission?.granted === true || permission?.status === "granted";
+  if (!permissionGranted) {
+    return {
+      status: "permission_required",
+      permissionGranted: false,
+      canAskAgain: permission?.canAskAgain !== false,
+    };
+  }
+
+  const stored = await readNotificationRegistrationState();
+  if (!stored) {
+    return {
+      status: "registration_required",
+      permissionGranted: true,
+      canAskAgain: permission?.canAskAgain !== false,
+      registeredAtMs: 0,
+    };
+  }
+
+  if (stored.status === "registered") {
+    const ageMs = Math.max(0, Number(nowMs) - Number(stored.atMs || 0));
+    return {
+      status: ageMs <= freshForMs ? "registered" : "registration_stale",
+      permissionGranted: true,
+      canAskAgain: permission?.canAskAgain !== false,
+      registeredAtMs: stored.atMs,
+      ageMs,
+      role: stored.role,
+    };
+  }
+
+  return {
+    status: stored.status === "permission_denied" ? "permission_required" : stored.status,
+    permissionGranted: true,
+    canAskAgain: permission?.canAskAgain !== false,
+    registeredAtMs: stored.atMs,
+    reasonCode: stored.reasonCode,
+    role: stored.role,
+  };
+}
+
+/**
  * Requests notification permission, obtains the real native Android FCM token
  * and registers it server-side.
  *
- * Returns:
- * - The native FCM token when registration succeeds.
- * - null when notifications are unavailable, permission is denied, the device
- *   is unsupported, or registration fails.
- *
- * Notification registration must never prevent the application from starting,
- * so failures are intentionally handled without throwing to the UI.
+ * Returns the native FCM token when registration succeeds, otherwise null.
+ * Registration failures are persisted only as privacy-safe status codes.
  */
 export async function registerForPushNotifications(role) {
+  const startedAt = Date.now();
+  const normalizedRole = safeRole(role);
+  let stage = "preflight";
+
+  traceNotificationReadiness("registration.requested", {
+    role: normalizedRole,
+  });
+
   try {
     if (Platform.OS !== "android" || !Device.isDevice) {
+      await writeNotificationRegistrationState("device_unsupported", {
+        role: normalizedRole,
+        appVersion,
+      });
+      traceNotificationReadiness("registration.not_available", {
+        role: normalizedRole,
+        reason: Platform.OS !== "android" ? "unsupported_platform" : "physical_device_required",
+        durationMs: Date.now() - startedAt,
+      }, "warn");
       return null;
     }
 
-    // Channels must be created before requesting the token or receiving
-    // Android notifications.
+    stage = "channels";
     await ensureAndroidChannels();
 
+    stage = "permission";
     const currentPermissions = await Notifications.getPermissionsAsync();
+    let permissionGranted = currentPermissions?.granted === true
+      || currentPermissions?.status === "granted";
+    let canAskAgain = currentPermissions?.canAskAgain !== false;
 
-    let permissionGranted = currentPermissions.granted;
-
-    if (!permissionGranted && currentPermissions.canAskAgain) {
-      const requestedPermissions =
-        await Notifications.requestPermissionsAsync();
-
-      permissionGranted = requestedPermissions.granted;
+    if (!permissionGranted && canAskAgain) {
+      const requestedPermissions = await Notifications.requestPermissionsAsync();
+      permissionGranted = requestedPermissions?.granted === true
+        || requestedPermissions?.status === "granted";
+      canAskAgain = requestedPermissions?.canAskAgain !== false;
     }
 
     if (!permissionGranted) {
+      await writeNotificationRegistrationState("permission_denied", {
+        role: normalizedRole,
+        appVersion,
+        canAskAgain,
+      });
+      traceNotificationReadiness("registration.permission_missing", {
+        role: normalizedRole,
+        canAskAgain,
+        durationMs: Date.now() - startedAt,
+      }, "warn");
       return null;
     }
 
-    // Returns the native Firebase Cloud Messaging token, not an Expo token.
+    stage = "device_token";
     const devicePushToken = await Notifications.getDevicePushTokenAsync();
-
     const token = devicePushToken?.data;
 
     if (!token) {
+      await writeNotificationRegistrationState("token_missing", {
+        role: normalizedRole,
+        appVersion,
+        reasonCode: "empty_native_token",
+      });
+      traceNotificationReadiness("registration.token_missing", {
+        role: normalizedRole,
+        durationMs: Date.now() - startedAt,
+      }, "warn");
       return null;
     }
 
+    stage = "server_sync";
     const installationId = await getInstallationId();
-
     const syncNotificationToken = httpsCallable(
       functions,
       "syncNotificationTokenSecure",
@@ -151,39 +304,47 @@ export async function registerForPushNotifications(role) {
       installationId,
       platform: "android",
       appVersion,
-      role: role ?? null,
+      role: normalizedRole,
+    });
+
+    await writeNotificationRegistrationState("registered", {
+      role: normalizedRole,
+      appVersion,
+    });
+    traceNotificationReadiness("registration.succeeded", {
+      role: normalizedRole,
+      durationMs: Date.now() - startedAt,
+      result: "registered",
     });
 
     return token;
   } catch (error) {
-    // Token registration is best-effort and must never break application
-    // startup. Avoid logging the FCM token or other sensitive information.
-    if (__DEV__) {
-      console.warn(
-        "[notifications] Unable to register the device notification token.",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-
+    const reasonCode = safeReasonCode(error?.code || error?.name || "unknown");
+    await writeNotificationRegistrationState("sync_failed", {
+      role: normalizedRole,
+      appVersion,
+      reasonCode: `${stage}:${reasonCode}`,
+    });
+    traceNotificationReadiness("registration.failed", {
+      role: normalizedRole,
+      stage,
+      reasonCode,
+      durationMs: Date.now() - startedAt,
+      result: "not_registered",
+    }, "warn");
     return null;
   }
 }
 
 /**
- * Disables the notification token associated with this application
- * installation.
- *
- * The backend marks the token as inactive when the user signs out.
- * This operation is best-effort and must not block logout.
+ * Disables the notification token associated with this application install.
+ * Logout continues even if the backend cannot disable it.
  */
 export async function disablePushNotifications() {
   try {
-    if (Platform.OS !== "android") {
-      return;
-    }
+    if (Platform.OS !== "android") return;
 
     const installationId = await getInstallationId();
-
     const syncNotificationToken = httpsCallable(
       functions,
       "syncNotificationTokenSecure",
@@ -194,13 +355,16 @@ export async function disablePushNotifications() {
       platform: "android",
       enabled: false,
     });
+    await writeNotificationRegistrationState("disabled", { appVersion });
+    traceNotificationReadiness("registration.disabled", { result: "disabled" });
   } catch (error) {
-    // Logout must continue even when the backend cannot disable the token.
-    if (__DEV__) {
-      console.warn(
-        "[notifications] Unable to disable the device notification token.",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+    traceNotificationReadiness("registration.disable_failed", {
+      reasonCode: safeReasonCode(error?.code || error?.name || "unknown"),
+      result: "best_effort_failed",
+    }, "warn");
   }
 }
+
+export const NOTIFICATION_DIAGNOSTIC_POLICY = Object.freeze({
+  registrationFreshMs: REGISTRATION_FRESH_MS,
+});
