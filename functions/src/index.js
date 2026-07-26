@@ -52,6 +52,10 @@ exports.listAdminDisputedRidesSecure = rideCallables.listAdminDisputedRidesSecur
 
 const { expireRideOffersTask } = require('./rides/expireOffersTask');
 exports.expireRideOffersTask = expireRideOffersTask;
+const {
+  cancellationNotificationStatusTrigger,
+} = require('./rides/cancellationNotificationStatus');
+exports.cancellationNotificationStatusTrigger = cancellationNotificationStatusTrigger;
 
 const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
