@@ -157,14 +157,13 @@ async function latestDriverPayment(db, uid, purpose) {
   if (!purpose) return null;
   const snap = await db.collection(paymentC.PAYMENT_REQUESTS)
     .where('driverId', '==', uid)
-    .limit(20)
+    .where('purpose', '==', purpose)
+    .orderBy('createdAtMs', 'desc')
+    .limit(1)
     .get();
-  const matches = snap.docs
-    .map((docSnap) => ({ paymentRequestId: docSnap.id, ...docSnap.data() }))
-    .filter((payment) => payment.purpose === purpose)
-    .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0));
-  const payment = matches[0];
-  if (!payment) return null;
+  const paymentDoc = snap.docs[0];
+  if (!paymentDoc) return null;
+  const payment = { paymentRequestId: paymentDoc.id, ...paymentDoc.data() };
   return {
     paymentRequestId: payment.paymentRequestId,
     purpose: payment.purpose,
