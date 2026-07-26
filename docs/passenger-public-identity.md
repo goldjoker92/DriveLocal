@@ -53,7 +53,8 @@ Passageiro
 ```
 
 The public first name is limited to 40 Unicode letters/marks with apostrophe or
-hyphen support.
+hyphen support. The mobile component repeats the first-token validation as defense
+in depth before rendering.
 
 ## Photo policy
 
@@ -74,7 +75,7 @@ revealed to the driver only through the post-acceptance offer projection.
 
 ## Trigger behavior
 
-Events:
+Projection events:
 
 ```text
 ride.passenger_identity_projection.started
@@ -90,7 +91,8 @@ Logs may contain:
 - projection version;
 - result code;
 - whether the generic first name was used;
-- whether a verified photo exists.
+- whether a verified photo exists;
+- whether the projection follows account deletion.
 
 Logs never contain the first name itself, photo path, passenger uid or private
 profile data.
@@ -98,6 +100,36 @@ profile data.
 The trigger is retryable and idempotent. A valid projection prevents a redundant
 trigger cycle. A malformed legacy projection is replaced by the exact three-field
 shape.
+
+## Account deletion
+
+Account deletion changes the retained ride projection to:
+
+```js
+{
+  firstName: 'Passageiro excluído',
+  photoStoragePath: null,
+  photoVerified: false,
+}
+```
+
+The projection trigger propagates the same anonymized value to the accepted
+`driverOffers` document, so the chauffeur history cannot retain the former name or
+photo after the passenger account is deleted.
+
+Because the approved photo path is intentionally opaque and cannot be derived from
+the Firebase uid, `passengerPublicPhotoCleanupTrigger` reads the deleted passenger
+profile snapshot and deletes the exact approved Storage object. Missing objects are
+an idempotent success; transient failures are retried.
+
+Cleanup events:
+
+```text
+account_deletion.passenger_photo_cleanup_completed
+account_deletion.passenger_photo_cleanup_failed
+```
+
+Neither event logs the passenger uid or Storage path.
 
 ## Mobile preparation
 
@@ -123,10 +155,13 @@ navigation and payment screen is not rewritten twice.
    - no duplicate write loop.
 5. Try a private or mismatched photo path:
    - photo is omitted.
-6. Confirm the driver cannot read `passengers/{uid}` directly.
+6. Delete the passenger account after a completed ride:
+   - retained ride and winning offer show `Passageiro excluído`;
+   - the approved public photo object is deleted.
+7. Confirm the driver cannot read `passengers/{uid}` directly.
 
 ## Deployment rule
 
-This block adds one Gen 2 Firestore trigger and one Storage Rules path. Do not
+This block adds two Gen 2 Firestore triggers and one Storage Rules path. Do not
 deploy Functions or Storage Rules to production without explicit validation. Both
 Jest suites must pass first.
