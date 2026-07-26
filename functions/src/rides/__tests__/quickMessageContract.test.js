@@ -41,9 +41,9 @@ describe('ride quick message integration contracts', () => {
   it('carries a catalog code but no free text in notification events', () => {
     const events = source('src/notifications/events.js');
     const processor = source('src/notifications/processEvent.js');
-    expect(events).toContain('messageCode: p.messageCode || null');
+    expect(events).toContain('...(p.messageCode ? { messageCode: p.messageCode } : {})');
     expect(processor).toContain('quickMessagePresentation(event.messageCode)');
-    expect(processor).toContain("messageCode: event.messageCode ? String(event.messageCode) : ''");
+    expect(processor).toContain('...(event.messageCode ? { messageCode: String(event.messageCode) } : {})');
     expect(processor).not.toContain('event.messageText');
   });
 });
