@@ -104,6 +104,7 @@ export function deriveDriverActiveRidePrimaryAction({
 } = {}) {
   const definition = ACTIONS[status];
   if (!definition) return null;
+
   const available = requirementAvailable(definition.requires, {
     hasPickup,
     hasDestination,
@@ -139,7 +140,11 @@ export function deriveDriverActiveRideNavigation({ status, pickup, destination }
 }
 
 export function driverActiveRideNavigationMode(vehicleType) {
-  return vehicleType === 'moto'
-    ? { google: 'two-wheeler', waze: 'motorcycle', label: 'Modo moto' }
-    : { google: 'driving', waze: 'private', label: 'Modo carro' };
+  if (vehicleType === 'moto') {
+    return { google: 'two-wheeler', waze: 'motorcycle', label: 'Modo moto' };
+  }
+  if (vehicleType === 'car') {
+    return { google: 'driving', waze: 'private', label: 'Modo carro' };
+  }
+  return { google: null, waze: null, label: 'Modo carregando' };
 }
