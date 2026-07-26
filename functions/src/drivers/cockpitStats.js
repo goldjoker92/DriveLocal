@@ -47,23 +47,58 @@ function cockpitPeriodKeys(nowMs, timeZone = COCKPIT_TIME_ZONE) {
   return { dayKey, weekKey, timeZone };
 }
 
+function periodAggregate({ priorKey, eventKey, priorCount, priorAmount, eventAmount }) {
+  if (!priorKey || eventKey > priorKey) {
+    return { key: eventKey, count: 1, amount: eventAmount };
+  }
+  if (eventKey === priorKey) {
+    return {
+      key: priorKey,
+      count: nonNegativeInteger(priorCount) + 1,
+      amount: nonNegativeInteger(priorAmount) + eventAmount,
+    };
+  }
+  // Firestore delivery is at-least-once and can be delayed. An older event must
+  // never roll the visible cockpit back to an earlier day/week.
+  return {
+    key: priorKey,
+    count: nonNegativeInteger(priorCount),
+    amount: nonNegativeInteger(priorAmount),
+  };
+}
+
 function nextDriverCockpitStats(previous, completedAtMs, receivedCentavos) {
   const prior = previous && typeof previous === 'object' ? previous : {};
   const keys = cockpitPeriodKeys(completedAtMs);
   const amount = nonNegativeInteger(receivedCentavos);
-  const sameDay = prior.dayKey === keys.dayKey;
-  const sameWeek = prior.weekKey === keys.weekKey;
+  const day = periodAggregate({
+    priorKey: prior.dayKey,
+    eventKey: keys.dayKey,
+    priorCount: prior.todayRideCount,
+    priorAmount: prior.todayReceivedCentavos,
+    eventAmount: amount,
+  });
+  const week = periodAggregate({
+    priorKey: prior.weekKey,
+    eventKey: keys.weekKey,
+    priorCount: prior.weekRideCount,
+    priorAmount: prior.weekReceivedCentavos,
+    eventAmount: amount,
+  });
 
   return Object.freeze({
     version: COCKPIT_STATS_VERSION,
     timeZone: COCKPIT_TIME_ZONE,
-    dayKey: keys.dayKey,
-    weekKey: keys.weekKey,
-    todayRideCount: (sameDay ? nonNegativeInteger(prior.todayRideCount) : 0) + 1,
-    todayReceivedCentavos: (sameDay ? nonNegativeInteger(prior.todayReceivedCentavos) : 0) + amount,
-    weekRideCount: (sameWeek ? nonNegativeInteger(prior.weekRideCount) : 0) + 1,
-    weekReceivedCentavos: (sameWeek ? nonNegativeInteger(prior.weekReceivedCentavos) : 0) + amount,
-    lastCompletedAtMs: nonNegativeInteger(completedAtMs),
+    dayKey: day.key,
+    weekKey: week.key,
+    todayRideCount: day.count,
+    todayReceivedCentavos: day.amount,
+    weekRideCount: week.count,
+    weekReceivedCentavos: week.amount,
+    lastCompletedAtMs: Math.max(
+      nonNegativeInteger(prior.lastCompletedAtMs),
+      nonNegativeInteger(completedAtMs)
+    ),
   });
 }
 
@@ -73,5 +108,6 @@ module.exports = {
   nonNegativeInteger,
   localDateParts,
   cockpitPeriodKeys,
+  periodAggregate,
   nextDriverCockpitStats,
 };
