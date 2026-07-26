@@ -184,10 +184,20 @@ function ticketDocumentId(uid, idempotencyKey) {
   return `st_${hash(`${uid}:${idempotencyKey}`, 28)}`;
 }
 
+async function activeActorTickets(db, uid) {
+  const snap = await db.collection(SUPPORT_TICKETS)
+    .where('actorUid', '==', uid)
+    .where('status', 'in', ACTIVE_STATUSES)
+    .limit(MAX_OPEN_TICKETS + 1)
+    .get();
+  return snap.docs.map((docSnap) => ({ ticketId: docSnap.id, ...docSnap.data() }));
+}
+
 async function recentActorTickets(db, uid) {
   const snap = await db.collection(SUPPORT_TICKETS)
     .where('actorUid', '==', uid)
-    .limit(20)
+    .orderBy('createdAtMs', 'desc')
+    .limit(MAX_USER_TICKETS)
     .get();
   return snap.docs.map((docSnap) => ({ ticketId: docSnap.id, ...docSnap.data() }));
 }
@@ -238,7 +248,7 @@ async function createSupportTicket({ db, request, context, clock }) {
   const [rideSnapshot, paymentSnapshot, actorTickets] = await Promise.all([
     loadRideContext(db, uid, role, args.rideId),
     role === 'driver' ? latestDriverPayment(db, uid, definition.paymentPurpose) : null,
-    recentActorTickets(db, uid),
+    activeActorTickets(db, uid),
   ]);
   const nowMs = Number(clock.now());
   const paymentRequestId = paymentSnapshot?.paymentRequestId || null;
@@ -249,8 +259,7 @@ async function createSupportTicket({ db, request, context, clock }) {
     paymentRequestId,
   });
   const duplicate = actorTickets.find((ticket) => (
-    ACTIVE_STATUSES.includes(ticket.status)
-    && ticket.issueFingerprint === fingerprint
+    ticket.issueFingerprint === fingerprint
     && nowMs - Number(ticket.createdAtMs || 0) <= DUPLICATE_WINDOW_MS
   ));
   if (duplicate) {
@@ -264,8 +273,7 @@ async function createSupportTicket({ db, request, context, clock }) {
     });
     return { ...myTicketProjection(duplicate), replay: true, duplicate: true };
   }
-  const openCount = actorTickets.filter((ticket) => ACTIVE_STATUSES.includes(ticket.status)).length;
-  if (openCount >= MAX_OPEN_TICKETS) {
+  if (actorTickets.length >= MAX_OPEN_TICKETS) {
     throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
       internalMessage: 'support actor open-ticket limit reached',
       safeMetadata: { reason: 'OPEN_TICKET_LIMIT', maxOpenTickets: MAX_OPEN_TICKETS },
@@ -340,10 +348,7 @@ async function listMySupportTickets({ db, request }) {
   const tickets = await recentActorTickets(db, uid);
   return {
     actorRole: role,
-    tickets: tickets
-      .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0))
-      .slice(0, MAX_USER_TICKETS)
-      .map(myTicketProjection),
+    tickets: tickets.map(myTicketProjection),
   };
 }
 
@@ -370,12 +375,12 @@ async function listAdminSupportTickets({ db, request }) {
   const args = adminListArgs(request);
   let query = db.collection(SUPPORT_TICKETS);
   if (args.status !== 'all') query = query.where('status', '==', args.status);
-  const snap = await query.limit(args.limit).get();
+  const snap = await query.orderBy('createdAtMs', 'desc').limit(args.limit).get();
   return {
     status: args.status,
-    tickets: snap.docs
-      .map((docSnap) => adminTicketProjection({ ticketId: docSnap.id, ...docSnap.data() }))
-      .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0)),
+    tickets: snap.docs.map((docSnap) =>
+      adminTicketProjection({ ticketId: docSnap.id, ...docSnap.data() })
+    ),
   };
 }
 
@@ -509,4 +514,6 @@ module.exports = {
   ticketDocumentId,
   myTicketProjection,
   adminTicketProjection,
+  activeActorTickets,
+  recentActorTickets,
 };
