@@ -57,10 +57,24 @@ function safeLastByRole(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-function safeRecentKeys(value) {
-  return Array.isArray(value)
-    ? value.filter((item) => typeof item === 'string' && /^[a-f0-9]{24}$/.test(item)).slice(-10)
-    : [];
+function safeRecentOperations(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item) => (
+      item
+      && typeof item === 'object'
+      && /^[a-f0-9]{24}$/.test(String(item.keyHash || ''))
+      && typeof item.messageCode === 'string'
+      && ['driver', 'passenger'].includes(item.senderRole)
+      && Number.isFinite(Number(item.sequence))
+    ))
+    .map((item) => ({
+      keyHash: String(item.keyHash),
+      messageCode: String(item.messageCode),
+      senderRole: item.senderRole,
+      sequence: Number(item.sequence),
+    }))
+    .slice(-10);
 }
 
 async function sendRideQuickMessage({ db, request, context, clock }) {
@@ -91,14 +105,23 @@ async function sendRideQuickMessage({ db, request, context, clock }) {
       });
     }
 
-    const recentKeys = safeRecentKeys(ride.quickMessageRecentKeys);
-    if (recentKeys.includes(keyHash)) {
+    const recentOperations = safeRecentOperations(ride.quickMessageRecentOperations);
+    const existingOperation = recentOperations.find((operation) => operation.keyHash === keyHash);
+    if (existingOperation) {
+      if (
+        existingOperation.messageCode !== messageCode
+        || existingOperation.senderRole !== senderRole
+      ) {
+        throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT, {
+          internalMessage: 'quick message idempotency key reused for another action',
+        });
+      }
       return {
         replay: true,
         senderRole,
-        messageCode,
+        messageCode: existingOperation.messageCode,
         rideStatus: ride.status || null,
-        sequence: Number(ride.quickMessageSequence || 0),
+        sequence: existingOperation.sequence,
       };
     }
 
@@ -168,7 +191,10 @@ async function sendRideQuickMessage({ db, request, context, clock }) {
     enqueueEventTx(tx, db, notification);
     tx.set(rideRef, {
       quickMessageSequence: sequence,
-      quickMessageRecentKeys: [...recentKeys.slice(-9), keyHash],
+      quickMessageRecentOperations: [
+        ...recentOperations.slice(-9),
+        { keyHash, messageCode, senderRole, sequence },
+      ],
       quickMessageLastByRole: {
         ...lastByRole,
         [senderRole]: { atMs: nowMs, messageCode },
@@ -214,4 +240,5 @@ module.exports = {
   quickMessageArgs,
   actorRoleForRide,
   idempotencyHash,
+  safeRecentOperations,
 };
