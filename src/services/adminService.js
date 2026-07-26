@@ -1,5 +1,5 @@
 // Admin client service — the ONLY app-side entry point for secure admin
-// operations. Sensitive mutations and aggregate/support reads always go through
+// operations. Sensitive mutations and aggregate/support/alert reads always go through
 // authenticated callables. Raw financial ledgers, Pix payloads and precise passenger
 // locations are never downloaded by the dashboard or dispute screens.
 
@@ -78,6 +78,20 @@ export const updateAdminSupportTicket = ({ ticketId, status, resolutionCode = nu
     status,
     resolutionCode,
     idempotencyKey: idempotencyKey('support'),
+  });
+
+// --- Aggregated admin alerts ------------------------------------------------
+export async function listAdminAlerts(status = 'open', severity = 'all', max = DEFAULT_LIMIT) {
+  const result = await call('listAdminAlertsSecure', { status, severity, limit: max });
+  return result?.alerts || [];
+}
+
+export const updateAdminAlert = ({ alertId, status, resolutionCode = null }) =>
+  call('updateAdminAlertSecure', {
+    alertId,
+    status,
+    resolutionCode,
+    idempotencyKey: idempotencyKey('alert'),
   });
 
 // --- Wallet adjustment ------------------------------------------------------
