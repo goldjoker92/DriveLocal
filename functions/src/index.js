@@ -38,6 +38,7 @@ exports.driverCockpitStatsTrigger = driverCockpitStatsTrigger;
 const paymentCallables = require('./payments/callables');
 exports.createDriverPixPayment = paymentCallables.createDriverPixPayment;
 exports.getDriverPaymentStatus = paymentCallables.getDriverPaymentStatus;
+exports.getDriverSubscriptionSnapshot = paymentCallables.getDriverSubscriptionSnapshot;
 exports.reprocessDriverPayment = paymentCallables.reprocessDriverPayment;
 exports.mercadoPagoWebhook = paymentCallables.mercadoPagoWebhook;
 
