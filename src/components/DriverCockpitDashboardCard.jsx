@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import AppButton from './AppButton';
 import AppCard from './AppCard';
 import { colors } from '../constants/colors';
@@ -60,12 +61,15 @@ export default function DriverCockpitDashboardCard({
   commission,
   subscription,
   onWalletPress,
+  onSubscriptionPress,
 }) {
+  const router = useRouter();
   const plan = subscriptionCopy(subscription);
   const heldPrefix = summary.walletHeldCentavos > 0
     ? `${formatBRL(summary.walletHeldCentavos)} reservado • `
     : '';
   const walletDetail = `${heldPrefix}${walletCopy(summary, commission)}`;
+  const openSubscription = onSubscriptionPress || (() => router.push('/subscription-plans'));
 
   return (
     <AppCard style={styles.card}>
@@ -106,7 +110,10 @@ export default function DriverCockpitDashboardCard({
         <Text style={styles.totalText}>
           {`${summary.totalCompletedRideCount} corridas concluídas no total`}
         </Text>
-        <AppButton title="Ver carteira" variant="ghost" onPress={onWalletPress} />
+        <View style={styles.actionRow}>
+          <AppButton title="Ver carteira" variant="ghost" onPress={onWalletPress} />
+          <AppButton title="Ver assinatura" variant="ghost" onPress={openSubscription} />
+        </View>
       </View>
     </AppCard>
   );
@@ -149,6 +156,7 @@ const styles = StyleSheet.create({
   commercialValue: { fontFamily, color: colors.text, ...typography.bodyBold },
   commercialDetail: { fontFamily, color: colors.textMuted, fontSize: 10, lineHeight: 14 },
   footerRow: { gap: spacing.xs },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   syncNote: { fontFamily, color: colors.textMuted, ...typography.caption },
   totalText: { fontFamily, color: colors.textMuted, ...typography.small },
 });
