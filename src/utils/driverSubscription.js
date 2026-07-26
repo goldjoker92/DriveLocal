@@ -5,8 +5,10 @@
 // aligned with the same commercial-policy projection.
 
 import {
+  NON_FOUNDER_FREE_RIDES,
   SUBSCRIPTION_MONTHLY_CENTAVOS,
   SUBSCRIPTION_PERIOD_DAYS,
+  getVehiclePricing,
 } from '../constants/pricingConfig';
 import {
   DAY_MS,
@@ -15,6 +17,8 @@ import {
   resolveCommercialPolicy,
   toMillis as policyToMillis,
 } from './commercialPolicy';
+import { formatBRL } from './format';
+import { formatDateBR } from './driverCockpit';
 
 // Compatibility export used by existing screens/tests.
 export function toMillis(value) {
@@ -127,4 +131,177 @@ export function getSubscriptionEligibility(driver, now = Date.now()) {
     coverageSource: policy.subscriptionCoverageSource,
     policyVersion: policy.policyVersion,
   };
+}
+
+export const DRIVER_SUBSCRIPTION_VIEW_VERSION = 'driver-subscription-view-v1';
+
+export const DRIVER_SUBSCRIPTION_MODE = Object.freeze({
+  FOUNDER_FREE: 'founder_free',
+  RIDE_GRACE: 'ride_grace',
+  ACTIVE: 'active',
+  REQUIRED_COMMISSION_FREE: 'required_commission_free',
+  REQUIRED_STANDARD: 'required_standard',
+  UNAVAILABLE: 'unavailable',
+});
+
+const VEHICLES = Object.freeze([
+  { type: 'moto', label: 'Moto', emoji: '🏍' },
+  { type: 'car', label: 'Carro', emoji: '🚗' },
+]);
+
+function futureTimestamp(value, nowMs) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > nowMs ? number : null;
+}
+
+function firstFutureTimestamp(values, nowMs) {
+  const valid = values
+    .map((value) => futureTimestamp(value, nowMs))
+    .filter((value) => value != null);
+  return valid.length > 0 ? Math.min(...valid) : null;
+}
+
+function dateLabel(timestampMs) {
+  return timestampMs ? formatDateBR(timestampMs) : null;
+}
+
+export function driverSubscriptionPlan(vehicleType, serviceAreaId) {
+  if (vehicleType !== 'moto' && vehicleType !== 'car') return null;
+  const pricing = getVehiclePricing(serviceAreaId, vehicleType);
+  const priceCentavos = Number(SUBSCRIPTION_MONTHLY_CENTAVOS[vehicleType]);
+  const commissionBps = Number(pricing?.normalCommissionBps);
+  if (!Number.isInteger(priceCentavos) || priceCentavos <= 0) return null;
+  if (!Number.isInteger(commissionBps) || commissionBps < 0) return null;
+
+  const vehicle = VEHICLES.find((item) => item.type === vehicleType);
+  return Object.freeze({
+    vehicleType,
+    vehicleLabel: vehicle.label,
+    vehicleEmoji: vehicle.emoji,
+    priceCentavos,
+    priceLabel: formatBRL(priceCentavos),
+    periodDays: SUBSCRIPTION_PERIOD_DAYS,
+    periodLabel: `${SUBSCRIPTION_PERIOD_DAYS} dias`,
+    commissionBps,
+    commissionPercent: commissionBps / 100,
+    commissionLabel: `${commissionBps / 100}%`,
+  });
+}
+
+export function driverSubscriptionCatalog(serviceAreaId) {
+  return VEHICLES
+    .map((vehicle) => driverSubscriptionPlan(vehicle.type, serviceAreaId))
+    .filter(Boolean);
+}
+
+// Decision model for the real Pix subscription screen. The app only explains the
+// current server-owned driver fields; createDriverPixPayment recalculates price and
+// eligibility again before creating a Mercado Pago order.
+export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
+  const d = driver || {};
+  const nowMs = toMillis(nowValue) || Number(nowValue) || Date.now();
+  const policy = resolveCommercialPolicy(d, nowMs);
+  const currentPlan = driverSubscriptionPlan(policy.vehicleType, d.serviceAreaId);
+  const catalog = driverSubscriptionCatalog(d.serviceAreaId);
+  const freePeriodDate = dateLabel(policy.freePeriodUntilMs);
+  const founderDate = dateLabel(policy.founderSubscriptionUntilMs);
+  const subscriptionDate = dateLabel(policy.subscriptionExpiresAtMs);
+  const used = Math.min(
+    NON_FOUNDER_FREE_RIDES,
+    Math.max(0, Number(policy.freeRideCountUsed || 0))
+  );
+
+  let mode = DRIVER_SUBSCRIPTION_MODE.UNAVAILABLE;
+  let statusTitle = 'Plano indisponível';
+  let statusDetail = 'Complete o tipo de veículo para consultar e pagar sua assinatura.';
+  let paymentEnabled = false;
+  let paymentButtonTitle = 'PAGAR COM PIX';
+  let paymentReason = 'vehicle_unknown';
+  let progressLabel = null;
+  let renewalDetail = null;
+
+  if (policy.founderFreeActive) {
+    mode = DRIVER_SUBSCRIPTION_MODE.FOUNDER_FREE;
+    statusTitle = 'Assinatura grátis';
+    statusDetail = founderDate
+      ? `Assinatura grátis até ${founderDate}.`
+      : 'Sua assinatura gratuita está ativa.';
+    paymentButtonTitle = '🔒 Pagar assinatura';
+    paymentReason = 'founder_free_window';
+  } else if (policy.nonFounderGraceActive) {
+    mode = DRIVER_SUBSCRIPTION_MODE.RIDE_GRACE;
+    statusTitle = 'Corridas sem assinatura';
+    progressLabel = `${used} de ${NON_FOUNDER_FREE_RIDES} corridas sem assinatura utilizadas`;
+    statusDetail = progressLabel;
+    paymentButtonTitle = '🔒 Pagar assinatura';
+    paymentReason = 'ride_grace_active';
+  } else if (policy.paidSubscriptionActive) {
+    mode = DRIVER_SUBSCRIPTION_MODE.ACTIVE;
+    statusTitle = 'Assinatura ativa';
+    statusDetail = subscriptionDate
+      ? `Ativa até ${subscriptionDate}.`
+      : 'Sua assinatura está ativa.';
+    paymentEnabled = Boolean(currentPlan);
+    paymentButtonTitle = 'RENOVAR COM PIX';
+    paymentReason = currentPlan ? null : 'vehicle_unknown';
+    renewalDetail = 'A renovação adiciona 30 dias à expiração atual. Seus dias restantes são preservados.';
+  } else if (policy.freePeriodActive) {
+    mode = DRIVER_SUBSCRIPTION_MODE.REQUIRED_COMMISSION_FREE;
+    statusTitle = 'Assinatura necessária';
+    statusDetail = freePeriodDate
+      ? `Comissão 0% até ${freePeriodDate}.`
+      : 'Sua comissão promocional continua em 0%.';
+    paymentEnabled = Boolean(currentPlan);
+    paymentButtonTitle = 'PAGAR COM PIX';
+    paymentReason = currentPlan ? null : 'vehicle_unknown';
+  } else {
+    mode = DRIVER_SUBSCRIPTION_MODE.REQUIRED_STANDARD;
+    statusTitle = 'Assinatura necessária';
+    statusDetail = currentPlan
+      ? `Comissão ${currentPlan.commissionLabel} após a ativação.`
+      : 'Selecione um veículo válido para consultar o plano.';
+    paymentEnabled = Boolean(currentPlan);
+    paymentButtonTitle = 'PAGAR COM PIX';
+    paymentReason = currentPlan ? null : 'vehicle_unknown';
+  }
+
+  const commissionLabel = policy.freePeriodActive
+    ? '0%'
+    : currentPlan?.commissionLabel || null;
+  const commissionDetail = policy.freePeriodActive
+    ? freePeriodDate
+      ? `Comissão 0% até ${freePeriodDate}`
+      : 'Comissão promocional 0%'
+    : currentPlan
+      ? `Comissão ${currentPlan.commissionLabel}`
+      : 'Comissão indisponível';
+
+  return Object.freeze({
+    version: DRIVER_SUBSCRIPTION_VIEW_VERSION,
+    mode,
+    currentPlan,
+    catalog,
+    statusTitle,
+    statusDetail,
+    progressLabel,
+    paymentEnabled,
+    paymentButtonTitle,
+    paymentReason,
+    renewalDetail,
+    founder: policy.founder,
+    freeRideCountUsed: used,
+    freeRideLimit: NON_FOUNDER_FREE_RIDES,
+    freeRidesRemaining: policy.freeRidesRemaining,
+    commissionLabel,
+    commissionDetail,
+    freePeriodUntilMs: policy.freePeriodUntilMs || null,
+    subscriptionExpiresAtMs: policy.subscriptionExpiresAtMs || null,
+    transitionAtMs: firstFutureTimestamp([
+      policy.founderSubscriptionUntilMs,
+      policy.freePeriodUntilMs,
+      policy.subscriptionExpiresAtMs,
+    ], nowMs),
+    paidSubscriptionActive: policy.paidSubscriptionActive,
+    policyVersion: policy.policyVersion,
+  });
 }
