@@ -37,6 +37,7 @@ describe('compact driver cockpit summary', () => {
       walletAvailableCentavos: 3000,
       walletHeldCentavos: 250,
       walletBalanceCentavos: 3250,
+      walletStatus: 'ready',
     }, utc('2026-07-21T15:00:00.000Z'));
 
     expect(current).toMatchObject({
@@ -48,6 +49,8 @@ describe('compact driver cockpit summary', () => {
       walletAvailableCentavos: 3000,
       walletHeldCentavos: 250,
       walletBalanceCentavos: 3250,
+      walletState: 'ready',
+      walletStatusLabel: 'disponível para comissões',
       statsCurrent: true,
     });
 
@@ -56,6 +59,17 @@ describe('compact driver cockpit summary', () => {
     expect(stale.todayReceivedCentavos).toBe(0);
     expect(stale.weekRideCount).toBe(0);
     expect(stale.weekReceivedCentavos).toBe(0);
+  });
+
+  it('maps wallet status without inferring it from the balance', () => {
+    expect(deriveDriverCockpitSummary({
+      walletStatus: 'not_required_during_commission_free_period',
+      walletAvailableCentavos: 0,
+    }).walletState).toBe('not_required');
+    expect(deriveDriverCockpitSummary({
+      walletStatus: 'blocked',
+      walletAvailableCentavos: 5000,
+    }).walletStatusLabel).toBe('recarga necessária');
   });
 
   it('preserves a chosen display name but never uses email as identity', () => {
