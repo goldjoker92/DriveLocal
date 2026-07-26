@@ -94,7 +94,7 @@ function createDb(initial = {}) {
 }
 
 describe('createSupportTicket', () => {
-  it('creates and then reuses one code-only account ticket', async () => {
+  it('creates, replays the same key, and deduplicates the same active issue', async () => {
     const store = createDb({
       'drivers/driver-1': { uid: 'driver-1', accountDeletionStatus: null },
     });
@@ -134,7 +134,25 @@ describe('createSupportTicket', () => {
     expect(record).not.toHaveProperty('message');
     expect(record).not.toHaveProperty('text');
 
-    const duplicate = await createSupportTicket(args);
+    // Same idempotency key replays the exact operation; it is not a new duplicate issue.
+    const replay = await createSupportTicket(args);
+    expect(replay).toMatchObject({
+      ticketId: first.ticketId,
+      replay: true,
+    });
+    expect(replay).not.toHaveProperty('duplicate');
+
+    // A different key for the same still-active issue reuses the ticket as a business duplicate.
+    const duplicate = await createSupportTicket({
+      ...args,
+      request: {
+        ...args.request,
+        data: {
+          ...args.request.data,
+          idempotencyKey: 'support-key-0002',
+        },
+      },
+    });
     expect(duplicate).toMatchObject({
       ticketId: first.ticketId,
       replay: true,
