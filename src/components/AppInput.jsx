@@ -14,6 +14,7 @@ export default function AppInput({
   keyboardType = 'default',
   secureTextEntry = false,
   style,
+  ...textInputProps
 }) {
   return (
     <View style={[{ gap: spacing.xs }, style]}>
@@ -23,6 +24,7 @@ export default function AppInput({
         </Text>
       ) : null}
       <TextInput
+        {...textInputProps}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -41,6 +43,7 @@ export default function AppInput({
             paddingHorizontal: spacing.lg,
           },
           typography.body,
+          textInputProps.style,
         ]}
       />
     </View>
