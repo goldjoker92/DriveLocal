@@ -49,6 +49,10 @@ function subscriptionAlreadyCovered(driver, nowMs) {
   return founderCovered || freeRidesRemaining;
 }
 
+function accountDeletionPending(driver) {
+  return ['requested', 'processing'].includes(driver?.accountDeletionStatus);
+}
+
 /**
  * @param {{db:object, request:object, context:object, clock:{now:()=>number}, adapter:object}} args
  */
@@ -85,6 +89,12 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     });
   }
   const driver = driverSnap.data() || {};
+  if (accountDeletionPending(driver)) {
+    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+      internalMessage: `driver ${driverId} requested account deletion`,
+      safeMetadata: { reason: 'ACCOUNT_DELETION_PENDING' },
+    });
+  }
 
   // Resolve the amount server-side per purpose (never trust a client amount for
   // subscription; restrict wallet to the pilot allowlist).
@@ -209,4 +219,8 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
   return safeResult;
 }
 
-module.exports = { createDriverPixPayment, subscriptionAlreadyCovered };
+module.exports = {
+  createDriverPixPayment,
+  subscriptionAlreadyCovered,
+  accountDeletionPending,
+};
