@@ -77,6 +77,48 @@ describe('driver cockpit statistics policy', () => {
     expect(next.weekReceivedCentavos).toBe(950);
   });
 
+  it('does not roll today backwards when a delayed event from yesterday arrives', () => {
+    const prior = {
+      dayKey: '2026-07-22',
+      weekKey: '2026-07-20',
+      todayRideCount: 2,
+      todayReceivedCentavos: 2400,
+      weekRideCount: 5,
+      weekReceivedCentavos: 6100,
+      lastCompletedAtMs: utc('2026-07-22T15:00:00.000Z'),
+    };
+    const delayed = nextDriverCockpitStats(prior, utc('2026-07-21T18:00:00.000Z'), 900);
+
+    expect(delayed.dayKey).toBe('2026-07-22');
+    expect(delayed.todayRideCount).toBe(2);
+    expect(delayed.todayReceivedCentavos).toBe(2400);
+    expect(delayed.weekRideCount).toBe(6);
+    expect(delayed.weekReceivedCentavos).toBe(7000);
+    expect(delayed.lastCompletedAtMs).toBe(prior.lastCompletedAtMs);
+  });
+
+  it('ignores a delayed event from an older week for visible current counters', () => {
+    const prior = {
+      dayKey: '2026-07-28',
+      weekKey: '2026-07-27',
+      todayRideCount: 1,
+      todayReceivedCentavos: 1000,
+      weekRideCount: 3,
+      weekReceivedCentavos: 3300,
+      lastCompletedAtMs: utc('2026-07-28T15:00:00.000Z'),
+    };
+    const delayed = nextDriverCockpitStats(prior, utc('2026-07-26T15:00:00.000Z'), 700);
+
+    expect(delayed).toMatchObject({
+      dayKey: '2026-07-28',
+      weekKey: '2026-07-27',
+      todayRideCount: 1,
+      todayReceivedCentavos: 1000,
+      weekRideCount: 3,
+      weekReceivedCentavos: 3300,
+    });
+  });
+
   it('normalizes invalid amounts and counters without producing negatives', () => {
     const next = nextDriverCockpitStats({
       dayKey: '2026-07-21',
