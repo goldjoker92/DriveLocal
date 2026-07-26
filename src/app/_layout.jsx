@@ -5,11 +5,13 @@
 import '../services/driverLocationTracking';
 import { useEffect } from 'react';
 import { Stack, usePathname } from 'expo-router';
+import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import AppErrorBoundary from '../components/AppErrorBoundary';
+import DriverDeviceHealthGuard from '../components/DriverDeviceHealthGuard';
 import { colors } from '../constants/colors';
 import { useRideNotifications } from '../hooks/useRideNotifications';
 import {
@@ -36,12 +38,16 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
           <StatusBar style="dark" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.background },
-            }}
-          />
+          <View style={{ flex: 1, backgroundColor: colors.background }}>
+            {/* Silent when healthy; visible only on operational driver routes. */}
+            <DriverDeviceHealthGuard route={pathname} />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: colors.background },
+              }}
+            />
+          </View>
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </AppErrorBoundary>
