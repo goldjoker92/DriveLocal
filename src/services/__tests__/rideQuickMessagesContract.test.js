@@ -10,9 +10,10 @@ describe('ride quick message mobile contracts', () => {
     const service = source('src/services/ridesService.js');
     expect(service).toContain("callRide('sendRideQuickMessageSecure', rideId, { messageCode })");
     expect(service).toContain("collection(db, 'rideRequests', rideId, 'quickMessages')");
-    expect(service).toContain("orderBy('createdAtMs', 'desc')");
-    expect(service).toContain('limit(QUICK_MESSAGE_HISTORY_LIMIT)');
+    expect(service).toContain('Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0)');
+    expect(service).toContain('.slice(0, QUICK_MESSAGE_HISTORY_LIMIT)');
     expect(service).toContain('Number(message.expiresAtMs) > nowMs');
+    expect(service).not.toContain("orderBy('createdAtMs', 'desc')");
   });
 
   it('mounts one shared panel on the active passenger and driver routes', () => {
