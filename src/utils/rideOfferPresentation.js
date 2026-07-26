@@ -1,21 +1,16 @@
 // Pure presentation helpers for the targeted driver offer.
 // The backend remains authoritative for eligibility, fare and final settlement.
+// This module only presents the versioned commercial policy and never persists or
+// authorizes a commission, subscription or wallet mutation.
 
 import {
   BPS_DENOMINATOR,
   MIN_WALLET_BALANCE_CENTAVOS,
   getVehiclePricing,
 } from '../constants/pricingConfig';
-import {
-  commissionFreeUntilMs,
-  formatDateBR,
-  isFounderDriver,
-} from './driverCockpit';
-import {
-  getSubscriptionEligibility,
-  getSubscriptionMonthlyCentavos,
-  toMillis,
-} from './driverSubscription';
+import { formatDateBR } from './driverCockpit';
+import { getSubscriptionMonthlyCentavos } from './driverSubscription';
+import { resolveCommercialPolicy } from './commercialPolicy';
 
 const PICKUP_AVERAGE_SPEED_KPH = Object.freeze({ moto: 25, car: 22 });
 
@@ -79,13 +74,14 @@ export function calculateOfferCommission({
   const minimumNet = Math.max(0, Number(pricing?.minimumDriverNetCentavos || 0));
   const cap = Math.max(0, fare - minimumNet);
   const commissionCentavos = Math.max(0, Math.min(rawCommission, cap));
-  const effectivePercent = fare > 0 ? (commissionCentavos / fare) * 100 : standardPercent;
-  const shownPercent = Math.abs(effectivePercent - standardPercent) < 0.6
-    ? standardPercent
-    : effectivePercent;
-  const commissionPercentLabel = Number.isInteger(shownPercent)
-    ? `${shownPercent}%`
-    : `${shownPercent.toFixed(1).replace('.', ',')}%`;
+
+  // Driver-facing copy intentionally shows only the policy percentage (12% moto
+  // or 15% car). Any centavo adjustment caused by the minimum-net guarantee stays
+  // in backend/ledger/admin reconciliation and is never converted to a custom
+  // percentage in the driver UI.
+  const commissionPercentLabel = Number.isInteger(standardPercent)
+    ? `${standardPercent}%`
+    : `${standardPercent.toFixed(1).replace('.', ',')}%`;
 
   return {
     commissionCentavos,
@@ -96,19 +92,16 @@ export function calculateOfferCommission({
 
 export function deriveRideOfferPresentation(driver, offer, nowMs = Date.now()) {
   const vehicleType = offer?.vehicleType || driver?.vehicleType || 'car';
+  const serviceAreaId = offer?.serviceAreaId || driver?.serviceAreaId;
+  const policyDriver = { ...(driver || {}), vehicleType, serviceAreaId };
+  const commercial = resolveCommercialPolicy(policyDriver, nowMs);
   const fareCentavos = Math.max(0, Math.round(Number(offer?.estimatedFareCentavos) || 0));
-  const commissionEndMs = commissionFreeUntilMs(driver);
-  const commissionFree = commissionEndMs > nowMs;
   const commission = calculateOfferCommission({
     fareCentavos,
     vehicleType,
-    serviceAreaId: offer?.serviceAreaId,
-    commissionFree,
+    serviceAreaId,
+    commissionFree: commercial.freePeriodActive,
   });
-  const subscription = getSubscriptionEligibility(driver, nowMs);
-  const founder = isFounderDriver(driver);
-  const founderSubscriptionEndMs = toMillis(driver?.subscriptionFreeUntil || driver?.founderFreeUntil);
-  const subscriptionExpiresAtMs = toMillis(driver?.subscriptionExpiresAt);
   const walletBalanceCentavos = Math.max(
     0,
     Number(
@@ -120,28 +113,30 @@ export function deriveRideOfferPresentation(driver, offer, nowMs = Date.now()) {
   );
 
   return {
+    commercialPolicyVersion: commercial.policyVersion,
+    subscriptionCoverageSource: commercial.subscriptionCoverageSource,
     vehicleType,
     vehicleName: vehicleLabel(vehicleType),
     fareCentavos,
     pickupEtaMinutes: estimatePickupMinutes(offer?.distanceToPickupMeters, vehicleType),
-    commissionFree,
-    commissionFreeUntilLabel: formatDateBR(commissionEndMs),
+    commissionFree: commercial.freePeriodActive,
+    commissionFreeUntilLabel: formatDateBR(commercial.freePeriodUntilMs),
     commissionCentavos: commission.commissionCentavos,
     commissionPercentLabel: commission.commissionPercentLabel,
     minimumGuaranteeApplied: commission.minimumGuaranteeApplied,
     driverNetCentavos: Math.max(0, fareCentavos - commission.commissionCentavos),
-    founder,
-    founderBenefitActive: founder && founderSubscriptionEndMs > nowMs,
-    founderBenefitUntilLabel: formatDateBR(
-      Math.min(commissionEndMs || founderSubscriptionEndMs, founderSubscriptionEndMs)
-    ),
+    founder: commercial.founder,
+    founderBenefitActive: commercial.founderFreeActive,
+    founderBenefitUntilLabel: formatDateBR(commercial.founderSubscriptionUntilMs),
     planCentavos: getSubscriptionMonthlyCentavos(vehicleType),
-    paidPlanActive: subscription.subscriptionStatus === 'active',
-    subscriptionExpiresAtLabel: formatDateBR(subscriptionExpiresAtMs),
-    freeRidesRemaining: subscription.freeRidesRemaining,
-    subscriptionRequired: subscription.required,
+    paidPlanActive: commercial.paidSubscriptionActive,
+    subscriptionExpiresAtLabel: formatDateBR(commercial.subscriptionExpiresAtMs),
+    freeRideCountUsed: commercial.freeRideCountUsed,
+    freeRidesRemaining: commercial.freeRidesRemaining,
+    subscriptionRequired: commercial.subscriptionRequired,
     walletBalanceCentavos,
-    walletLow: !commissionFree && walletBalanceCentavos <= MIN_WALLET_BALANCE_CENTAVOS,
+    walletLow: commercial.walletTopupRequired
+      && walletBalanceCentavos <= MIN_WALLET_BALANCE_CENTAVOS,
     acceptanceRate: acceptanceRatePercent(driver),
   };
 }
