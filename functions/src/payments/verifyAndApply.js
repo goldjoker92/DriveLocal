@@ -58,7 +58,7 @@ async function verifyAndApplyOrder({ db, adapter, providerOrderId, context, cloc
       status: providerPaid ? C.STATUS.MANUAL_REVIEW : C.STATUS.CANCELLED,
       manualReviewReason: providerPaid ? 'account_deleted_provider_payment' : null,
       cancellationReason: 'account_deleted',
-      updatedAtMs: clock.now(),
+      updatedAt: clock.now(),
     }, { merge: true });
     logWarning(context, 'payment.account_deleted_ignored', {
       operation: source,
