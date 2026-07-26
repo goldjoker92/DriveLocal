@@ -28,7 +28,16 @@ const requestAccountDeletionSecure = onCall(
 );
 
 const processAccountDeletionRequest = onDocumentCreated(
-  { region: REGION, document: `${ACCOUNT_DELETION_REQUESTS}/{requestId}` },
+  {
+    region: REGION,
+    document: `${ACCOUNT_DELETION_REQUESTS}/{requestId}`,
+    // Transient Storage/Auth/Firestore failures are retried for up to the Gen 2
+    // retry window. Every mutation below is idempotent and requestRef is retained
+    // until the anonymized completion audit exists.
+    retry: true,
+    timeoutSeconds: 540,
+    memory: '512MiB',
+  },
   async (event) => {
     const snapshot = event.data;
     if (!snapshot) return;
