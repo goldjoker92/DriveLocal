@@ -53,9 +53,7 @@ function safeLedgerEntry(snapshot) {
     availableDeltaCentavos: optionalSignedCentavos(data.availableDeltaCentavos),
     balanceDeltaCentavos: optionalSignedCentavos(data.balanceDeltaCentavos),
     availableAfterCentavos: optionalNonNegativeCentavos(data.availableAfterCentavos),
-    balanceAfterCentavos: optionalNonNegativeCentavos(
-      data.balanceAfterCentavos ?? data.balanceAfterCentavos
-    ),
+    balanceAfterCentavos: optionalNonNegativeCentavos(data.balanceAfterCentavos),
     capturedCentavos: optionalNonNegativeCentavos(data.capturedCentavos),
     releasedCentavos: optionalNonNegativeCentavos(data.releasedCentavos),
     createdAtMs: optionalTimestampMs(data.createdAtMs),
