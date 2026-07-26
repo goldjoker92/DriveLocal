@@ -11,9 +11,12 @@ describe('ride offer lifecycle contract', () => {
     expect(layout).toContain('listenToMyOffer');
     expect(layout).toContain('getDriver(uid)');
     expect(layout).toContain('driver?.activeRideId');
-    expect(layout).toContain('driver.activeRideId === offer.rideId');
+    expect(layout).toContain('const targetRideId = restoredRideId || offer.rideId');
+    expect(layout).toContain('driver.activeRideId === targetRideId');
+    expect(layout).toContain('offer.rideId !== restoredRideId');
     expect(layout).toContain("pathname: '/ride-request'");
     expect(layout).toContain("pathname: '/active-ride'");
+    expect(layout).toContain('params: { rideId: targetRideId }');
   });
 
   it('uses a real countdown and server-authoritative refusal', () => {
