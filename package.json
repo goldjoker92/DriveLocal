@@ -59,6 +59,7 @@
     "lint": "expo lint",
     "start:dev": "expo start --dev-client",
     "test": "jest --ci --runInBand",
+    "release:check": "node scripts/release/release-check.js",
     "validate:service-area": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
     "validate:env:dev": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
     "validate:env:prod": "node functions/scripts/validate-config.js --project drivelocal-prod --expect-env production",

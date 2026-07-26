@@ -49,6 +49,10 @@ function subscriptionAlreadyCovered(driver, nowMs) {
   return founderCovered || freeRidesRemaining;
 }
 
+function accountDeletionPending(driver) {
+  return ['requested', 'processing'].includes(driver?.accountDeletionStatus);
+}
+
 /**
  * @param {{db:object, request:object, context:object, clock:{now:()=>number}, adapter:object}} args
  */
@@ -80,11 +84,17 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) {
     throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
-      internalMessage: `driver not found: ${driverId}`,
+      internalMessage: 'authenticated driver profile not found',
       safeMetadata: { field: 'driverId' },
     });
   }
   const driver = driverSnap.data() || {};
+  if (accountDeletionPending(driver)) {
+    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+      internalMessage: 'authenticated driver requested account deletion',
+      safeMetadata: { reason: 'ACCOUNT_DELETION_PENDING' },
+    });
+  }
 
   // Resolve the amount server-side per purpose (never trust a client amount for
   // subscription; restrict wallet to the pilot allowlist).
@@ -135,7 +145,7 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
       return acq.resultReference || null;
     }
     throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT, {
-      internalMessage: `payment creation already in progress for key "${idempotencyKey}"`,
+      internalMessage: 'payment creation already in progress for this idempotency operation',
     });
   }
 
@@ -209,4 +219,8 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
   return safeResult;
 }
 
-module.exports = { createDriverPixPayment, subscriptionAlreadyCovered };
+module.exports = {
+  createDriverPixPayment,
+  subscriptionAlreadyCovered,
+  accountDeletionPending,
+};

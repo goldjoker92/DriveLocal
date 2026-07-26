@@ -13,6 +13,10 @@ const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
 const { createRideRequestSecure } = require('./createRideRequest');
 const { acceptDriverOfferSecure } = require('./acceptOffer');
 const { declineDriverOfferSecure } = require('./declineOffer');
+const { markDriverArrived } = require('./markDriverArrived');
+const { cancelRide } = require('./cancelRide');
+const { normalizedCancellationRequest } = require('./cancellationCompatibility');
+const { sendRideQuickMessage } = require('./sendQuickMessage');
 const lifecycle = require('./lifecycle');
 const { resolveRideDispute } = require('./disputeResolution');
 const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
@@ -27,6 +31,15 @@ function bindLifecycle(name, handler) {
       handler({ db: admin.firestore(), request, context, clock: systemClock })
     )
   );
+}
+
+async function cancelRideWithCompatibility({ db, request, context, clock }) {
+  return cancelRide({
+    db,
+    request: normalizedCancellationRequest(request),
+    context,
+    clock,
+  });
 }
 
 // Older driver profiles store Pix fields on drivers/{uid}, while the secure ride
@@ -95,12 +108,13 @@ module.exports = {
   createRideRequestSecure: createRideRequestSecureFn,
   acceptDriverOfferSecure: acceptDriverOfferSecureFn,
   declineDriverOfferSecure: declineDriverOfferSecureFn,
-  markDriverArrivedSecure: bindLifecycle('markDriverArrivedSecure', lifecycle.markDriverArrived),
+  markDriverArrivedSecure: bindLifecycle('markDriverArrivedSecure', markDriverArrived),
   startRideSecure: bindLifecycle('startRideSecure', lifecycle.startRide),
   finishRideSecure: bindLifecycle('finishRideSecure', finishRideWithPixMigration),
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
   confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
-  cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide),
+  cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRideWithCompatibility),
+  sendRideQuickMessageSecure: bindLifecycle('sendRideQuickMessageSecure', sendRideQuickMessage),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
   getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),

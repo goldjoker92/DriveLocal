@@ -24,14 +24,34 @@ const SENSITIVE_KEY_PATTERNS = [
   'cpf', 'cnpj', 'cnh', 'rg', 'identity',
   'phone', 'telefone', 'whatsapp',
   'email', 'pixkey', 'pix_key', 'address', 'endereco',
-  'rawpayload', 'providerpayload',
+  'rawpayload', 'providerpayload', 'internalmessage',
 ];
+
+// Exact identity keys. They cannot use substring matching because safe correlation
+// fields such as actorUidHash and driverIdHash must remain visible.
+const SENSITIVE_IDENTITY_KEYS = new Set([
+  'uid',
+  'actoruid',
+  'subjectuid',
+  'recipientuid',
+  'targetuid',
+  'targetuserid',
+  'userid',
+  'driverid',
+  'passengerid',
+]);
+
 const REDACTED = '[REDACTED]';
 const MAX_DEPTH = 8;
 
+function normalizedKey(key) {
+  return String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 function isSensitiveKey(key) {
   const k = String(key).toLowerCase();
-  return SENSITIVE_KEY_PATTERNS.some((p) => k.includes(p));
+  return SENSITIVE_IDENTITY_KEYS.has(normalizedKey(key))
+    || SENSITIVE_KEY_PATTERNS.some((p) => k.includes(p));
 }
 
 /**
@@ -63,17 +83,21 @@ function createTraceId() {
 
 /**
  * Builds an immutable logger context carried through a request. A traceId is
- * generated when not supplied.
+ * generated when not supplied. actorUid remains available to handlers that may
+ * already read it, but structured logging always redacts it and exposes only its
+ * non-reversible actorUidHash.
  * @param {{traceId?:string, functionName?:string, environment?:string, actorType?:string, actorUid?:string}} [fields]
  */
 function createLoggerContext(fields = {}) {
-  return Object.freeze({
+  const context = {
     traceId: fields.traceId || createTraceId(),
     functionName: fields.functionName,
     environment: fields.environment,
     actorType: fields.actorType,
     actorUid: fields.actorUid,
-  });
+  };
+  if (fields.actorUid) context.actorUidHash = shortHash(fields.actorUid);
+  return Object.freeze(context);
 }
 
 function buildEntry(context, eventName, severity, extra) {
@@ -87,8 +111,8 @@ function logInfo(context, eventName, extra) {
 function logWarning(context, eventName, extra) {
   flogger.warn(eventName, buildEntry(context, eventName, 'WARNING', extra));
 }
-// Errors are logged server-side only; a sanitized internal message may be
-// included, but stack traces are never returned to the client.
+// Error logs retain stable code/retryability/trace metadata. internalMessage is
+// always redacted because free text can accidentally contain identifiers or secrets.
 function logError(context, eventName, extra) {
   flogger.error(eventName, buildEntry(context, eventName, 'ERROR', extra));
 }
@@ -114,5 +138,6 @@ module.exports = {
   measureDuration,
   shortHash,
   SENSITIVE_KEY_PATTERNS,
+  SENSITIVE_IDENTITY_KEYS,
   REDACTED,
 };

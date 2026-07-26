@@ -10,6 +10,13 @@ if (admin.apps.length === 0) {
 const { health } = require('./diagnostics/health');
 exports.health = health;
 
+const clientErrorCallables = require('./clientErrors/callables');
+exports.reportClientErrorSecure = clientErrorCallables.reportClientErrorSecure;
+
+const accountCallables = require('./accounts/callables');
+exports.requestAccountDeletionSecure = accountCallables.requestAccountDeletionSecure;
+exports.processAccountDeletionRequest = accountCallables.processAccountDeletionRequest;
+
 const driverCallables = require('./drivers/callables');
 exports.approveDriverSecure = driverCallables.approveDriverSecure;
 exports.rejectDriverSecure = driverCallables.rejectDriverSecure;
@@ -38,6 +45,7 @@ exports.finishRideSecure = rideCallables.finishRideSecure;
 exports.markPassengerPixSentSecure = rideCallables.markPassengerPixSentSecure;
 exports.confirmDriverPixReceivedSecure = rideCallables.confirmDriverPixReceivedSecure;
 exports.cancelRideSecure = rideCallables.cancelRideSecure;
+exports.sendRideQuickMessageSecure = rideCallables.sendRideQuickMessageSecure;
 exports.reportRidePaymentIssueSecure = rideCallables.reportRidePaymentIssueSecure;
 exports.resolveRideDisputeSecure = rideCallables.resolveRideDisputeSecure;
 exports.getAdminRideSummarySecure = rideCallables.getAdminRideSummarySecure;
@@ -45,10 +53,32 @@ exports.listAdminDisputedRidesSecure = rideCallables.listAdminDisputedRidesSecur
 
 const { expireRideOffersTask } = require('./rides/expireOffersTask');
 exports.expireRideOffersTask = expireRideOffersTask;
+const {
+  cancellationNotificationStatusTrigger,
+} = require('./rides/cancellationNotificationStatus');
+exports.cancellationNotificationStatusTrigger = cancellationNotificationStatusTrigger;
 
 const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
 exports.processRideNotificationEvent = notificationCallables.processRideNotificationEvent;
+
+const supportCallables = require('./support/callables');
+exports.createSupportTicketSecure = supportCallables.createSupportTicketSecure;
+exports.listMySupportTicketsSecure = supportCallables.listMySupportTicketsSecure;
+exports.listAdminSupportTicketsSecure = supportCallables.listAdminSupportTicketsSecure;
+exports.updateAdminSupportTicketSecure = supportCallables.updateAdminSupportTicketSecure;
+exports.pseudonymizeSupportTicketsOnAccountDeletion =
+  supportCallables.pseudonymizeSupportTicketsOnAccountDeletion;
+
+const adminAlertCallables = require('./adminAlerts/callables');
+exports.listAdminAlertsSecure = adminAlertCallables.listAdminAlertsSecure;
+exports.updateAdminAlertSecure = adminAlertCallables.updateAdminAlertSecure;
+exports.supportTicketAdminAlertTrigger = adminAlertCallables.supportTicketAdminAlertTrigger;
+exports.rideDisputeAdminAlertTrigger = adminAlertCallables.rideDisputeAdminAlertTrigger;
+exports.paymentReviewAdminAlertTrigger = adminAlertCallables.paymentReviewAdminAlertTrigger;
+exports.riskCaseAdminAlertTrigger = adminAlertCallables.riskCaseAdminAlertTrigger;
+exports.accountDeletionAdminAlertTrigger = adminAlertCallables.accountDeletionAdminAlertTrigger;
+exports.clientErrorAdminAlertTrigger = adminAlertCallables.clientErrorAdminAlertTrigger;
 
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;

@@ -91,6 +91,37 @@ export default function PassengerHome() {
 
         <AppButton title="Pedir corrida" onPress={openRideRequest} />
 
+        <AppCard>
+          <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
+            Ajuda e suporte
+          </Text>
+          <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+            Abra uma solicitação por categoria e acompanhe o status sem compartilhar dados pessoais.
+          </Text>
+          <AppButton
+            title="ABRIR SUPORTE"
+            variant="secondary"
+            onPress={() => router.push({
+              pathname: '/support-center',
+              params: { source: 'passenger_home' },
+            })}
+          />
+        </AppCard>
+
+        <AppCard>
+          <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
+            Conta e privacidade
+          </Text>
+          <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+            Consulte seus dados, a política de privacidade e a exclusão da conta.
+          </Text>
+          <AppButton
+            title="PRIVACIDADE E CONTA"
+            variant="ghost"
+            onPress={() => router.push('/privacy-center')}
+          />
+        </AppCard>
+
         {error ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text> : null}
       </ScrollView>
     </SafeAreaView>

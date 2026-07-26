@@ -1,8 +1,11 @@
 // Driver work-session client. Availability is server-authoritative: the app asks
 // to start/stop working and receives the session id that every GPS point must use.
+// Device readiness is validated before the server session is opened so the
+// cockpit can never turn green without GPS and notifications actually working.
 
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
+import { prepareDriverDeviceForAvailability } from './driverDeviceDiagnostics';
 
 const setDriverAvailabilitySecure = httpsCallable(functions, 'setDriverAvailabilitySecure');
 
@@ -34,10 +37,37 @@ function normalizedResult(response) {
   };
 }
 
+function deviceNotReadyError(diagnostic) {
+  const error = new Error('DRIVER_DEVICE_NOT_READY');
+  error.code = 'DRIVER_DEVICE_NOT_READY';
+  error.details = {
+    message: diagnostic?.primaryIssue?.message
+      || 'Verifique o GPS e as notificações antes de começar a trabalhar.',
+    issueCode: diagnostic?.primaryIssue?.code || 'unknown',
+    retryable: diagnostic?.primaryIssue?.action !== 'settings',
+  };
+  return error;
+}
+
 export async function startDriverWorkSession() {
   const startedAt = Date.now();
   traceAvailability('work_session.start_requested', { desiredStatus: 'online' });
   try {
+    const diagnostic = await prepareDriverDeviceForAvailability();
+    if (!diagnostic.readyForAvailability) {
+      traceAvailability('work_session.start_rejected', {
+        reason: 'device_not_ready',
+        issueCode: diagnostic.primaryIssue?.code || 'unknown',
+        result: 'offline',
+      }, 'warn');
+      throw deviceNotReadyError(diagnostic);
+    }
+
+    traceAvailability('work_session.device_ready', {
+      devSimulationBypass: diagnostic.devSimulationBypass === true,
+      result: 'preflight_passed',
+    });
+
     const response = await setDriverAvailabilitySecure({ availabilityStatus: 'online' });
     const result = normalizedResult(response);
     if (result.availabilityStatus !== 'online' || !result.availabilitySessionId) {
@@ -56,6 +86,7 @@ export async function startDriverWorkSession() {
   } catch (error) {
     traceAvailability('work_session.start_failed', {
       reason: error?.code || error?.message || 'unknown',
+      issueCode: error?.details?.issueCode || null,
       durationMs: Date.now() - startedAt,
       result: 'offline',
     }, 'warn');

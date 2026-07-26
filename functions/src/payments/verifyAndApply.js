@@ -12,6 +12,11 @@ const { logInfo, logWarning } = require('../logging/logger');
 const { applyWalletTopup, applySubscription, markManualReview } = require('./applyPayment');
 const C = require('./constants');
 
+function accountDeletedPayment(pay) {
+  return pay?.accountDeleted === true
+    || String(pay?.driverId || '').startsWith('deleted_driver_');
+}
+
 /**
  * @param {{db:object, adapter:object, providerOrderId:string, context:object,
  *          clock:{now:()=>number}, environment?:string, source:string}} args
@@ -42,6 +47,32 @@ async function verifyAndApplyOrder({ db, adapter, providerOrderId, context, cloc
     return { outcome: 'verification_failed', event: 'payment.verification_failed', localPaymentId };
   }
   const pay = snap.data() || {};
+
+  // Account deletion is a terminal application barrier. A provider callback can
+  // arrive after the local request was cancelled/pseudonymized; it must never
+  // recreate a wallet balance or subscription for a deleted Firebase account.
+  if (accountDeletedPayment(pay)) {
+    const providerPaid = order.normalizedStatus === C.STATUS.PAID
+      || order.normalizedStatus === C.STATUS.REFUNDED;
+    await paymentRef.set({
+      status: providerPaid ? C.STATUS.MANUAL_REVIEW : C.STATUS.CANCELLED,
+      manualReviewReason: providerPaid ? 'account_deleted_provider_payment' : null,
+      cancellationReason: 'account_deleted',
+      updatedAt: clock.now(),
+    }, { merge: true });
+    logWarning(context, 'payment.account_deleted_ignored', {
+      operation: source,
+      providerOrderId,
+      localPaymentId,
+      normalizedStatus: order.normalizedStatus,
+      outcome: providerPaid ? 'manual_review' : 'cancelled',
+    });
+    return {
+      outcome: providerPaid ? 'manual_review' : 'account_deleted_ignored',
+      event: 'payment.account_deleted_ignored',
+      localPaymentId,
+    };
+  }
 
   // 3. Verify the notification really matches this local request. Any mismatch
   //    NEVER credits — it becomes manual_review.
@@ -148,4 +179,4 @@ async function verifyAndApplyOrder({ db, adapter, providerOrderId, context, cloc
   return { outcome: applyRes.duplicate ? 'duplicate' : 'applied', event: applyRes.event, localPaymentId };
 }
 
-module.exports = { verifyAndApplyOrder };
+module.exports = { verifyAndApplyOrder, accountDeletedPayment };

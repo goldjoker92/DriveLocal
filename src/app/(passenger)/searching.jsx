@@ -19,6 +19,7 @@ import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { formatBRL, formatDistanceKm, formatDurationMinutes } from '../../utils/format';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { listenToRide, cancelRide } from '../../services/ridesService';
+import { networkErrorMessage } from '../../services/networkRecoveryService';
 
 const STATUS_LABEL = {
   searching: 'Procurando um motorista próximo…',
@@ -27,6 +28,7 @@ const STATUS_LABEL = {
   in_progress: 'Corrida em andamento.',
   awaiting_payment: 'Corrida finalizada. Abra o pagamento Pix.',
   payment_marked_sent: 'Pagamento informado. Aguardando confirmação.',
+  disputed: 'Pagamento em análise. Abra o acompanhamento Pix.',
   no_driver_available: 'Nenhum motorista disponível no momento.',
   dispatch_failed: 'Não foi possível procurar motoristas. Tente novamente.',
   cancelled: 'Corrida cancelada.',
@@ -86,6 +88,7 @@ export default function Searching() {
       (nextRide) => {
         if (!nextRide) return;
         setRide(nextRide);
+        setError('');
 
         logRideClientEvent('ride.searching.status_processed', {
           rideId,
@@ -95,7 +98,7 @@ export default function Searching() {
 
         if (['assigned', 'driver_arrived', 'in_progress'].includes(nextRide.status)) {
           router.replace({ pathname: '/driver-accepted', params: { rideId } });
-        } else if (['awaiting_payment', 'payment_marked_sent'].includes(nextRide.status)) {
+        } else if (['awaiting_payment', 'payment_marked_sent', 'disputed'].includes(nextRide.status)) {
           router.replace({ pathname: '/pix-payment', params: { rideId } });
         } else if (nextRide.status === 'completed') {
           router.replace({ pathname: '/ride-completed', params: { rideId } });
@@ -105,7 +108,10 @@ export default function Searching() {
       },
       (listenerError) => {
         logRideClientEvent('ride.searching.listener_failed', { rideId, error: listenerError }, 'error');
-        setError('Não foi possível acompanhar a busca. Verifique sua conexão.');
+        setError(networkErrorMessage(
+          listenerError,
+          'Não foi possível acompanhar a busca. Recarregue a tela.'
+        ));
       }
     );
   }, [rideId, router]);
@@ -119,11 +125,7 @@ export default function Searching() {
       await cancelRide(rideId, 'passageiro_cancelou_busca');
       router.replace('/passenger-home');
     } catch (cancelError) {
-      setError(
-        cancelError?.details?.message ||
-        cancelError?.message ||
-        'Não foi possível cancelar a corrida.'
-      );
+      setError(networkErrorMessage(cancelError, 'Não foi possível cancelar a corrida.'));
     } finally {
       setBusy(false);
     }

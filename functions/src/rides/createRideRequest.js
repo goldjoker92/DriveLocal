@@ -45,6 +45,10 @@ function sanitizeCoord(value, field) {
   return out;
 }
 
+function accountDeletionPending(profile) {
+  return ['requested', 'processing'].includes(profile?.accountDeletionStatus);
+}
+
 async function clearPassengerActiveRideIfCurrent({ db, passengerId, rideId }) {
   const paxRef = db.collection(C.PASSENGERS).doc(passengerId);
   return db.runTransaction(async (tx) => {
@@ -100,7 +104,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
   if (!acq.acquired) {
     if (acq.state === OPERATION_STATES.COMPLETED) return acq.resultReference || null;
     throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT, {
-      internalMessage: `ride creation already in progress for key "${idempotencyKey}"`,
+      internalMessage: 'ride creation already in progress for this idempotency operation',
     });
   }
 
@@ -108,6 +112,19 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
     const paxRef = db.collection(C.PASSENGERS).doc(passengerId);
     const paxSnap = await paxRef.get();
     const passenger = paxSnap.exists ? paxSnap.data() || {} : {};
+
+    if (accountDeletionPending(passenger)) {
+      logInfo(context, 'ride.create.account_deletion_blocked', {
+        operation: OPERATION_TYPE,
+        result: 'blocked_new_ride',
+        reasonCode: 'ACCOUNT_DELETION_PENDING',
+      });
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+        internalMessage: 'authenticated passenger requested account deletion',
+        safeMetadata: { reason: 'ACCOUNT_DELETION_PENDING' },
+      });
+    }
+
     const eligibility = evaluatePassengerRideEligibility(passenger, clock);
     if (!eligibility.canRequestRide) {
       logInfo(context, 'ride.create.passenger_restricted', {
@@ -116,7 +133,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         reasonCode: eligibility.reasonCode,
       });
       throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-        internalMessage: `passenger ${passengerId} cannot request a ride: ${eligibility.reasonCode}`,
+        internalMessage: `passenger account cannot request a ride: ${eligibility.reasonCode}`,
         safeMetadata: {
           reason: eligibility.reasonCode,
           restrictionUntilMs: eligibility.restrictionUntilMs,
@@ -130,7 +147,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       const activeStatus = activeSnap.exists ? (activeSnap.data() || {}).status : null;
       if (activeStatus && C.NON_FINAL_RIDE_STATUSES.includes(activeStatus)) {
         throw new AppError(ERROR_CODES.RIDE_IN_PROGRESS, {
-          internalMessage: `passenger ${passengerId} already has ride ${activeRideId} (${activeStatus})`,
+          internalMessage: `passenger account already has ride ${activeRideId} (${activeStatus})`,
         });
       }
     }
@@ -254,4 +271,5 @@ module.exports = {
   createRideRequestSecure,
   clearPassengerActiveRideIfCurrent,
   sanitizeCoord,
+  accountDeletionPending,
 };

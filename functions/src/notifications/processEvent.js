@@ -4,10 +4,11 @@
 // Firebase Admin Messaging (real), records a safe result, disables invalid
 // tokens, and is idempotent (a re-run on an already-processed event is ignored).
 //
-// The message contains a generic, visible notification plus a strict strings-only
-// data payload. No coordinates, address, Pix, wallet or other PII are sent.
+// The message contains a generic or server-catalogued visible notification plus a
+// strict strings-only data payload. No coordinates, address, Pix, wallet or PII.
 
 const { logInfo, logWarning } = require('../logging/logger');
+const { quickMessagePresentation } = require('../rides/quickMessageCatalog');
 const C = require('../rides/constants');
 
 // FCM error codes meaning the token is dead and must be disabled.
@@ -56,12 +57,23 @@ const PRESENTATION = Object.freeze({
   },
 });
 
+function presentationForEvent(event) {
+  if (event?.eventType === C.NOTIFICATION_EVENT.RIDE_QUICK_MESSAGE) {
+    return quickMessagePresentation(event.messageCode);
+  }
+  return PRESENTATION[event?.eventType] || {
+    title: 'Atualização da corrida',
+    body: 'Abra a DriveLocal para ver os detalhes.',
+  };
+}
+
 function dataPayload(event) {
   return {
     notificationId: String(event.notificationId),
     eventType: String(event.eventType),
     rideId: String(event.rideId),
     offerId: event.offerId ? String(event.offerId) : '',
+    ...(event.messageCode ? { messageCode: String(event.messageCode) } : {}),
     recipientRole: String(event.recipientRole),
     route: event.route ? String(event.route) : '',
     traceId: event.traceId ? String(event.traceId) : '',
@@ -69,10 +81,7 @@ function dataPayload(event) {
 }
 
 function buildMulticastMessage(event, tokens) {
-  const presentation = PRESENTATION[event.eventType] || {
-    title: 'Atualização da corrida',
-    body: 'Abra a DriveLocal para ver os detalhes.',
-  };
+  const presentation = presentationForEvent(event);
   const channelId = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED
     ? C.NOTIFICATION_CHANNELS.RIDE_OFFERS
     : C.NOTIFICATION_CHANNELS.RIDE_STATUS;
@@ -153,4 +162,11 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
   return { status, successCount, failureCount };
 }
 
-module.exports = { processRideNotificationEvent, buildMulticastMessage, INVALID_TOKEN_CODES, PRESENTATION };
+module.exports = {
+  processRideNotificationEvent,
+  buildMulticastMessage,
+  presentationForEvent,
+  dataPayload,
+  INVALID_TOKEN_CODES,
+  PRESENTATION,
+};

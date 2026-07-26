@@ -6,20 +6,21 @@
 // Firestore onCreate trigger therefore fires once.
 //
 // Payload carries STRINGS ONLY — never coordinates, address, Pix, wallet, phone,
-// email or other private data.
+// email or other private data. Quick messages carry a catalog code, never free text.
 
 const admin = require('firebase-admin');
 const C = require('../rides/constants');
 
 // dedupeSuffix defaults to recipientRole (one event per ride+event+recipient).
-// For fan-out cases (e.g. one offer per driver) pass a unique suffix (driverId).
+// For fan-out or repeatable events pass a unique, server-generated suffix.
 function eventId(rideId, eventType, suffix) {
   return `${rideId}_${eventType}_${suffix}`;
 }
 
 /**
  * @param {{rideId:string, eventType:string, recipientUid:string, recipientRole:string,
- *          route:string, offerId?:string, traceId?:string, nowMs:number, dedupeSuffix?:string}} p
+ *          route:string, offerId?:string, messageCode?:string, traceId?:string,
+ *          nowMs:number, dedupeSuffix?:string}} p
  */
 function buildNotificationEvent(p) {
   const id = eventId(p.rideId, p.eventType, p.dedupeSuffix || p.recipientRole);
@@ -30,6 +31,7 @@ function buildNotificationEvent(p) {
       eventType: p.eventType,
       rideId: p.rideId,
       offerId: p.offerId || null,
+      ...(p.messageCode ? { messageCode: p.messageCode } : {}),
       recipientUid: p.recipientUid,
       recipientRole: p.recipientRole,
       route: p.route || null,
