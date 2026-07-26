@@ -49,6 +49,12 @@ function subscriptionCopy(subscription) {
   return { value: 'Necessária', detail: 'ative para receber ofertas' };
 }
 
+function walletCopy(summary, commission) {
+  if (commission?.mode === 'free') return 'nenhuma recarga necessária';
+  if (summary.walletState === 'blocked') return 'recarga necessária';
+  return 'disponível para comissões';
+}
+
 export default function DriverCockpitDashboardCard({
   summary,
   commission,
@@ -59,7 +65,7 @@ export default function DriverCockpitDashboardCard({
   const heldPrefix = summary.walletHeldCentavos > 0
     ? `${formatBRL(summary.walletHeldCentavos)} reservado • `
     : '';
-  const walletDetail = `${heldPrefix}${summary.walletStatusLabel}`;
+  const walletDetail = `${heldPrefix}${walletCopy(summary, commission)}`;
 
   return (
     <AppCard style={styles.card}>
