@@ -12,6 +12,10 @@ describe('client ride debug logs', () => {
       serviceAreaId: 'horizonte-ce',
       vehicleType: 'moto',
       estimatedFareCentavos: 905,
+      commissionDisplayBps: 1200,
+      commissionHoldCentavos: 109,
+      commissionCapturedCentavos: 109,
+      holdReleasedCentavos: 0,
       routeDistanceMeters: 5000,
       routeDurationSeconds: 900,
       pricingConfigVersion: 'pricing-v1',
@@ -29,6 +33,7 @@ describe('client ride debug logs', () => {
       serviceAreaId: 'horizonte-ce',
       vehicleType: 'moto',
       estimatedFareCentavos: 905,
+      commissionDisplayBps: 1200,
       routeDistanceMeters: 5000,
       routeDurationSeconds: 900,
       hasPickup: true,
@@ -38,6 +43,9 @@ describe('client ride debug logs', () => {
       hasAcceptedDriver: true,
       hasPixPaymentPayload: true,
     });
+    expect(snapshot).not.toHaveProperty('commissionHoldCentavos');
+    expect(snapshot).not.toHaveProperty('commissionCapturedCentavos');
+    expect(snapshot).not.toHaveProperty('holdReleasedCentavos');
 
     const serialized = JSON.stringify(snapshot);
     expect(serialized).not.toContain('Rua privada');
@@ -47,6 +55,13 @@ describe('client ride debug logs', () => {
     expect(serialized).not.toContain('driver_private_uid');
     expect(serialized).not.toContain('-4.1');
     expect(serialized).not.toContain('-38.5');
+  });
+
+  it('drops commission percentages outside the closed 0/12/15 vocabulary', () => {
+    expect(sanitizeRideForClientLog({ commissionDisplayBps: 940 }))
+      .not.toHaveProperty('commissionDisplayBps');
+    expect(sanitizeRideForClientLog({ commissionDisplayBps: 0 }).commissionDisplayBps).toBe(0);
+    expect(sanitizeRideForClientLog({ commissionDisplayBps: 1500 }).commissionDisplayBps).toBe(1500);
   });
 
   it('normalizes Firebase callable error details without stacks or causes', () => {
