@@ -89,14 +89,15 @@ function createTraceId() {
  * @param {{traceId?:string, functionName?:string, environment?:string, actorType?:string, actorUid?:string}} [fields]
  */
 function createLoggerContext(fields = {}) {
-  return Object.freeze({
+  const context = {
     traceId: fields.traceId || createTraceId(),
     functionName: fields.functionName,
     environment: fields.environment,
     actorType: fields.actorType,
     actorUid: fields.actorUid,
-    actorUidHash: fields.actorUid ? shortHash(fields.actorUid) : undefined,
-  });
+  };
+  if (fields.actorUid) context.actorUidHash = shortHash(fields.actorUid);
+  return Object.freeze(context);
 }
 
 function buildEntry(context, eventName, severity, extra) {
