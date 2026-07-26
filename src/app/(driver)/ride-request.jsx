@@ -1,89 +1,28 @@
 // Incoming targeted ride offer (route "/ride-request").
-// Before acceptance only a generic/coarsened pickup region is shown. Acceptance
-// and refusal remain server-authoritative; this screen only presents safe data.
+// Before acceptance only a generic/coarsened pickup region is shown. Acceptance,
+// refusal and expiry remain server-authoritative; this screen only presents safe data.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import AnimatedAcceptRideButton from '../../components/AnimatedAcceptRideButton';
+import DriverTimedOfferCard from '../../components/DriverTimedOfferCard';
 import { colors } from '../../constants/colors';
 import { radius, spacing } from '../../constants/spacing';
-import { typography, fontFamily } from '../../constants/typography';
-import { formatBRL, formatDistanceKm } from '../../utils/format';
-import {
-  deriveRideOfferPresentation,
-  estimatePickupMinutes,
-  formatPickupEta,
-  vehicleLabel,
-} from '../../utils/rideOfferPresentation';
+import { fontFamily, typography } from '../../constants/typography';
+import { deriveDriverTimedOffer } from '../../utils/driverTimedOffer';
+import { deriveRideOfferPresentation } from '../../utils/rideOfferPresentation';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { auth } from '../../config/firebase';
 import { getDriver } from '../../services/driverService';
-import { listenToMyOffer, acceptOffer, declineOffer } from '../../services/ridesService';
-import { openWazeToPoint, openGoogleMapsToPoint } from '../../utils/maps';
+import { acceptOffer, declineOffer, listenToMyOffer } from '../../services/ridesService';
+import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 
-function InfoRow({ icon, label, value, detail, tone = 'default' }) {
-  const valueColor = tone === 'success'
-    ? colors.success
-    : tone === 'warning'
-      ? colors.warning
-      : colors.text;
-
-  return (
-    <View style={styles.infoRow}>
-      <View style={styles.infoIcon}><Text style={styles.infoIconText}>{icon}</Text></View>
-      <View style={styles.infoCopy}>
-        <Text style={styles.infoLabel}>{label}</Text>
-        <Text style={[styles.infoValue, { color: valueColor }]}>{value}</Text>
-        {detail ? <Text style={styles.infoDetail}>{detail}</Text> : null}
-      </View>
-    </View>
-  );
-}
-
-function StatusItem({ icon, title, detail, tone = 'default' }) {
-  const backgroundColor = tone === 'success'
-    ? colors.successBg
-    : tone === 'warning'
-      ? colors.warningBg
-      : colors.primaryTint;
-
-  return (
-    <View style={styles.statusItem}>
-      <View style={[styles.statusIcon, { backgroundColor }]}>
-        <Text style={styles.statusIconText}>{icon}</Text>
-      </View>
-      <View style={styles.statusCopy}>
-        <Text style={styles.statusTitle}>{title}</Text>
-        <Text style={styles.statusDetail}>{detail}</Text>
-      </View>
-    </View>
-  );
-}
-
-function BusinessContextPlaceholder({ failed = false }) {
-  return (
-    <AppCard style={failed ? styles.contextWarningCard : styles.statusCard}>
-      <View style={styles.contextRow}>
-        {!failed ? <ActivityIndicator size="small" color={colors.primary} /> : null}
-        <View style={styles.flex}>
-          <Text style={failed ? styles.contextWarningTitle : styles.statusTitle}>
-            {failed ? 'Comissão e benefícios indisponíveis' : 'Carregando comissão e benefícios…'}
-          </Text>
-          <Text style={styles.statusDetail}>
-            {failed
-              ? 'A oferta continua válida. O servidor verificará seu plano, sua promoção e sua carteira ao aceitar.'
-              : 'A oferta pode ser aceita enquanto essas informações são carregadas.'}
-          </Text>
-        </View>
-      </View>
-    </AppCard>
-  );
-}
+const KNOWN_VEHICLE_TYPES = new Set(['moto', 'car']);
 
 export default function RideRequest() {
   const router = useRouter();
@@ -150,6 +89,9 @@ export default function RideRequest() {
           rideId: nextOffer.rideId,
           status: nextOffer.status,
           vehicleType: nextOffer.vehicleType,
+          hasPickupRegion: Boolean(nextOffer.pickupPreview?.label),
+          hasPickupDistance: Number.isFinite(Number(nextOffer.distanceToPickupMeters)),
+          hasFare: Number.isFinite(Number(nextOffer.estimatedFareCentavos)),
         });
       }
       if (nextOffer?.status === 'accepted' && nextOffer.exactPickup) {
@@ -178,7 +120,10 @@ export default function RideRequest() {
     let expiring = false;
 
     const tick = async () => {
-      const remaining = Math.max(0, Math.ceil((Number(offer.expiresAtMs) - Date.now()) / 1000));
+      const remaining = Math.max(
+        0,
+        Math.ceil((Number(offer.expiresAtMs) - Date.now()) / 1000)
+      );
       setSecondsLeft(remaining);
       if (remaining !== 0 || expiring) return;
 
@@ -205,7 +150,14 @@ export default function RideRequest() {
     tick();
     const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
-  }, [offer?.offerId, offer?.expiresAtMs, offer?.status, offer?.rideId, offer?.vehicleType, router]);
+  }, [
+    offer?.offerId,
+    offer?.expiresAtMs,
+    offer?.status,
+    offer?.rideId,
+    offer?.vehicleType,
+    router,
+  ]);
 
   async function handleAccept() {
     if (!offer || accepting || declining || secondsLeft <= 0) return;
@@ -269,11 +221,14 @@ export default function RideRequest() {
   }
 
   async function openNav(which) {
-    if (!accepted?.pickup) return;
+    if (!accepted?.pickup || !KNOWN_VEHICLE_TYPES.has(accepted?.vehicleType)) return;
     setAcceptError('');
     try {
-      if (which === 'waze') await openWazeToPoint(accepted.pickup, accepted.vehicleType);
-      else await openGoogleMapsToPoint(accepted.pickup, accepted.vehicleType);
+      if (which === 'waze') {
+        await openWazeToPoint(accepted.pickup, accepted.vehicleType);
+      } else {
+        await openGoogleMapsToPoint(accepted.pickup, accepted.vehicleType);
+      }
     } catch (_error) {
       setAcceptError(which === 'waze'
         ? 'Não foi possível abrir o Waze. Tente o Google Maps.'
@@ -281,230 +236,90 @@ export default function RideRequest() {
     }
   }
 
-  const presentation = offer && driverContextStatus === 'ready' && driver
-    ? deriveRideOfferPresentation(driver, offer, Date.now())
-    : null;
-  const offerVehicleName = presentation?.vehicleName || vehicleLabel(offer?.vehicleType);
-  const pickupEtaMinutes = presentation?.pickupEtaMinutes
-    ?? estimatePickupMinutes(offer?.distanceToPickupMeters, offer?.vehicleType);
-  const urgent = secondsLeft <= 5;
-  const acceptDisabled = accepting || declining || secondsLeft <= 0;
-  const contextLoading = driverContextStatus === 'loading';
-  const contextFailed = driverContextStatus === 'failed';
+  // The commercial projection is presentation-only. Unknown vehicle data never
+  // falls back to a car percentage; the server validates eligibility on acceptance.
+  const presentation = useMemo(() => (
+    offer
+    && driverContextStatus === 'ready'
+    && driver
+    && KNOWN_VEHICLE_TYPES.has(offer.vehicleType)
+      ? deriveRideOfferPresentation(driver, offer, Date.now())
+      : null
+  ), [offer, driverContextStatus, driver]);
+
+  const compactOffer = useMemo(() => deriveDriverTimedOffer({
+    offer,
+    secondsLeft,
+    commissionPercentLabel: presentation?.commissionPercentLabel || null,
+    commissionStatus: driverContextStatus,
+  }), [offer, secondsLeft, presentation?.commissionPercentLabel, driverContextStatus]);
+
+  const acceptDisabled = accepting
+    || declining
+    || secondsLeft <= 0
+    || !compactOffer.visible;
+  const acceptedNavigationDisabled = !accepted?.pickup
+    || !KNOWN_VEHICLE_TYPES.has(accepted?.vehicleType);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Header
-            title="Nova corrida"
-            subtitle={accepted ? 'Corrida aceita' : 'Analise os detalhes antes de aceitar'}
-          />
-
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
           {accepted ? (
-            <AppCard>
-              <Text style={styles.acceptedTitle}>Corrida aceita!</Text>
-              <Text style={styles.muted}>O endereço exato do embarque já está liberado.</Text>
-              <View style={styles.stack}>
-                <AppButton title="Abrir no Waze" onPress={() => openNav('waze')} />
-                <AppButton title="Abrir no Google Maps" onPress={() => openNav('gmaps')} />
-              </View>
-              <AppButton
-                title="Ir para a corrida"
-                variant="ghost"
-                onPress={() => router.replace({
-                  pathname: '/active-ride',
-                  params: { rideId: accepted.rideId },
-                })}
-              />
-            </AppCard>
-          ) : offer ? (
             <>
-              <AppCard style={styles.offerCard}>
-                <View style={styles.offerHeader}>
-                  <View style={styles.offerHeading}>
-                    <Text style={styles.eyebrow}>OFERTA PARA {offerVehicleName.toUpperCase()}</Text>
-                    <Text style={styles.offerTitle}>Corrida disponível</Text>
-                  </View>
-                  <View style={[styles.countdown, urgent && styles.countdownUrgent]}>
-                    <Text style={[styles.countdownValue, urgent && styles.countdownUrgentText]}>
-                      {secondsLeft}s
-                    </Text>
-                    <Text style={[styles.countdownLabel, urgent && styles.countdownUrgentText]}>
-                      para responder
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.pickupBox}>
-                  <Text style={styles.pickupIcon}>📍</Text>
-                  <View style={styles.flex}>
-                    <Text style={styles.label}>Embarque</Text>
-                    <Text style={styles.pickupText}>
-                      {offer.pickupPreview?.label || 'Região do embarque'}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.moneyRow}>
-                  <View style={styles.moneyBox}>
-                    <Text style={styles.label}>Valor estimado</Text>
-                    <Text style={styles.moneyValue}>{formatBRL(offer.estimatedFareCentavos)}</Text>
-                  </View>
-                  <View style={[styles.moneyBox, presentation ? styles.netBox : null]}>
-                    <Text style={styles.label}>Você recebe</Text>
-                    <Text style={[styles.moneyValue, presentation ? styles.successText : styles.pendingText]}>
-                      {presentation
-                        ? formatBRL(presentation.driverNetCentavos)
-                        : contextLoading
-                          ? 'Calculando…'
-                          : '—'}
-                    </Text>
-                    {!presentation ? (
-                      <Text style={styles.moneyDetail}>
-                        {contextFailed ? 'Validado ao aceitar' : 'Comissão em carregamento'}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
-
-                <View style={styles.infoList}>
-                  <InfoRow
-                    icon="⏱"
-                    label="Tempo estimado até o embarque"
-                    value={formatPickupEta(pickupEtaMinutes)}
+              <Header title="Corrida aceita" subtitle="O embarque exato foi liberado" />
+              <AppCard style={styles.acceptedCard}>
+                <Text style={styles.acceptedTitle}>Corrida aceita!</Text>
+                <Text style={styles.muted}>
+                  Abra sua navegação ou entre na tela permanente da corrida.
+                </Text>
+                <View style={styles.stack}>
+                  <AppButton
+                    title="Abrir no Waze"
+                    onPress={() => openNav('waze')}
+                    disabled={acceptedNavigationDisabled}
                   />
-                  <InfoRow
-                    icon="↔"
-                    label="Distância até o embarque"
-                    value={formatDistanceKm(offer.distanceToPickupMeters)}
-                  />
-                  <InfoRow
-                    icon="%"
-                    label="Comissão desta corrida"
-                    value={presentation
-                      ? presentation.commissionPercentLabel
-                      : contextLoading
-                        ? 'Carregando…'
-                        : 'Validada ao aceitar'}
-                    detail={presentation
-                      ? presentation.commissionFree
-                        ? 'Promo de 0% ativa'
-                        : presentation.minimumGuaranteeApplied
-                          ? 'Ajustada pela garantia mínima do motorista'
-                          : `Taxa para ${presentation.vehicleName.toLowerCase()}`
-                      : 'Nenhum percentual provisório é exibido.'}
-                    tone={presentation?.commissionFree ? 'success' : 'default'}
-                  />
-                  <InfoRow
-                    icon="PIX"
-                    label="Pagamento"
-                    value="Pix direto ao motorista"
-                    detail="Você confirma após receber na sua conta."
-                  />
-                  <InfoRow
-                    icon="🔒"
-                    label="Destino"
-                    value="Liberado após o início da corrida"
+                  <AppButton
+                    title="Abrir no Google Maps"
+                    variant="secondary"
+                    onPress={() => openNav('gmaps')}
+                    disabled={acceptedNavigationDisabled}
                   />
                 </View>
-
-                {presentation?.acceptanceRate != null ? (
-                  <View style={styles.acceptanceChip}>
-                    <Text style={styles.acceptanceLabel}>Taxa de aceitação</Text>
-                    <Text style={styles.acceptanceValue}>{presentation.acceptanceRate}%</Text>
-                  </View>
-                ) : null}
+                <AppButton
+                  title="Ir para a corrida"
+                  variant="ghost"
+                  onPress={() => router.replace({
+                    pathname: '/active-ride',
+                    params: { rideId: accepted.rideId },
+                  })}
+                />
               </AppCard>
-
-              {contextLoading ? <BusinessContextPlaceholder /> : null}
-              {contextFailed ? <BusinessContextPlaceholder failed /> : null}
-
-              {presentation ? (
-                <AppCard style={styles.statusCard}>
-                  <Text style={styles.sectionTitle}>SEU STATUS NESTA OFERTA</Text>
-
-                  {presentation.founderBenefitActive ? (
-                    <StatusItem
-                      icon="🎉"
-                      title="Promo Fundador"
-                      detail={`0% de comissão + assinatura grátis por 60 dias${presentation.founderBenefitUntilLabel ? `, até ${presentation.founderBenefitUntilLabel}` : ''}.`}
-                      tone="success"
-                    />
-                  ) : presentation.commissionFree ? (
-                    <StatusItem
-                      icon="🎁"
-                      title="Comissão promocional"
-                      detail={`0% de comissão${presentation.commissionFreeUntilLabel ? ` até ${presentation.commissionFreeUntilLabel}` : ''}.`}
-                      tone="success"
-                    />
-                  ) : null}
-
-                  {!presentation.founderBenefitActive && presentation.paidPlanActive ? (
-                    <StatusItem
-                      icon="✓"
-                      title="Plano ativo"
-                      detail={`Plano ${presentation.vehicleName}: ${formatBRL(presentation.planCentavos)}/mês${presentation.subscriptionExpiresAtLabel ? `. Próximo pagamento: ${presentation.subscriptionExpiresAtLabel}` : ''}.`}
-                      tone="success"
-                    />
-                  ) : null}
-
-                  {!presentation.founder && !presentation.paidPlanActive && presentation.freeRidesRemaining > 0 ? (
-                    <StatusItem
-                      icon="📦"
-                      title="Plano em breve"
-                      detail={`${presentation.freeRidesRemaining} ${presentation.freeRidesRemaining === 1 ? 'corrida restante' : 'corridas restantes'} antes do plano. Plano ${presentation.vehicleName}: ${formatBRL(presentation.planCentavos)}/mês. Depois, ative o plano para continuar recebendo corridas.`}
-                    />
-                  ) : null}
-
-                  {presentation.subscriptionRequired ? (
-                    <StatusItem
-                      icon="!"
-                      title="Plano necessário"
-                      detail="A elegibilidade será validada novamente pelo servidor ao aceitar."
-                      tone="warning"
-                    />
-                  ) : null}
-                </AppCard>
-              ) : null}
-
-              {presentation ? (
-                <AppCard style={presentation.walletLow ? styles.walletLowCard : styles.walletCard}>
-                  <InfoRow
-                    icon="👛"
-                    label={presentation.walletLow ? 'Saldo baixo' : 'Saldo da carteira'}
-                    value={formatBRL(presentation.walletBalanceCentavos)}
-                    tone={presentation.walletLow ? 'warning' : 'default'}
-                  />
-                  {presentation.commissionFree ? (
-                    <View style={styles.noDebitBox}>
-                      <Text style={styles.noDebitTitle}>Débito nesta corrida: R$ 0,00</Text>
-                      <Text style={styles.noDebitText}>
-                        Nenhum débito será feito na carteira durante sua comissão de 0%.
-                      </Text>
-                    </View>
-                  ) : presentation.walletLow ? (
-                    <Text style={styles.warningText}>
-                      Recarregue para continuar recebendo corridas.
-                    </Text>
-                  ) : (
-                    <Text style={styles.muted}>
-                      A comissão desta corrida será reservada ao aceitar.
-                    </Text>
-                  )}
-                </AppCard>
-              ) : null}
+            </>
+          ) : compactOffer.visible ? (
+            <>
+              <Text style={styles.screenEyebrow}>NOVA CORRIDA</Text>
+              <DriverTimedOfferCard view={compactOffer} />
+              <Text style={styles.privacyCopy}>
+                O endereço exato e o destino permanecem protegidos até as etapas corretas da corrida.
+              </Text>
             </>
           ) : (
-            <AppCard><Text style={styles.empty}>Nenhuma corrida disponível no momento.</Text></AppCard>
+            <AppCard>
+              <Text style={styles.empty}>Nenhuma corrida disponível no momento.</Text>
+            </AppCard>
           )}
 
           {acceptError ? <Text style={styles.error}>{acceptError}</Text> : null}
         </ScrollView>
 
-        {!accepted && offer ? (
+        {!accepted && compactOffer.visible ? (
           <View style={styles.actionDock}>
             <AnimatedAcceptRideButton
+              title={compactOffer.acceptTitle}
               onPress={handleAccept}
               disabled={acceptDisabled}
               loading={accepting}
@@ -533,65 +348,57 @@ export default function RideRequest() {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   screen: { flex: 1 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xl, gap: spacing.md, flexGrow: 1 },
+  content: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+    gap: spacing.md,
+  },
+  screenEyebrow: {
+    fontFamily,
+    color: colors.primary,
+    ...typography.caption,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  acceptedCard: { gap: spacing.md },
   flex: { flex: 1 },
   stack: { gap: spacing.sm },
-  offerCard: { backgroundColor: colors.background, borderColor: colors.primaryTint, gap: spacing.md },
-  offerHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-  offerHeading: { flex: 1 },
-  eyebrow: { fontFamily, color: colors.primary, letterSpacing: 0.8, ...typography.caption },
-  offerTitle: { fontFamily, color: colors.text, marginTop: spacing.xs, ...typography.h3 },
-  countdown: { minWidth: 78, alignItems: 'center', borderRadius: radius.md, padding: spacing.sm, backgroundColor: colors.primaryTint },
-  countdownUrgent: { backgroundColor: colors.dangerBg },
-  countdownValue: { fontFamily, color: colors.primary, ...typography.bodyBold },
-  countdownLabel: { fontFamily, color: colors.primary, marginTop: 1, ...typography.caption },
-  countdownUrgentText: { color: colors.danger },
-  pickupBox: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.primaryTint },
-  pickupIcon: { fontSize: 20 },
-  label: { fontFamily, color: colors.textMuted, ...typography.caption },
-  pickupText: { fontFamily, color: colors.text, marginTop: 2, ...typography.bodyBold },
-  moneyRow: { flexDirection: 'row', gap: spacing.sm },
-  moneyBox: { flex: 1, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  netBox: { backgroundColor: colors.successBg, borderColor: colors.accentTint },
-  moneyValue: { fontFamily, color: colors.text, marginTop: spacing.sm, ...typography.h3 },
-  moneyDetail: { fontFamily, color: colors.textMuted, marginTop: spacing.xs, ...typography.caption },
-  successText: { color: colors.success },
-  pendingText: { color: colors.textMuted },
-  infoList: { gap: spacing.xs },
-  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md, paddingVertical: spacing.sm },
-  infoIcon: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md, backgroundColor: colors.primaryTint },
-  infoIconText: { fontFamily, color: colors.primary, fontSize: 13, fontWeight: '700' },
-  infoCopy: { flex: 1 },
-  infoLabel: { fontFamily, color: colors.textMuted, ...typography.caption },
-  infoValue: { fontFamily, marginTop: 2, ...typography.bodyBold },
-  infoDetail: { fontFamily, color: colors.textMuted, marginTop: 2, ...typography.small },
-  acceptanceChip: { alignSelf: 'flex-start', flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs, paddingHorizontal: spacing.md, borderRadius: radius.pill, backgroundColor: colors.primaryTint },
-  acceptanceLabel: { fontFamily, color: colors.textMuted, ...typography.caption },
-  acceptanceValue: { fontFamily, color: colors.primary, ...typography.small, fontWeight: '700' },
-  statusCard: { backgroundColor: colors.background, gap: spacing.md },
-  sectionTitle: { fontFamily, color: colors.textMuted, letterSpacing: 0.8, ...typography.caption },
-  statusItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-  statusIcon: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md },
-  statusIconText: { fontFamily, color: colors.primary, fontSize: 16, fontWeight: '700' },
-  statusCopy: { flex: 1 },
-  statusTitle: { fontFamily, color: colors.text, ...typography.bodyBold },
-  statusDetail: { fontFamily, color: colors.textMuted, marginTop: spacing.xs, ...typography.small },
-  contextRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
-  contextWarningCard: { backgroundColor: colors.warningBg, borderColor: colors.warning },
-  contextWarningTitle: { fontFamily, color: colors.warning, ...typography.bodyBold },
-  walletCard: { backgroundColor: colors.background },
-  walletLowCard: { backgroundColor: colors.warningBg, borderColor: colors.warning },
-  noDebitBox: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.successBg },
-  noDebitTitle: { fontFamily, color: colors.success, ...typography.bodyBold },
-  noDebitText: { fontFamily, color: colors.text, marginTop: spacing.xs, ...typography.small },
-  warningText: { fontFamily, color: colors.warning, ...typography.small, fontWeight: '700' },
-  actionDock: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm, backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: colors.border },
-  declineButton: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, borderRadius: radius.md },
+  privacyCopy: {
+    fontFamily,
+    color: colors.textFaint,
+    ...typography.caption,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  actionDock: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    gap: spacing.sm,
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  declineButton: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.md,
+  },
   declinePressed: { backgroundColor: colors.primaryTint },
-  declineText: { fontFamily, color: colors.textMuted, ...typography.small, fontWeight: '700' },
+  declineText: {
+    fontFamily,
+    color: colors.textMuted,
+    ...typography.small,
+    fontWeight: '700',
+  },
   disabled: { opacity: 0.5 },
   acceptedTitle: { fontFamily, color: colors.text, ...typography.h3 },
   muted: { fontFamily, color: colors.textMuted, ...typography.small },
   empty: { fontFamily, color: colors.textMuted, textAlign: 'center', ...typography.small },
-  error: { fontFamily, color: colors.danger, ...typography.small },
+  error: { fontFamily, color: colors.danger, ...typography.small, textAlign: 'center' },
 });
