@@ -9,7 +9,7 @@ const {
 
 const PASSENGER_ID = 'passenger_secure_001';
 const VERSION = 'photo_v20260726';
-const PUBLIC_PATH = `publicPassengerPhotos/${PASSENGER_ID}/${VERSION}.jpg`;
+const PUBLIC_PATH = `publicPassengerPhotos/${VERSION}.jpg`;
 
 describe('accepted passenger public identity', () => {
   it('publishes only the first name from a private full name', () => {
@@ -24,22 +24,22 @@ describe('accepted passenger public identity', () => {
     expect(passengerFirstName({ fullName: '' })).toBe(DEFAULT_FIRST_NAME);
   });
 
-  it('accepts only an explicitly verified canonical public photo', () => {
+  it('accepts only an explicitly verified opaque public photo', () => {
     const passenger = {
       passengerPhotoPublicVerified: true,
       passengerPhotoPublicVersion: VERSION,
       passengerPhotoPublicPath: PUBLIC_PATH,
     };
-    expect(approvedPassengerPhotoPath(passenger, PASSENGER_ID)).toBe(PUBLIC_PATH);
+    expect(approvedPassengerPhotoPath(passenger)).toBe(PUBLIC_PATH);
   });
 
   it.each([
     [{ passengerPhotoPublicVerified: false, passengerPhotoPublicVersion: VERSION, passengerPhotoPublicPath: PUBLIC_PATH }],
     [{ passengerPhotoPublicVerified: true, passengerPhotoPublicVersion: 'bad', passengerPhotoPublicPath: PUBLIC_PATH }],
     [{ passengerPhotoPublicVerified: true, passengerPhotoPublicVersion: VERSION, passengerPhotoPublicPath: 'passengers/private.jpg' }],
-    [{ passengerPhotoPublicVerified: true, passengerPhotoPublicVersion: VERSION, passengerPhotoPublicPath: `publicPassengerPhotos/other/${VERSION}.jpg` }],
-  ])('rejects unverified or non-canonical photo metadata', (passenger) => {
-    expect(approvedPassengerPhotoPath(passenger, PASSENGER_ID)).toBeNull();
+    [{ passengerPhotoPublicVerified: true, passengerPhotoPublicVersion: VERSION, passengerPhotoPublicPath: `publicPassengerPhotos/${PASSENGER_ID}/${VERSION}.jpg` }],
+  ])('rejects unverified, private or account-derived photo metadata', (passenger) => {
+    expect(approvedPassengerPhotoPath(passenger)).toBeNull();
   });
 
   it('returns the closed three-field projection without private profile data', () => {
@@ -51,7 +51,7 @@ describe('accepted passenger public identity', () => {
       passengerPhotoPublicVerified: true,
       passengerPhotoPublicVersion: VERSION,
       passengerPhotoPublicPath: PUBLIC_PATH,
-    }, PASSENGER_ID);
+    });
 
     expect(projection).toEqual({
       firstName: 'Maria',
