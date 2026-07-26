@@ -40,6 +40,7 @@ async function reportClientError({ db, request, context, clock }) {
     const shared = {
       lastSeenAtMs: nowMs,
       lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       occurrenceCount,
       severity: report.severity,
       isFatal: report.isFatal,
@@ -75,7 +76,6 @@ async function reportClientError({ db, request, context, clock }) {
       firstSeenAt: admin.firestore.FieldValue.serverTimestamp(),
       status: 'open',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   });
 
