@@ -4,9 +4,9 @@
 // assigns the ride, marks the offer, places the commission hold and starts the
 // single-current-point live-location document consumed by the passenger map.
 //
-// Financial invariant: commission eligibility is frozen at acceptance. A later
-// subscription/promotion change can never turn an already-held commission into a
-// free ride or increase what was reserved.
+// Financial invariant: commission and commercial eligibility are frozen at
+// acceptance. A later date boundary, subscription payment or profile update can
+// never rewrite the conditions under which this ride was accepted.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -14,7 +14,8 @@ const { assertShape, validateIdentifier, validateIdempotencyKey } = require('../
 const { logInfo, logWarning } = require('../logging/logger');
 const { writeAuditLog } = require('../audit/auditLog');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
-const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
+const { evaluateRideEligibility } = require('../drivers/eligibility');
+const { buildCommercialPolicySnapshot } = require('../drivers/commercialPolicy');
 const { availabilityAgeMs, hasMatchingAvailabilitySession } = require('./candidates');
 const { safeAcceptanceView } = require('./safeViews');
 const C = require('./constants');
@@ -60,10 +61,16 @@ function publicDriverSummary(driver, vehicleType, driverId = '') {
   };
 }
 
+// Compatibility signature retained for existing tests. The returned commercial
+// snapshot is internal-only and contains no UID, contact, address or Pix data.
 function resolveHold(driver, ride, nowMs) {
-  const commissionFree = toMillis(driver.commissionFreeUntil) > nowMs;
-  if (commissionFree) return { holdAmount: 0, commissionFree: true };
-  return { holdAmount: Number(ride.estimatedCommissionCentavos || 0), commissionFree: false };
+  const commercialPolicySnapshot = buildCommercialPolicySnapshot(driver, nowMs);
+  const commissionFree = commercialPolicySnapshot.commissionFreeAtAcceptance;
+  return {
+    holdAmount: commissionFree ? 0 : Number(ride.estimatedCommissionCentavos || 0),
+    commissionFree,
+    commercialPolicySnapshot,
+  };
 }
 
 function buildCommissionPolicySnapshot(ride, holdAmount, commissionFree, nowMs) {
@@ -180,10 +187,22 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     if (!evalResult.canReceiveRides) {
       throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
         internalMessage: `driver ${driverId} not ride-eligible`,
+        safeMetadata: {
+          reason: evalResult.requiresSubscription
+            ? 'SUBSCRIPTION_REQUIRED'
+            : evalResult.riskRestricted
+              ? 'RISK_RESTRICTED'
+              : 'DRIVER_NOT_ELIGIBLE',
+          commercialPolicyVersion: evalResult.commercialPolicyVersion,
+        },
       });
     }
 
-    const { holdAmount, commissionFree } = resolveHold(driver, ride, nowMs);
+    const {
+      holdAmount,
+      commissionFree,
+      commercialPolicySnapshot,
+    } = resolveHold(driver, ride, nowMs);
     if (!commissionFree) {
       const available = Number(driver.walletAvailableCentavos || 0);
       if (!(available > C.MIN_WALLET_BALANCE_CENTAVOS)) {
@@ -221,6 +240,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       acceptedAt: ts(),
       commissionHoldCentavos: holdAmount,
       commissionPolicySnapshot,
+      commercialPolicySnapshot,
       commissionSettlementStatus,
       reasonCode: null,
       updatedAt: ts(),
@@ -271,6 +291,8 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
         expectedCommissionCentavos: commissionPolicySnapshot.estimatedCommissionCentavos,
         pricingConfigVersion: commissionPolicySnapshot.pricingConfigVersion,
         policyVersion: COMMISSION_POLICY_VERSION,
+        commercialPolicyVersion: commercialPolicySnapshot.policyVersion,
+        commissionBpsAtAcceptance: commercialPolicySnapshot.commissionBpsAtAcceptance,
         status: 'held',
         createdAtMs: nowMs,
         createdAt: ts(),
@@ -301,21 +323,24 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
         acceptedAvailabilitySessionId: driver.availabilitySessionId,
         commissionHoldCentavos: holdAmount,
         commissionPolicySnapshot,
+        commercialPolicySnapshot,
         commissionSettlementStatus,
       },
       holdAmount,
       commissionFree,
+      commercialPolicySnapshot,
       holdAlreadyExisted: false,
     };
   });
 
   if (result.replay) {
-    logInfo(context, 'ride.accept.won', {
+    logInfo(context, 'ride.accept.duplicate_ignored', {
       operation: 'accept',
       offerId,
       rideId: result.ride.rideId,
       normalizedStatus: 'assigned',
       reasonCode: 'IDEMPOTENT_REPLAY',
+      commercialPolicyVersion: result.ride.commercialPolicySnapshot?.policyVersion || null,
     });
     return safeAcceptanceView(result.ride.rideId, result.ride, result.holdAmount);
   }
@@ -333,9 +358,23 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       commissionHoldCentavos: result.holdAmount,
       commissionFreeAtAcceptance: result.commissionFree,
       commissionPolicyVersion: COMMISSION_POLICY_VERSION,
+      commercialPolicyVersion: result.commercialPolicySnapshot.policyVersion,
+      subscriptionCoverageSource: result.commercialPolicySnapshot.subscriptionCoverageSource,
+      freeRideCountUsedAtAcceptance: result.commercialPolicySnapshot.freeRideCountUsedAtAcceptance,
       hasApprovedDriverPhoto: Boolean(result.ride.acceptedDriverPublic?.photoStoragePath),
     },
   }, clock);
+
+  logInfo(context, 'ride.accept.commercial_policy_frozen', {
+    operation: 'accept',
+    rideId,
+    offerId,
+    policyVersion: result.commercialPolicySnapshot.policyVersion,
+    founder: result.commercialPolicySnapshot.founder,
+    commissionBpsAtAcceptance: result.commercialPolicySnapshot.commissionBpsAtAcceptance,
+    subscriptionCoverageSource: result.commercialPolicySnapshot.subscriptionCoverageSource,
+    freeRideCountUsedAtAcceptance: result.commercialPolicySnapshot.freeRideCountUsedAtAcceptance,
+  });
 
   if (result.holdAmount > 0) {
     logInfo(context, 'wallet.hold.created', {
