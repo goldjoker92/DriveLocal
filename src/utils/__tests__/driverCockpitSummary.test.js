@@ -58,8 +58,8 @@ describe('compact driver cockpit summary', () => {
     expect(stale.weekReceivedCentavos).toBe(0);
   });
 
-  it('never uses an email as the cockpit display name', () => {
-    expect(driverCockpitDisplayName({ displayName: 'Hell angel' })).toBe('Hell');
+  it('preserves a chosen display name but never uses email as identity', () => {
+    expect(driverCockpitDisplayName({ displayName: 'Hell angel' })).toBe('Hell angel');
     expect(driverCockpitDisplayName({ fullName: 'Guillaume Ragot' })).toBe('Guillaume');
     expect(driverCockpitDisplayName({ displayName: 'driver@example.com' })).toBe('Motorista');
   });
