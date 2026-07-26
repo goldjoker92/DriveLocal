@@ -14,6 +14,11 @@ const C = require('./constants');
 
 const REGION = 'southamerica-east1';
 const PROJECTION_VERSION = 'accepted-passenger-public-v1';
+const DELETED_PASSENGER_PUBLIC = Object.freeze({
+  firstName: 'Passageiro excluído',
+  photoStoragePath: null,
+  photoVerified: false,
+});
 
 function closedProjection(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -41,9 +46,12 @@ function sameProjection(left, right) {
   );
 }
 
-function identityProjectionNeeded(_before = {}, after = {}) {
+function identityProjectionNeeded(before = {}, after = {}) {
   if (!after.passengerId || !after.acceptedDriverId) return false;
   if (after.status === C.RIDE_STATUS.SEARCHING) return false;
+  // Account deletion already replaces the private ride projection. Run once more
+  // to remove the old identity from the accepted driver's offer as well.
+  if (after.passengerDeleted === true && before.passengerDeleted !== true) return true;
   // A valid projection written by this trigger must not schedule one redundant
   // invocation. Malformed/legacy maps are replaced with the closed safe shape.
   return !closedProjection(after.acceptedPassengerPublic);
@@ -58,21 +66,26 @@ async function syncAcceptedPassengerIdentity({ db, rideId, context }) {
     const ride = rideSnap.data() || {};
     if (!ride.passengerId || !ride.acceptedDriverId) return { action: 'not_assigned' };
 
-    const passengerRef = db.collection(C.PASSENGERS).doc(ride.passengerId);
     const offerRef = db.collection(C.DRIVER_OFFERS).doc(`${rideId}_${ride.acceptedDriverId}`);
-    const passengerSnap = await tx.get(passengerRef);
     const offerSnap = await tx.get(offerRef);
     if (!offerSnap.exists) return { action: 'accepted_offer_missing' };
 
-    const passenger = passengerSnap.exists ? passengerSnap.data() || {} : {};
-    const projection = buildAcceptedPassengerPublic(passenger);
+    let projection;
+    if (ride.passengerDeleted === true) {
+      projection = DELETED_PASSENGER_PUBLIC;
+    } else {
+      const passengerRef = db.collection(C.PASSENGERS).doc(ride.passengerId);
+      const passengerSnap = await tx.get(passengerRef);
+      const passenger = passengerSnap.exists ? passengerSnap.data() || {} : {};
+      projection = buildAcceptedPassengerPublic(passenger);
+    }
     const offer = offerSnap.data() || {};
 
     if (
       sameProjection(ride.acceptedPassengerPublic, projection)
       && sameProjection(offer.acceptedPassengerPublic, projection)
     ) {
-      return { action: 'duplicate_ignored', projection };
+      return { action: 'duplicate_ignored', projection, accountDeleted: ride.passengerDeleted === true };
     }
 
     const projectedAtMs = Date.now();
@@ -85,7 +98,7 @@ async function syncAcceptedPassengerIdentity({ db, rideId, context }) {
     };
     tx.set(rideRef, update, { merge: true });
     tx.set(offerRef, update, { merge: true });
-    return { action: 'succeeded', projection };
+    return { action: 'succeeded', projection, accountDeleted: ride.passengerDeleted === true };
   });
 
   const metadata = {
@@ -93,6 +106,7 @@ async function syncAcceptedPassengerIdentity({ db, rideId, context }) {
     rideId,
     projectionVersion: PROJECTION_VERSION,
     result: result.action,
+    accountDeleted: result.accountDeleted === true,
     firstNameFallback: result.projection?.firstName === DEFAULT_FIRST_NAME,
     photoVerified: result.projection?.photoVerified === true,
   };
@@ -127,6 +141,7 @@ const acceptedPassengerIdentityTrigger = onDocumentUpdated(
       operation: 'project_accepted_passenger_identity',
       rideId: event.params.rideId,
       projectionVersion: PROJECTION_VERSION,
+      accountDeleted: after.passengerDeleted === true,
     });
 
     try {
@@ -140,6 +155,7 @@ const acceptedPassengerIdentityTrigger = onDocumentUpdated(
         operation: 'project_accepted_passenger_identity',
         rideId: event.params.rideId,
         projectionVersion: PROJECTION_VERSION,
+        accountDeleted: after.passengerDeleted === true,
         errorCode: error?.code || error?.name || 'IDENTITY_PROJECTION_FAILED',
       });
       throw error;
@@ -150,6 +166,7 @@ const acceptedPassengerIdentityTrigger = onDocumentUpdated(
 
 module.exports = {
   PROJECTION_VERSION,
+  DELETED_PASSENGER_PUBLIC,
   closedProjection,
   sameProjection,
   identityProjectionNeeded,
