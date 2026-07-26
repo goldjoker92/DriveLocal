@@ -18,9 +18,9 @@ function safeLabel(value, fallback) {
 }
 
 export function driverActiveRideVehicle(vehicleType) {
-  return vehicleType === 'moto'
-    ? { type: 'moto', emoji: '🏍', label: 'Moto' }
-    : { type: 'car', emoji: '🚗', label: 'Carro' };
+  if (vehicleType === 'moto') return { type: 'moto', emoji: '🏍', label: 'Moto' };
+  if (vehicleType === 'car') return { type: 'car', emoji: '🚗', label: 'Carro' };
+  return { type: 'unknown', emoji: '🚘', label: 'Veículo' };
 }
 
 export function driverActiveRideStatus(offer, explicitStatus = null) {
@@ -35,6 +35,10 @@ export function deriveDriverActiveRideCard(offer, explicitStatus = null) {
   const visible = Boolean(accepted && status && !HIDDEN_STATUSES.has(status));
   const destinationReleased = DESTINATION_RELEASED_STATUSES.has(status);
   const passengerIdentity = offer?.acceptedPassengerPublic || null;
+  const fareValue = offer?.estimatedFareCentavos;
+  const fareCentavos = fareValue != null && Number.isFinite(Number(fareValue))
+    ? Math.max(0, Math.round(Number(fareValue)))
+    : null;
 
   return {
     version: DRIVER_ACTIVE_RIDE_CARD_VERSION,
@@ -49,8 +53,6 @@ export function deriveDriverActiveRideCard(offer, explicitStatus = null) {
     destinationLabel: destinationReleased
       ? safeLabel(offer?.exactDestination?.label, 'Destino em carregamento…')
       : 'Liberado após o embarque',
-    fareCentavos: Number.isFinite(Number(offer?.estimatedFareCentavos))
-      ? Math.max(0, Math.round(Number(offer.estimatedFareCentavos)))
-      : 0,
+    fareCentavos,
   };
 }
