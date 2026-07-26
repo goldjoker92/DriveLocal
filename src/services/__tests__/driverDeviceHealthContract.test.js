@@ -17,15 +17,18 @@ describe('driver device health integration contracts', () => {
     expect(start).toContain("setDriverAvailabilitySecure({ availabilityStatus: 'online' })");
     expect(start.indexOf('prepareDriverDeviceForAvailability'))
       .toBeLessThan(start.indexOf("setDriverAvailabilitySecure({ availabilityStatus: 'online' })"));
-    expect(start).toContain("error.code = 'DRIVER_DEVICE_NOT_READY'");
-    expect(start).toContain("work_session.start_rejected");
+    // The stable error code is created by the dedicated helper immediately above
+    // startDriverWorkSession, while the guarded flow throws that helper result.
+    expect(availability).toContain("error.code = 'DRIVER_DEVICE_NOT_READY'");
+    expect(start).toContain('throw deviceNotReadyError(diagnostic)');
+    expect(start).toContain('work_session.start_rejected');
   });
 
   it('mounts one persistent guard above all operational driver screens', () => {
     const layout = source('src/app/_layout.jsx');
     const guard = source('src/components/DriverDeviceHealthGuard.jsx');
 
-    expect(layout).toContain("import DriverDeviceHealthGuard");
+    expect(layout).toContain('import DriverDeviceHealthGuard');
     expect(layout).toContain('<DriverDeviceHealthGuard route={pathname} />');
     expect(guard).toContain("path.includes('driver-home')");
     expect(guard).toContain("path.includes('active-ride')");
