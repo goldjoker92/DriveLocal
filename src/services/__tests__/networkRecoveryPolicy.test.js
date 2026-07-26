@@ -36,6 +36,9 @@ describe('network recovery policy', () => {
     });
     expect(JSON.stringify(hint)).not.toContain('PRIVATE_UID');
     expect(sanitizeRideRecoveryHint({ ...hint, status: 'completed' }, nowMs)).toBeNull();
+    expect(sanitizeRideRecoveryHint({ ...hint, status: 'disputed' }, nowMs)).toMatchObject({
+      status: 'disputed',
+    });
     expect(sanitizeRideRecoveryHint({ ...hint, recordedAtMs: 1 }, nowMs + 25 * 60 * 60 * 1000)).toBeNull();
   });
 
@@ -49,6 +52,7 @@ describe('network recovery policy', () => {
       params: { rideId: 'ride-2', restored: '1' },
     });
     expect(isTerminalRideStatus('cancelled')).toBe(true);
+    expect(isTerminalRideStatus('disputed')).toBe(false);
     expect(isTerminalRideStatus('in_progress')).toBe(false);
   });
 
