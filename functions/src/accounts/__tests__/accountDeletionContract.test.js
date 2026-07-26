@@ -30,6 +30,29 @@ describe('account deletion integration contracts', () => {
     expect(processor).toContain('C.PRIVATE_DRIVER_DATA');
   });
 
+  it('pseudonymizes the actual audit and risk-engine identity fields', () => {
+    const processor = source('src/accounts/processDeletion.js');
+
+    expect(processor).toContain("[infraC.AUDIT_LOGS, 'actorUid']");
+    expect(processor).toContain("[infraC.AUDIT_LOGS, 'targetId']");
+    expect(processor).toContain("[riskC.COLLECTIONS.RISK_EVENTS, 'actorId']");
+    expect(processor).toContain("[riskC.COLLECTIONS.RISK_EVENTS, 'sourceId']");
+    expect(processor).toContain("[riskC.COLLECTIONS.FRAUD_CASES, 'actorId']");
+    expect(processor).toContain("[riskC.COLLECTIONS.FRAUD_CASES, 'sourceId']");
+    expect(processor).toContain("[riskC.COLLECTIONS.FINANCIAL_ALERTS, 'sourceId']");
+    expect(processor).not.toContain("[riskC.COLLECTIONS.RISK_EVENTS, 'actorUid']");
+  });
+
+  it('migrates the role-prefixed risk profile so its document id no longer contains the uid', () => {
+    const processor = source('src/accounts/processDeletion.js');
+
+    expect(processor).toContain('doc(`${role}_${uid}`)');
+    expect(processor).toContain('doc(`${role}_${anonymousSubjectId}`)');
+    expect(processor).toContain('batch.delete(oldRef)');
+    expect(processor).toContain('actorId: anonymousSubjectId');
+    expect(processor).not.toContain('RISK_PROFILES).doc(uid)');
+  });
+
   it('keeps financial records only after pseudonymization and secret removal', () => {
     const processor = source('src/accounts/processDeletion.js');
     const policy = source('src/accounts/deletionPolicy.js');
@@ -53,6 +76,23 @@ describe('account deletion integration contracts', () => {
     expect(barrierIndex).toBeLessThan(subscriptionIndex);
     expect(verification).toContain('payment.account_deleted_ignored');
     expect(verification).toContain('account_deleted_provider_payment');
+    expect(verification).toContain('updatedAt: clock.now()');
+  });
+
+  it('blocks new ride and Pix creation before external work starts', () => {
+    const rideCreation = source('src/rides/createRideRequest.js');
+    const pixCreation = source('src/payments/createPixPayment.js');
+    const rideBarrier = rideCreation.indexOf('if (accountDeletionPending(passenger))');
+    const routeWork = rideCreation.indexOf('validateServiceArea({');
+    const pixBarrier = pixCreation.indexOf('if (accountDeletionPending(driver))');
+    const providerWork = pixCreation.indexOf('adapter.createPixOrder({');
+
+    expect(rideBarrier).toBeGreaterThan(-1);
+    expect(rideBarrier).toBeLessThan(routeWork);
+    expect(pixBarrier).toBeGreaterThan(-1);
+    expect(pixBarrier).toBeLessThan(providerWork);
+    expect(rideCreation).toContain("reason: 'ACCOUNT_DELETION_PENDING'");
+    expect(pixCreation).toContain("reason: 'ACCOUNT_DELETION_PENDING'");
   });
 
   it('deletes Firebase Auth only after profile, storage and record cleanup', () => {
