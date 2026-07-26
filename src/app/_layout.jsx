@@ -12,6 +12,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import AppErrorBoundary from '../components/AppErrorBoundary';
 import DriverDeviceHealthGuard from '../components/DriverDeviceHealthGuard';
+import AccountPrivacyShortcut from '../components/AccountPrivacyShortcut';
 import { colors } from '../constants/colors';
 import { useRideNotifications } from '../hooks/useRideNotifications';
 import {
@@ -41,6 +42,8 @@ export default function RootLayout() {
           <View style={{ flex: 1, backgroundColor: colors.background }}>
             {/* Silent when healthy; visible only on operational driver routes. */}
             <DriverDeviceHealthGuard route={pathname} />
+            {/* Temporary compact entry until the full cockpit redesign lands. */}
+            <AccountPrivacyShortcut route={pathname} />
             <Stack
               screenOptions={{
                 headerShown: false,
