@@ -18,7 +18,7 @@ describe('admin alert inbox contracts', () => {
     expect(screen).toContain('ADMIN_ALERT_RESOLUTIONS');
     expect(screen).toContain("updateStatus(resolutionAlert, 'resolved', code)");
     expect(screen).toContain('router.push({');
-    expect(screen).toContain('targetRoute: alert.targetRoute');
+    expect(screen).toContain('pathname: alert.targetRoute');
     expect(screen).not.toContain('TextInput');
     expect(screen).not.toContain('note:');
     expect(screen).not.toMatch(/tel:|mailto:|wa\.me|api\.whatsapp/i);
