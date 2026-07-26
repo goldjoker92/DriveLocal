@@ -1,7 +1,7 @@
 // @ts-check
 // Authenticated account-deletion request. The callable only accepts passenger and
 // driver accounts, requires a recent Firebase authentication, and refuses to start
-// while any non-final ride still belongs to the account.
+// while an operational ride or unresolved dispute still belongs to the account.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -11,6 +11,7 @@ const C = require('../rides/constants');
 const {
   POLICY_VERSION,
   ACCOUNT_DELETION_REQUESTS,
+  DELETION_BLOCKING_RIDE_STATUSES,
   assertConfirmation,
   recentAuthentication,
   authAgeMs,
@@ -33,7 +34,7 @@ async function findNonFinalRide(db, role, uid) {
   const snapshot = await db.collection(C.RIDE_REQUESTS).where(field, '==', uid).get();
   return snapshot.docs.find((docSnap) => {
     const status = docSnap.data()?.status;
-    return C.NON_FINAL_RIDE_STATUSES.includes(status);
+    return DELETION_BLOCKING_RIDE_STATUSES.includes(status);
   }) || null;
 }
 
@@ -81,7 +82,10 @@ async function requestAccountDeletion({ db, request, context, clock }) {
 
   if (profile.data.activeRideId) throw blockedError('ACTIVE_RIDE_PRESENT');
   const activeRide = await findNonFinalRide(db, profile.role, uid);
-  if (activeRide) throw blockedError('ACTIVE_RIDE_PRESENT');
+  if (activeRide) {
+    const status = activeRide.data()?.status;
+    throw blockedError(status === 'disputed' ? 'OPEN_DISPUTE_PRESENT' : 'ACTIVE_RIDE_PRESENT');
+  }
 
   const previousRequestId = typeof profile.data.accountDeletionRequestId === 'string'
     ? profile.data.accountDeletionRequestId
