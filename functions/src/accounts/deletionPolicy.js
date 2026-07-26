@@ -8,6 +8,15 @@ const RECENT_AUTH_MAX_AGE_MS = 10 * 60 * 1000;
 const CONFIRMATION_TEXT = 'EXCLUIR';
 const ACCOUNT_DELETION_REQUESTS = 'accountDeletionRequests';
 const ACCOUNT_DELETION_AUDITS = 'accountDeletionAudits';
+const DELETION_BLOCKING_RIDE_STATUSES = Object.freeze([
+  'searching',
+  'assigned',
+  'driver_arrived',
+  'in_progress',
+  'awaiting_payment',
+  'payment_marked_sent',
+  'disputed',
+]);
 
 function normalizeRole(value) {
   return value === 'driver' || value === 'passenger' ? value : null;
@@ -98,8 +107,8 @@ function buildRideAnonymizationUpdate({ role, anonymousSubjectId, ride = {}, del
   return update;
 }
 
-function buildFinancialPseudonymizationUpdate({ anonymousSubjectId, deleteField }) {
-  return {
+function buildFinancialPseudonymizationUpdate({ anonymousSubjectId, deleteField, record = {} }) {
+  const update = {
     driverId: anonymousSubjectId,
     accountDeleted: true,
     accountDeletionPolicyVersion: POLICY_VERSION,
@@ -109,6 +118,13 @@ function buildFinancialPseudonymizationUpdate({ anonymousSubjectId, deleteField 
     idempotencyFingerprint: deleteField,
     updatedAt: 'SERVER_TIMESTAMP',
   };
+
+  if (record.status === 'pending') {
+    update.status = 'cancelled';
+    update.cancellationReason = 'account_deleted';
+    update.cancelledAt = 'SERVER_TIMESTAMP';
+  }
+  return update;
 }
 
 module.exports = {
@@ -117,6 +133,7 @@ module.exports = {
   CONFIRMATION_TEXT,
   ACCOUNT_DELETION_REQUESTS,
   ACCOUNT_DELETION_AUDITS,
+  DELETION_BLOCKING_RIDE_STATUSES,
   normalizeRole,
   assertConfirmation,
   authAgeMs,
