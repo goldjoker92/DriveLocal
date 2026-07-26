@@ -56,9 +56,10 @@ export default function DriverCockpitDashboardCard({
   onWalletPress,
 }) {
   const plan = subscriptionCopy(subscription);
-  const heldDetail = summary.walletHeldCentavos > 0
-    ? `${formatBRL(summary.walletHeldCentavos)} reservado`
-    : 'disponível para comissões';
+  const heldPrefix = summary.walletHeldCentavos > 0
+    ? `${formatBRL(summary.walletHeldCentavos)} reservado • `
+    : '';
+  const walletDetail = `${heldPrefix}${summary.walletStatusLabel}`;
 
   return (
     <AppCard style={styles.card}>
@@ -85,7 +86,7 @@ export default function DriverCockpitDashboardCard({
         <CommercialMetric
           label="Saldo DriveLocal"
           value={formatBRL(summary.walletAvailableCentavos)}
-          detail={heldDetail}
+          detail={walletDetail}
         />
         <CommercialMetric label="Assinatura" value={plan.value} detail={plan.detail} />
       </View>
