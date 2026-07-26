@@ -106,14 +106,17 @@ describe('driver ride-offer presentation', () => {
     expect(estimatePickupMinutes(80, 'car')).toBe(0);
   });
 
-  it('never displays a provisional commission before the driver context is loaded', () => {
+  it('never displays a provisional commission before driver context is loaded', () => {
     const screen = source('src/app/(driver)/ride-request.jsx');
+    const compact = source('src/utils/driverTimedOffer.js');
 
     expect(screen).toContain("const [driverContextStatus, setDriverContextStatus] = useState('loading')");
-    expect(screen).toContain("offer && driverContextStatus === 'ready' && driver");
-    expect(screen).toContain('Carregando comissão e benefícios…');
-    expect(screen).toContain('Nenhum percentual provisório é exibido.');
-    expect(screen).toContain('Tempo estimado até o embarque');
+    expect(screen).toContain("driverContextStatus === 'ready'");
+    expect(screen).toContain('KNOWN_VEHICLE_TYPES.has(offer.vehicleType)');
+    expect(screen).toContain('commissionStatus: driverContextStatus');
+    expect(compact).toContain("? 'Validada ao aceitar'");
+    expect(compact).toContain(": 'Carregando…'");
+    expect(compact).not.toContain("commissionLabel: '0%'");
   });
 
   it('keeps plan activation and reset independent from the approval-based commission window', () => {
