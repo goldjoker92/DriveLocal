@@ -2,13 +2,22 @@
 // Writes go through Cloud Functions callables; reads use secured Firestore listeners.
 
 import { httpsCallable } from 'firebase/functions';
-import { doc, collection, query, where, onSnapshot } from 'firebase/firestore';
+import {
+  doc,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+} from 'firebase/firestore';
 import { functions, db } from '../config/firebase';
 import {
   DRIVER_CANCELLATION_REASONS,
   PASSENGER_CANCELLATION_REASONS,
   normalizeCancellationReason,
 } from '../constants/rideCancellation';
+import { QUICK_MESSAGE_HISTORY_LIMIT } from '../constants/rideQuickMessages';
 import { logRideClientEvent } from '../utils/clientRideLog';
 import { getDriverTrackingSession } from './driverLocationTracking';
 import { chooseCancellationReason } from './rideCancellationPrompt';
@@ -144,6 +153,8 @@ export async function cancelRide(rideId, reasonCode, role = null) {
   return callRide('cancelRideSecure', rideId, { reasonCode: normalizedReasonCode });
 }
 export const reportPassengerNotFound = (rideId) => cancelRide(rideId, 'passenger_no_show', 'driver');
+export const sendRideQuickMessage = (rideId, messageCode) =>
+  callRide('sendRideQuickMessageSecure', rideId, { messageCode });
 export const reportPaymentIssue = (rideId, reasonCode) => callRide('reportRidePaymentIssueSecure', rideId, { reasonCode });
 
 export function listenToRide(rideId, onData, onError) {
@@ -154,6 +165,30 @@ export function listenToRide(rideId, onData, onError) {
     onData(ride);
   }, (error) => {
     logRideClientEvent('ride.snapshot.listener_failed', { rideId, error }, 'error');
+    if (onError) onError(error);
+  });
+}
+
+export function listenToRideQuickMessages(rideId, onData, onError) {
+  const messagesQuery = query(
+    collection(db, 'rideRequests', rideId, 'quickMessages'),
+    orderBy('createdAtMs', 'desc'),
+    limit(QUICK_MESSAGE_HISTORY_LIMIT),
+  );
+  logRideClientEvent('ride.quick_messages.listener_started', { rideId });
+  return onSnapshot(messagesQuery, (snap) => {
+    const nowMs = Date.now();
+    const messages = snap.docs
+      .map((messageSnap) => ({ messageId: messageSnap.id, ...messageSnap.data() }))
+      .filter((message) => !message.expiresAtMs || Number(message.expiresAtMs) > nowMs);
+    logRideClientEvent('ride.quick_messages.snapshot_received', {
+      rideId,
+      messageCount: messages.length,
+      latestMessageCode: messages[0]?.messageCode || null,
+    });
+    onData(messages);
+  }, (error) => {
+    logRideClientEvent('ride.quick_messages.listener_failed', { rideId, error }, 'error');
     if (onError) onError(error);
   });
 }
