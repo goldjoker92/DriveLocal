@@ -48,7 +48,8 @@ describe('minimal support center contracts', () => {
     expect(adminService).toContain("call('listAdminSupportTicketsSecure'");
     expect(adminService).toContain("call('updateAdminSupportTicketSecure'");
     expect(adminScreen).toContain('SUPPORT_RESOLUTIONS');
-    expect(adminScreen).toContain("update(ticket, 'resolved', code)");
+    // Resolution actions use the ticket selected in the modal, not the map-loop variable.
+    expect(adminScreen).toContain("update(resolutionTicket, 'resolved', code)");
     expect(adminScreen).not.toContain('TextInput');
     expect(adminScreen).not.toContain('note:');
     expect(adminLayout).toContain("router.push('/support-tickets')");
