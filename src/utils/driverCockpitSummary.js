@@ -96,6 +96,16 @@ export function driverCockpitVehicle(driver) {
   };
 }
 
+function walletStatusPresentation(status) {
+  if (status === 'required' || status === 'blocked') {
+    return { walletState: 'blocked', walletStatusLabel: 'recarga necessária' };
+  }
+  if (status === 'not_required_during_commission_free_period') {
+    return { walletState: 'not_required', walletStatusLabel: 'nenhuma recarga necessária' };
+  }
+  return { walletState: 'ready', walletStatusLabel: 'disponível para comissões' };
+}
+
 export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
   const stats = driver?.cockpitStats && typeof driver.cockpitStats === 'object'
     ? driver.cockpitStats
@@ -108,6 +118,7 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
   );
   const held = nonNegativeInteger(driver?.walletHeldCentavos);
   const total = nonNegativeInteger(driver?.walletBalanceCentavos ?? available + held);
+  const wallet = walletStatusPresentation(driver?.walletStatus);
 
   return Object.freeze({
     statsVersion: stats.version || null,
@@ -121,6 +132,8 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
     walletAvailableCentavos: available,
     walletHeldCentavos: held,
     walletBalanceCentavos: total,
+    walletState: wallet.walletState,
+    walletStatusLabel: wallet.walletStatusLabel,
     statsCurrent: dayCurrent && weekCurrent,
   });
 }
