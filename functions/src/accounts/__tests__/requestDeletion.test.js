@@ -152,6 +152,22 @@ describe('requestAccountDeletion', () => {
     });
   });
 
+  it('blocks deletion while a payment dispute remains open', async () => {
+    const disputedRideDoc = { data: () => ({ status: 'disputed' }) };
+    const { db, batch } = createDb({ profile: {}, rideDocs: [disputedRideDoc] });
+
+    await expect(requestAccountDeletion({
+      db,
+      request: authenticatedRequest(),
+      context: {},
+      clock: fixedClock(1_000_000),
+    })).rejects.toMatchObject({
+      code: ERROR_CODES.INVALID_STATE_TRANSITION,
+      safeMetadata: { reason: 'OPEN_DISPUTE_PRESENT' },
+    });
+    expect(batch.commit).not.toHaveBeenCalled();
+  });
+
   it('creates a private request and freezes driver availability before processing', async () => {
     const { db, batch, requestRef, driverRef } = createDb({
       role: 'driver',
