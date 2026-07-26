@@ -95,8 +95,23 @@ async function syncAdminAlert({ db, sourceType, sourceId, sourceData, context, c
     const before = snapshot.exists ? snapshot.data() || {} : null;
 
     if (!descriptor) {
-      if (!before || before.status === STATUS.RESOLVED || before.sourceActive === false) {
+      if (!before || before.sourceActive === false) {
         return { action: 'noop', alertId, before };
+      }
+      if (before.status === STATUS.RESOLVED) {
+        const update = {
+          sourceActive: false,
+          sourceStatus,
+          updatedAtMs: nowMs,
+          updatedAt: nowTimestamp(),
+        };
+        tx.set(alertRef, update, { merge: true });
+        return {
+          action: 'source_inactive',
+          alertId,
+          before,
+          after: { ...before, ...update },
+        };
       }
       const update = {
         status: STATUS.RESOLVED,
