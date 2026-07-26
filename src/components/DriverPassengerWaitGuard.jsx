@@ -11,7 +11,6 @@ import { radius, spacing } from '../constants/spacing';
 import { fontFamily, typography } from '../constants/typography';
 import {
   listenToMyOffer,
-  listenToRide,
   reportPassengerNotFound,
 } from '../services/ridesService';
 import AppButton from './AppButton';
@@ -48,31 +47,28 @@ export default function DriverPassengerWaitGuard({ route }) {
   const relevantRoute = isActiveRideRoute(route);
   const [authenticatedUid, setAuthenticatedUid] = useState(auth.currentUser?.uid || null);
   const [offer, setOffer] = useState(null);
-  const [ride, setRide] = useState(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => auth.onAuthStateChanged((user) => {
     setAuthenticatedUid(user?.uid || null);
-    if (!user) {
-      setOffer(null);
-      setRide(null);
-    }
+    if (!user) setOffer(null);
   }), []);
 
   useEffect(() => {
     if (!relevantRoute || !authenticatedUid) {
       setOffer(null);
-      setRide(null);
       return undefined;
     }
 
+    // driverOffers is the driver's private safe projection. Do not read the full
+    // ride document here: Firestore intentionally keeps its destination private.
     return listenToMyOffer(
       authenticatedUid,
       (nextOffer) => {
-        setOffer(nextOffer || null);
-        if (nextOffer?.driverRideStatus !== 'driver_arrived') setRide(null);
+        setOffer(nextOffer?.driverRideStatus === 'driver_arrived' ? nextOffer : null);
+        if (nextOffer?.driverRideStatus !== 'driver_arrived') setError('');
       },
       (listenerError) => {
         traceWait('offer_listener.failed', {
@@ -82,36 +78,24 @@ export default function DriverPassengerWaitGuard({ route }) {
     );
   }, [authenticatedUid, relevantRoute]);
 
-  const activeRideId = offer?.driverRideStatus === 'driver_arrived' ? offer?.rideId : null;
+  const activeRideId = offer?.rideId || null;
+  const driverArrivedAtMs = Number(offer?.driverArrivedAtMs || 0);
+  const serverEligibleAtMs = Number(offer?.passengerNoShowEligibleAtMs || 0);
 
   useEffect(() => {
-    if (!relevantRoute || !activeRideId) {
-      setRide(null);
-      return undefined;
-    }
-    return listenToRide(
-      activeRideId,
-      (nextRide) => setRide(nextRide?.status === 'driver_arrived' ? nextRide : null),
-      (listenerError) => {
-        traceWait('ride_listener.failed', {
-          reason: listenerError?.code || listenerError?.name || 'unknown',
-        }, 'warn');
-      },
-    );
-  }, [activeRideId, relevantRoute]);
-
-  useEffect(() => {
-    if (!ride?.driverArrivedAtMs) return undefined;
+    if (!driverArrivedAtMs) return undefined;
     setNowMs(Date.now());
     const interval = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(interval);
-  }, [ride?.driverArrivedAtMs]);
+  }, [driverArrivedAtMs]);
 
-  if (!relevantRoute || !ride || ride.status !== 'driver_arrived') return null;
+  if (!relevantRoute || !offer || !driverArrivedAtMs) return null;
 
-  const remainingMs = noShowRemainingMs(ride.driverArrivedAtMs, nowMs);
+  const remainingMs = serverEligibleAtMs > 0
+    ? Math.max(0, serverEligibleAtMs - nowMs)
+    : noShowRemainingMs(driverArrivedAtMs, nowMs);
   const noShowAvailable = remainingMs === 0;
-  const elapsedMs = Math.max(0, nowMs - Number(ride.driverArrivedAtMs || nowMs));
+  const elapsedMs = Math.max(0, nowMs - driverArrivedAtMs);
 
   async function handlePassengerNotFound() {
     if (!activeRideId || busy || !noShowAvailable) return;
