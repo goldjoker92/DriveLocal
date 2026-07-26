@@ -45,6 +45,10 @@ function sanitizeCoord(value, field) {
   return out;
 }
 
+function accountDeletionPending(profile) {
+  return ['requested', 'processing'].includes(profile?.accountDeletionStatus);
+}
+
 async function clearPassengerActiveRideIfCurrent({ db, passengerId, rideId }) {
   const paxRef = db.collection(C.PASSENGERS).doc(passengerId);
   return db.runTransaction(async (tx) => {
@@ -108,6 +112,19 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
     const paxRef = db.collection(C.PASSENGERS).doc(passengerId);
     const paxSnap = await paxRef.get();
     const passenger = paxSnap.exists ? paxSnap.data() || {} : {};
+
+    if (accountDeletionPending(passenger)) {
+      logInfo(context, 'ride.create.account_deletion_blocked', {
+        operation: OPERATION_TYPE,
+        result: 'blocked_new_ride',
+        reasonCode: 'ACCOUNT_DELETION_PENDING',
+      });
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+        internalMessage: `passenger ${passengerId} requested account deletion`,
+        safeMetadata: { reason: 'ACCOUNT_DELETION_PENDING' },
+      });
+    }
+
     const eligibility = evaluatePassengerRideEligibility(passenger, clock);
     if (!eligibility.canRequestRide) {
       logInfo(context, 'ride.create.passenger_restricted', {
@@ -254,4 +271,5 @@ module.exports = {
   createRideRequestSecure,
   clearPassengerActiveRideIfCurrent,
   sanitizeCoord,
+  accountDeletionPending,
 };
