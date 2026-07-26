@@ -93,6 +93,23 @@ export default function PassengerHome() {
 
         <AppCard>
           <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
+            Ajuda e suporte
+          </Text>
+          <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+            Abra uma solicitação por categoria e acompanhe o status sem compartilhar dados pessoais.
+          </Text>
+          <AppButton
+            title="ABRIR SUPORTE"
+            variant="secondary"
+            onPress={() => router.push({
+              pathname: '/support-center',
+              params: { source: 'passenger_home' },
+            })}
+          />
+        </AppCard>
+
+        <AppCard>
+          <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
             Conta e privacidade
           </Text>
           <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
