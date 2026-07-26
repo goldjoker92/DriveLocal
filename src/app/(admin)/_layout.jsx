@@ -10,18 +10,34 @@ import { fontFamily, typography } from '../../constants/typography';
 export default function AdminLayout() {
   const pathname = usePathname();
   const router = useRouter();
-  const showSupport = String(pathname || '').toLowerCase().includes('dashboard');
+  const showOperationalShortcuts = String(pathname || '').toLowerCase().includes('dashboard');
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {showSupport ? (
+      {showOperationalShortcuts ? (
         <View
           style={{
             paddingHorizontal: spacing.lg,
             paddingTop: spacing.xs,
-            alignItems: 'flex-end',
+            flexDirection: 'row',
+            justifyContent: 'flex-end',
+            gap: spacing.sm,
           }}
         >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Abrir alertas operacionais"
+            onPress={() => router.push('/admin-alerts')}
+            style={({ pressed }) => ({
+              paddingVertical: spacing.sm,
+              paddingHorizontal: spacing.md,
+              opacity: pressed ? 0.65 : 1,
+            })}
+          >
+            <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>
+              Alertas
+            </Text>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Abrir tickets de suporte"
@@ -33,7 +49,7 @@ export default function AdminLayout() {
             })}
           >
             <Text style={[{ fontFamily, color: colors.primary }, typography.small]}>
-              Tickets de suporte
+              Tickets
             </Text>
           </Pressable>
         </View>
