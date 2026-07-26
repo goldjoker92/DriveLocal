@@ -1,8 +1,8 @@
-const callable = jest.fn();
-const prepareDriverDeviceForAvailability = jest.fn();
+const mockCallable = jest.fn();
+const mockPrepareDriverDeviceForAvailability = jest.fn();
 
 jest.mock('firebase/functions', () => ({
-  httpsCallable: jest.fn(() => callable),
+  httpsCallable: jest.fn(() => mockCallable),
 }));
 
 jest.mock('../../config/firebase', () => ({
@@ -10,7 +10,7 @@ jest.mock('../../config/firebase', () => ({
 }));
 
 jest.mock('../driverDeviceDiagnostics', () => ({
-  prepareDriverDeviceForAvailability: (...args) => prepareDriverDeviceForAvailability(...args),
+  prepareDriverDeviceForAvailability: (...args) => mockPrepareDriverDeviceForAvailability(...args),
 }));
 
 const { startDriverWorkSession } = require('../driverAvailabilityService');
@@ -18,7 +18,7 @@ const { startDriverWorkSession } = require('../driverAvailabilityService');
 describe('driver availability device gate', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    callable.mockResolvedValue({
+    mockCallable.mockResolvedValue({
       data: {
         driverId: 'driver1',
         availabilityStatus: 'online',
@@ -29,7 +29,7 @@ describe('driver availability device gate', () => {
   });
 
   it('does not call Firebase when the device is not ready', async () => {
-    prepareDriverDeviceForAvailability.mockResolvedValue({
+    mockPrepareDriverDeviceForAvailability.mockResolvedValue({
       readyForAvailability: false,
       primaryIssue: {
         code: 'notifications_permission_required',
@@ -46,13 +46,13 @@ describe('driver availability device gate', () => {
       },
     });
 
-    expect(prepareDriverDeviceForAvailability).toHaveBeenCalledTimes(1);
-    expect(callable).not.toHaveBeenCalled();
+    expect(mockPrepareDriverDeviceForAvailability).toHaveBeenCalledTimes(1);
+    expect(mockCallable).not.toHaveBeenCalled();
   });
 
   it('opens the server work session only after a successful preflight', async () => {
     const order = [];
-    prepareDriverDeviceForAvailability.mockImplementation(async () => {
+    mockPrepareDriverDeviceForAvailability.mockImplementation(async () => {
       order.push('preflight');
       return {
         readyForAvailability: true,
@@ -60,7 +60,7 @@ describe('driver availability device gate', () => {
         devSimulationBypass: false,
       };
     });
-    callable.mockImplementation(async () => {
+    mockCallable.mockImplementation(async () => {
       order.push('firebase');
       return {
         data: {
@@ -75,7 +75,7 @@ describe('driver availability device gate', () => {
     const result = await startDriverWorkSession();
 
     expect(order).toEqual(['preflight', 'firebase']);
-    expect(callable).toHaveBeenCalledWith({ availabilityStatus: 'online' });
+    expect(mockCallable).toHaveBeenCalledWith({ availabilityStatus: 'online' });
     expect(result).toMatchObject({
       availabilityStatus: 'online',
       availabilitySessionId: 'session_1234567890',
