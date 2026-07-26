@@ -1,13 +1,16 @@
 // Driver route group layout. Keeps one offer listener and one inexpensive
 // foreground GPS safety pulse alive across every driver screen.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
+import DriverActiveRideCard from '../../components/DriverActiveRideCard';
 import { auth, db } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
+import { spacing } from '../../constants/spacing';
 import { getDriver } from '../../services/driverService';
 import {
   getDriverTrackingSession,
@@ -63,6 +66,7 @@ export default function DriverLayout() {
   const segments = useSegments();
   const lastOfferId = useRef(null);
   const reconciliationBusy = useRef(false);
+  const [activeOffer, setActiveOffer] = useState(null);
   const onRobotScreen = segments.includes('robot-driver');
   const onActiveRideScreen = segments.includes('active-ride');
 
@@ -236,9 +240,17 @@ export default function DriverLayout() {
     if (!uid) return undefined;
 
     return listenToMyOffer(uid, async (offer) => {
-      if (!offer?.offerId) return;
+      if (!offer?.offerId) {
+        setActiveOffer(null);
+        return;
+      }
 
       if (offer.status === 'accepted') {
+        // The accepted offer is the existing secured driver projection. Keeping it
+        // in the route-group layout makes the active card survive screen changes,
+        // external navigation, cached snapshots and process restoration.
+        setActiveOffer(offer);
+
         if (offer.driverRideStatus) {
           await updateActiveRideTrackingStatus(offer.driverRideStatus).catch(() => undefined);
         }
@@ -258,6 +270,7 @@ export default function DriverLayout() {
         return;
       }
 
+      setActiveOffer(null);
       if (offer.status !== 'offered' || Number(offer.expiresAtMs || 0) <= Date.now()) return;
 
       const trackingSession = await getDriverTrackingSession();
@@ -283,7 +296,17 @@ export default function DriverLayout() {
 
   return (
     <View style={styles.container}>
-      <Stack screenOptions={{ headerShown: false }} />
+      {activeOffer ? (
+        <SafeAreaView style={styles.activeRideArea} edges={['top']}>
+          <DriverActiveRideCard
+            offer={activeOffer}
+            status={activeOffer.driverRideStatus}
+          />
+        </SafeAreaView>
+      ) : null}
+      <View style={styles.stackContainer}>
+        <Stack screenOptions={{ headerShown: false }} />
+      </View>
       {DEV_RIDE_SIMULATOR_ENABLED && !onRobotScreen ? (
         <Pressable
           accessibilityRole="button"
@@ -299,7 +322,15 @@ export default function DriverLayout() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: colors.background },
+  stackContainer: { flex: 1 },
+  activeRideArea: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    backgroundColor: colors.background,
+    zIndex: 5,
+    elevation: 5,
+  },
   robotButton: {
     position: 'absolute',
     right: 14,
