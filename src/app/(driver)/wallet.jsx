@@ -28,6 +28,8 @@ import {
 } from '../../utils/driverWallet';
 import { formatDateBR } from '../../utils/driverCockpit';
 
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
 function HistoryRow({ item }) {
   const amountTone = item.direction === 'credit'
     ? styles.amountCredit
@@ -53,6 +55,7 @@ export default function Wallet() {
   const uid = auth.currentUser?.uid || null;
   const [liveDriver, setLiveDriver] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
+  const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [balanceLoading, setBalanceLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -68,6 +71,7 @@ export default function Wallet() {
     try {
       const next = await loadDriverWalletSnapshot();
       setSnapshot(next);
+      setClockNowMs(Date.now());
       setError('');
     } catch (loadError) {
       setError(loadError?.message || 'Não foi possível carregar o histórico da carteira.');
@@ -89,6 +93,7 @@ export default function Wallet() {
       uid,
       (next) => {
         setLiveDriver(next);
+        setClockNowMs(Date.now());
         setBalanceLoading(false);
       },
       () => {
@@ -101,16 +106,29 @@ export default function Wallet() {
   }, [uid, loadHistory]);
 
   const wallet = useMemo(
-    () => deriveDriverWalletView(liveDriver, snapshot, Date.now()),
-    [liveDriver, snapshot]
+    () => deriveDriverWalletView(liveDriver, snapshot, clockNowMs),
+    [liveDriver, snapshot, clockNowMs]
   );
+
+  useEffect(() => {
+    if (!wallet.topupLocked || !wallet.topupUnlockAtMs) return undefined;
+    const remainingMs = wallet.topupUnlockAtMs - Date.now();
+    const delayMs = Math.max(50, Math.min(remainingMs + 100, MAX_TIMEOUT_MS));
+    const timer = setTimeout(() => setClockNowMs(Date.now()), delayMs);
+    return () => clearTimeout(timer);
+  }, [wallet.topupLocked, wallet.topupUnlockAtMs]);
+
   const unlockDate = formatDateBR(wallet.topupUnlockAtMs);
   const anyGenerating = generatingKey != null;
+  const topupControlsDisabled = balanceLoading
+    || !liveDriver
+    || wallet.topupLocked
+    || anyGenerating;
 
   async function onTopup(amountCentavos, key, { customAmount = false } = {}) {
     // Mobile guard comes before the payment service. The backend repeats the same
     // policy check before creating any Mercado Pago order.
-    if (wallet.topupLocked || anyGenerating) return;
+    if (balanceLoading || !liveDriver || wallet.topupLocked || anyGenerating) return;
     setGeneratingKey(key);
     setError('');
     try {
@@ -126,7 +144,7 @@ export default function Wallet() {
   }
 
   async function onCustomTopup() {
-    if (wallet.topupLocked || anyGenerating) return;
+    if (balanceLoading || !liveDriver || wallet.topupLocked || anyGenerating) return;
     const parsed = parseWalletTopupInput(customValue);
     if (!parsed.valid) {
       setCustomError(parsed.error);
@@ -199,7 +217,7 @@ export default function Wallet() {
                         ? 'Gerando…'
                         : formatTopupPreset(amount, wallet.topupLocked)}
                       onPress={() => onTopup(amount, key)}
-                      disabled={wallet.topupLocked || anyGenerating}
+                      disabled={topupControlsDisabled}
                     />
                   </View>
                 );
@@ -217,7 +235,7 @@ export default function Wallet() {
                 placeholder="R$ 10,00 a R$ 200,00"
                 keyboardType="decimal-pad"
                 maxLength={9}
-                editable={!wallet.topupLocked && !anyGenerating}
+                editable={!topupControlsDisabled}
                 accessibilityLabel="Outro valor para recarga"
               />
               {customError ? <Text style={styles.fieldError}>{customError}</Text> : null}
@@ -228,7 +246,7 @@ export default function Wallet() {
                     ? 'Gerando…'
                     : 'Gerar Pix — outro valor'}
                 onPress={onCustomTopup}
-                disabled={wallet.topupLocked || anyGenerating}
+                disabled={topupControlsDisabled}
               />
               <Text style={styles.limitCopy}>Mínimo R$ 10,00 • máximo R$ 200,00</Text>
             </View>
@@ -240,7 +258,7 @@ export default function Wallet() {
             <View style={styles.sectionHeaderCopy}>
               <Text style={styles.sectionTitle}>Histórico da carteira</Text>
               <Text style={styles.sectionCopy}>
-                Recharges, reservas, liberações, capturas e status Pix reais.
+                Recargas, reservas, liberações, capturas e status Pix reais.
               </Text>
             </View>
             <AppButton
