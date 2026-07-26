@@ -63,6 +63,12 @@ describe('block 16 active ride screen policy', () => {
     });
   });
 
+  it('does not expose a primary action for terminal or disputed statuses', () => {
+    expect(deriveDriverActiveRidePrimaryAction({ status: 'completed' })).toBeNull();
+    expect(deriveDriverActiveRidePrimaryAction({ status: 'cancelled' })).toBeNull();
+    expect(deriveDriverActiveRidePrimaryAction({ status: 'disputed' })).toBeNull();
+  });
+
   it('navigates to pickup before boarding and destination after boarding', () => {
     const pickup = { lat: -4.1, lng: -38.4 };
     const destination = { lat: -4.2, lng: -38.5 };
@@ -91,6 +97,14 @@ describe('block 16 active ride screen policy', () => {
       google: 'driving',
       waze: 'private',
       label: 'Modo carro',
+    });
+  });
+
+  it('does not silently assume a car while vehicle data is loading', () => {
+    expect(driverActiveRideNavigationMode(null)).toEqual({
+      google: null,
+      waze: null,
+      label: 'Modo carregando',
     });
   });
 });
