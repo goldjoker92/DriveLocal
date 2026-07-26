@@ -62,6 +62,12 @@ const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
 exports.processRideNotificationEvent = notificationCallables.processRideNotificationEvent;
 
+const supportCallables = require('./support/callables');
+exports.createSupportTicketSecure = supportCallables.createSupportTicketSecure;
+exports.listMySupportTicketsSecure = supportCallables.listMySupportTicketsSecure;
+exports.listAdminSupportTicketsSecure = supportCallables.listAdminSupportTicketsSecure;
+exports.updateAdminSupportTicketSecure = supportCallables.updateAdminSupportTicketSecure;
+
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
 
