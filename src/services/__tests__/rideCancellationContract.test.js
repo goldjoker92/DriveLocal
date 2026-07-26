@@ -28,8 +28,7 @@ describe('ride cancellation integration contracts', () => {
     const guard = source('src/components/DriverPassengerWaitGuard.jsx');
     expect(guard).toContain('offer?.driverArrivedAtMs');
     expect(guard).toContain('offer?.passengerNoShowEligibleAtMs');
-    expect(guard).not.toContain('listenToRide(');
-    expect(guard).not.toContain("from '../services/ridesService';\nimport");
+    expect(guard).not.toContain('listenToRide');
   });
 
   it('shows the timer and keeps the no-show action disabled until eligible', () => {
