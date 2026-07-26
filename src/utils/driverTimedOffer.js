@@ -5,6 +5,7 @@ export const DRIVER_TIMED_OFFER_VERSION = 'driver-timed-offer-v1';
 export const DRIVER_TIMED_OFFER_URGENT_SECONDS = 5;
 
 function finiteNonNegative(value) {
+  if (value == null || value === '') return null;
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
 }
