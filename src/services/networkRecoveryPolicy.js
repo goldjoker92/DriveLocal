@@ -12,10 +12,11 @@ export const RIDE_RECOVERY_HINT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export const NETWORK_ACTION_TIMEOUT_MS = 25 * 1000;
 export const PENDING_ACTION_MAX_AGE_MS = 10 * 60 * 1000;
 
+// A dispute stops live GPS but remains recoverable: both parties must still see
+// the payment/litigation state after a process restart.
 const TERMINAL_RIDE_STATUSES = new Set([
   'completed',
   'cancelled',
-  'disputed',
   'no_driver_available',
   'dispatch_failed',
 ]);
