@@ -10,6 +10,7 @@ const { approveDriver } = require('./approveDriver');
 const { rejectDriver, blockDriver, unblockDriver, suspendDriver, reactivateDriver } = require('./moderateDriver');
 const { activateSubscription } = require('./activateSubscription');
 const { approveDriverPhoto, rejectDriverPhoto } = require('./photoReview');
+const { setDriverAvailability } = require('./availability');
 
 const REGION = 'southamerica-east1';
 
@@ -32,4 +33,5 @@ module.exports = {
   activateSubscriptionSecure: bind('activateSubscriptionSecure', activateSubscription),
   approveDriverPhotoSecure: bind('approveDriverPhotoSecure', approveDriverPhoto),
   rejectDriverPhotoSecure: bind('rejectDriverPhotoSecure', rejectDriverPhoto),
+  setDriverAvailabilitySecure: bind('setDriverAvailabilitySecure', setDriverAvailability),
 };

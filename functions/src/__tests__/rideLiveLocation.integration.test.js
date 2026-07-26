@@ -9,6 +9,7 @@ const DRIVER = 'driver_live_location';
 const PASSENGER = 'passenger_live_location';
 const RIDE = 'ride_live_location';
 const OFFER = `${RIDE}_${DRIVER}`;
+const WORK_SESSION = 'work_live_location_0001';
 
 function req(uid, data) {
   return { auth: { uid }, data };
@@ -23,6 +24,8 @@ function seed(db) {
     subscriptionExpiresAt: NOW + 30 * 864e5,
     isBlocked: false,
     availabilityStatus: 'online',
+    availabilitySessionId: WORK_SESSION,
+    availabilityUpdatedAtMs: NOW,
     activeRideId: null,
     vehicleType: 'moto',
     fullName: 'Motorista Live',
@@ -30,6 +33,7 @@ function seed(db) {
     walletAvailableCentavos: 1000,
     walletHeldCentavos: 0,
     location: { lat: -4.0995358, lng: -38.5006227 },
+    locationAvailabilitySessionId: WORK_SESSION,
     locationAccuracyMeters: 7,
     locationHeadingDegrees: 90,
     locationSpeedMps: 4.5,
@@ -47,11 +51,15 @@ function seed(db) {
     estimatedCommissionCentavos: 93,
   });
 
+  // The offer must belong to the exact work session that produced the GPS point.
+  // This fixture intentionally exercises the same anti-stale-session guard used in
+  // production instead of bypassing it for live-location lifecycle tests.
   db.collection(C.DRIVER_OFFERS).doc(OFFER).set({
     rideId: RIDE,
     driverId: DRIVER,
     vehicleType: 'moto',
     status: C.OFFER_STATUS.OFFERED,
+    availabilitySessionId: WORK_SESSION,
     expiresAtMs: NOW + 15_000,
   });
 

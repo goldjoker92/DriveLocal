@@ -9,7 +9,7 @@ const { evaluateRideEligibility } = require('../drivers/eligibility');
 const {
   driverLocation,
   locationAgeMs,
-  availabilityAgeMs,
+  hasFreshAvailabilitySession,
   ONLINE_STALE_FALLBACK_MAX_AGE_MS,
 } = require('../rides/candidates');
 const rideC = require('../rides/constants');
@@ -24,15 +24,14 @@ function vehicle(driver) {
 }
 
 function hasUsableDispatchLocation(driver, timestampMs) {
+  if (!hasFreshAvailabilitySession(driver, timestampMs)) return false;
   if (!driverLocation(driver)) return false;
   const ageMs = locationAgeMs(driver, timestampMs);
-  if (ageMs <= rideC.LOCATION_MAX_AGE_MS) return true;
-  return ageMs <= ONLINE_STALE_FALLBACK_MAX_AGE_MS
-    && availabilityAgeMs(driver, timestampMs) <= ONLINE_STALE_FALLBACK_MAX_AGE_MS;
+  return ageMs <= ONLINE_STALE_FALLBACK_MAX_AGE_MS;
 }
 
 function canReceiveGenericLaunchRide(driver, timestampMs) {
-  if (driver?.availabilityStatus !== 'online' || driver?.activeRideId) return false;
+  if (driver?.activeRideId || !hasUsableDispatchLocation(driver, timestampMs)) return false;
   const eligibility = evaluateRideEligibility(driver, { now: () => timestampMs });
   if (!eligibility.canReceiveRides) return false;
 
@@ -40,7 +39,7 @@ function canReceiveGenericLaunchRide(driver, timestampMs) {
   // remain dispatchable with R$ 0 because acceptOffer intentionally skips the hold.
   const walletUsable = eligibility.commissionFree
     || Number(driver?.walletAvailableCentavos || 0) > rideC.MIN_WALLET_BALANCE_CENTAVOS;
-  return walletUsable && hasUsableDispatchLocation(driver, timestampMs);
+  return walletUsable;
 }
 
 function buildSupplySnapshot(drivers = [], timestampMs = Date.now()) {
@@ -59,9 +58,8 @@ function buildSupplySnapshot(drivers = [], timestampMs = Date.now()) {
       result.approved.total += 1;
     }
 
-    // Supply metrics represent drivers that could realistically participate in
-    // dispatch, not draft/suspended accounts that merely wrote "online".
-    if (!approved || driver?.availabilityStatus !== 'online') return;
+    // “Online” means an actual fresh work session, not a stale Firestore string.
+    if (!approved || !hasFreshAvailabilitySession(driver, timestampMs)) return;
     result.online[type] += 1;
     result.online.total += 1;
     if (driver?.activeRideId) {

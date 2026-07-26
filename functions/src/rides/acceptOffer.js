@@ -15,6 +15,7 @@ const { logInfo, logWarning } = require('../logging/logger');
 const { writeAuditLog } = require('../audit/auditLog');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
+const { availabilityAgeMs, hasMatchingAvailabilitySession } = require('./candidates');
 const { safeAcceptanceView } = require('./safeViews');
 const C = require('./constants');
 
@@ -154,6 +155,22 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
         internalMessage: `driver ${driverId} not online`,
       });
     }
+    if (
+      !hasMatchingAvailabilitySession(driver)
+      || !offer.availabilitySessionId
+      || offer.availabilitySessionId !== driver.availabilitySessionId
+    ) {
+      throw new AppError(ERROR_CODES.OFFER_EXPIRED, {
+        internalMessage: `offer ${offerId} belongs to an old work session`,
+        safeMetadata: { reason: 'STALE_AVAILABILITY_SESSION' },
+      });
+    }
+    if (availabilityAgeMs(driver, nowMs) > C.AVAILABILITY_SESSION_MAX_AGE_MS) {
+      throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
+        internalMessage: `driver ${driverId} work session is stale`,
+        safeMetadata: { reason: 'STALE_AVAILABILITY_SESSION' },
+      });
+    }
     if (driver.activeRideId) {
       throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
         internalMessage: `driver ${driverId} already on ride ${driver.activeRideId}`,
@@ -199,6 +216,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       status: C.RIDE_STATUS.ASSIGNED,
       acceptedDriverId: driverId,
       acceptedDriverPublic,
+      acceptedAvailabilitySessionId: driver.availabilitySessionId,
       acceptedAtMs: nowMs,
       acceptedAt: ts(),
       commissionHoldCentavos: holdAmount,
@@ -280,6 +298,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
         status: C.RIDE_STATUS.ASSIGNED,
         acceptedDriverId: driverId,
         acceptedDriverPublic,
+        acceptedAvailabilitySessionId: driver.availabilitySessionId,
         commissionHoldCentavos: holdAmount,
         commissionPolicySnapshot,
         commissionSettlementStatus,

@@ -1,7 +1,8 @@
 // @ts-check
 // Deterministic launch platform flow using fixed Horizonte coordinates:
-// application -> approved public photo -> admin approval #101 -> 0% launch ride ->
-// exact promotion expiry -> wallet gate -> normal commission hold and capture.
+// application -> approved public photo -> admin approval #101 -> explicit work
+// session -> 0% launch ride -> exact promotion expiry -> wallet gate -> normal
+// commission hold and capture.
 
 const { approveDriver } = require('../drivers/approveDriver');
 const { createRideRequestSecure } = require('../rides/createRideRequest');
@@ -15,6 +16,7 @@ const RIDE_C = require('../rides/constants');
 const ADMIN_ID = 'admin_horizonte_platform_test';
 const DRIVER_ID = 'driver_101_car_horizonte';
 const PASSENGER_ID = 'passenger_real_addresses_horizonte';
+const AVAILABILITY_SESSION = 'work_platform_driver_session_123456789';
 const AT_18H = Date.parse('2026-08-01T21:00:00.000Z');
 const CTX = { traceId: 'trace_platform_real_horizonte', environment: 'test' };
 
@@ -97,6 +99,7 @@ function seedPlatform(db) {
       selfie: 'drivers/test/selfie.jpg',
     },
     availabilityStatus: 'offline',
+    availabilitySessionId: null,
     activeRideId: null,
     submittedAtMs: AT_18H - 60_000,
   });
@@ -195,6 +198,10 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
       subscriptionFreeUntil: null,
     });
     expect(approved.commissionFreeUntil).toBe(AT_18H + 60 * DRIVER_C.DAY_MS);
+    expect(db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`)).toMatchObject({
+      availabilityStatus: 'offline',
+      availabilitySessionId: null,
+    });
 
     // Reapproval is idempotent and cannot restart launch benefits.
     const replayApproval = await approveDriver({
@@ -208,9 +215,11 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
 
     await db.collection(DRIVER_C.DRIVERS).doc(DRIVER_ID).set({
       availabilityStatus: 'online',
+      availabilitySessionId: AVAILABILITY_SESSION,
       availabilityUpdatedAtMs: clock.now(),
       location: { lat: PICKUP.lat, lng: PICKUP.lng },
       locationUpdatedAtMs: clock.now(),
+      locationAvailabilitySessionId: AVAILABILITY_SESSION,
     }, { merge: true });
 
     // Launch window: no hold and no wallet needed.

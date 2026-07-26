@@ -9,14 +9,17 @@ const clock = { now: () => NOW };
 const pickup = { lat: -4.1109, lng: -38.4838 };
 
 function candidate(id, over = {}) {
+  const availabilitySessionId = `work_${id}_session_123456789`;
   return {
     id,
     data: {
       availabilityStatus: 'online',
-      availabilityUpdatedAt: NOW - 60_000,
+      availabilitySessionId,
+      availabilityUpdatedAtMs: NOW - 60_000,
       activeRideId: null,
       location: { lat: -4.1109, lng: -38.4838 },
       locationUpdatedAtMs: NOW - 60_000,
+      locationAvailabilitySessionId: availabilitySessionId,
       verificationStatus: 'approved',
       isBlocked: false,
       founderEligible: true,
@@ -27,17 +30,21 @@ function candidate(id, over = {}) {
   };
 }
 
-describe('candidate diagnostics and Horizonte stale-online fallback', () => {
-  it('keeps fresh drivers first and recovers a recently-online stale heartbeat', () => {
+describe('candidate diagnostics and bounded work-session fallback', () => {
+  it('keeps fresh drivers first and tolerates only a short GPS delay', () => {
     const candidates = [
       candidate('fresh'),
       candidate('stale-recoverable', {
-        locationUpdatedAtMs: NOW - 35 * 60 * 1000,
-        availabilityUpdatedAt: NOW - 35 * 60 * 1000,
+        locationUpdatedAtMs: NOW - 6 * 60 * 1000,
       }),
       candidate('stale-too-old', {
-        locationUpdatedAtMs: NOW - 2 * 60 * 60 * 1000,
-        availabilityUpdatedAt: NOW - 2 * 60 * 60 * 1000,
+        locationUpdatedAtMs: NOW - 8 * 60 * 1000,
+      }),
+      candidate('work-session-too-old', {
+        availabilityUpdatedAtMs: NOW - 8 * 60 * 1000,
+      }),
+      candidate('session-mismatch', {
+        locationAvailabilitySessionId: 'work_previous_session_987654321',
       }),
       candidate('busy', { activeRideId: 'other-ride' }),
       candidate('subscription-required', {
@@ -57,25 +64,28 @@ describe('candidate diagnostics and Horizonte stale-online fallback', () => {
     expect(eligible[0].locationFreshness).toBe('fresh');
     expect(eligible[1].locationFreshness).toBe('stale_online_fallback');
     expect(diagnostics).toMatchObject({
-      candidateCount: 5,
+      candidateCount: 7,
       eligibleCount: 2,
       freshEligibleCount: 1,
       staleFallbackEligibleCount: 1,
-      rejectedCount: 3,
+      rejectedCount: 5,
       rejectedBusy: 1,
+      rejectedMissingWorkSession: 1,
+      rejectedStaleWorkSession: 1,
       rejectedStaleLocation: 1,
       rejectedSubscriptionRequired: 1,
       searchRadiusMeters: 50_000,
       locationMaxAgeMs: 5 * 60 * 1000,
+      availabilitySessionMaxAgeMs: 7 * 60 * 1000,
       staleFallbackMaxAgeMs: ONLINE_STALE_FALLBACK_MAX_AGE_MS,
     });
   });
 
-  it('does not recover a stale location when the online status is also too old', () => {
+  it('does not recover a fresh point when the work-session lease is too old', () => {
     const { eligible, diagnostics } = selectEligibleDriversWithDiagnostics([
       candidate('ghost-online', {
-        locationUpdatedAtMs: NOW - 20 * 60 * 1000,
-        availabilityUpdatedAt: NOW - 2 * 60 * 60 * 1000,
+        locationUpdatedAtMs: NOW - 60_000,
+        availabilityUpdatedAtMs: NOW - 20 * 60 * 1000,
       }),
     ], {
       pickup,
@@ -84,6 +94,6 @@ describe('candidate diagnostics and Horizonte stale-online fallback', () => {
     });
 
     expect(eligible).toHaveLength(0);
-    expect(diagnostics.rejectedStaleLocation).toBe(1);
+    expect(diagnostics.rejectedStaleWorkSession).toBe(1);
   });
 });

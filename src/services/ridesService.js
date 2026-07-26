@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { doc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { functions, db } from '../config/firebase';
 import { logRideClientEvent } from '../utils/clientRideLog';
+import { getDriverTrackingSession } from './driverLocationTracking';
 
 function makeIdempotencyKey(prefix) {
   const rand = Math.random().toString(36).slice(2, 12);
@@ -142,7 +143,10 @@ const TERMINAL_DRIVER_RIDE_STATUSES = new Set(['completed', 'cancelled', 'disput
 
 export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
   const q = query(collection(db, 'driverOffers'), where('driverId', '==', driverUid));
-  return onSnapshot(q, (snap) => {
+  let snapshotRevision = 0;
+
+  return onSnapshot(q, async (snap) => {
+    const revision = ++snapshotRevision;
     let offered = null;
     let accepted = null;
     const nowMs = Date.now();
@@ -162,7 +166,31 @@ export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
       }
     });
 
-    const selected = accepted || offered;
+    let selected = accepted || offered;
+
+    // Accepted rides remain recoverable even after a process restart. A merely
+    // offered ride, however, belongs to exactly one work session and must never be
+    // shown from an old Android notification or an old Firestore snapshot.
+    if (selected?.status === 'offered') {
+      const trackingSession = await getDriverTrackingSession();
+      if (revision !== snapshotRevision) return;
+      const sessionMatches = Boolean(
+        trackingSession?.driverId === driverUid
+        && trackingSession?.availabilitySessionId
+        && selected.availabilitySessionId === trackingSession.availabilitySessionId
+      );
+      if (!sessionMatches) {
+        logRideClientEvent('ride.driver_offer.stale_session_ignored', {
+          action: 'filter_targeted_offer',
+          rideId: selected.rideId,
+          offerId: selected.offerId,
+          reason: trackingSession ? 'availability_session_mismatch' : 'local_work_session_missing',
+          resultStatus: 'ignored',
+        }, 'warning');
+        selected = null;
+      }
+    }
+
     logRideClientEvent('ride.driver_offer.snapshot_received', {
       rideId: selected?.rideId || rideId,
       offerStatus: selected?.status || 'missing',

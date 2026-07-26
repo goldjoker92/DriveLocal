@@ -1,11 +1,10 @@
 // Deterministic unit tests for BLOCK 07+08 (ride request, dispatch, acceptance,
 // wallet hold). In-memory fake Firestore + injected fake routing provider — no
-// emulator, no cloud, no real Google Routes call. Exactly the 10 critical
-// invariants required by the block.
+// emulator, no cloud, no real Google Routes call. Exactly the critical invariants
+// required by the block plus driver work-session isolation.
 //
 // The fake routing adapter and fakeFirestore are TEST-ONLY; runtime exports build
-// the real Google Routes adapter and use the Firebase Admin SDK (verified by
-// git grep in the validation step).
+// the real Google Routes adapter and use the Firebase Admin SDK.
 
 const { createRideRequestSecure } = require('../rides/createRideRequest');
 const { acceptDriverOfferSecure } = require('../rides/acceptOffer');
@@ -52,15 +51,19 @@ function seedCity(db) {
 }
 
 function seedDriver(db, id, over = {}) {
+  const availabilitySessionId = `work_${id}_session_123456789`;
   db.collection(C.DRIVERS).doc(id).set({
     serviceAreaId: C.DEFAULT_SERVICE_AREA_ID,
     vehicleType: 'moto',
     verificationStatus: 'approved',
     isBlocked: false,
     availabilityStatus: 'online',
+    availabilitySessionId,
+    availabilityUpdatedAtMs: T0,
     activeRideId: null,
     location: { lat: -4.10, lng: -38.49 },
     locationUpdatedAtMs: T0,
+    locationAvailabilitySessionId: availabilitySessionId,
     // Founder -> commission-free + subscription-covered by default.
     founderEligible: true,
     commissionFreeUntil: T0 + 60 * 24 * 60 * 60 * 1000,
@@ -168,6 +171,7 @@ describe('dispatch targeting', () => {
     seedDriver(db, 'blocked', { isBlocked: true });
     seedDriver(db, 'unapproved', { verificationStatus: 'pending_review' });
     seedDriver(db, 'stale', { locationUpdatedAtMs: T0 - 10 * 60 * 1000 });
+    seedDriver(db, 'old-session', { locationAvailabilitySessionId: 'work_previous_session_123456' });
     seedDriver(db, 'far', { location: { lat: -4.14, lng: -38.54 } });
     seedDriver(db, 'busy', { activeRideId: 'other' });
 
@@ -180,6 +184,7 @@ describe('dispatch targeting', () => {
     expect(offered).not.toContain(`${view.rideId}_blocked`);
     expect(offered).not.toContain(`${view.rideId}_unapproved`);
     expect(offered).not.toContain(`${view.rideId}_stale`);
+    expect(offered).not.toContain(`${view.rideId}_old-session`);
     expect(offered).not.toContain(`${view.rideId}_busy`);
     expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
   });
@@ -233,6 +238,34 @@ describe('transactional acceptance & wallet hold', () => {
     await expect(
       acceptDriverOfferSecure({ db, request: { auth: { uid: 'A' }, data: { offerId: `${view.rideId}_A`, idempotencyKey: 'acc-expired-01' } }, context: ctx, clock: fixedClock(EXPIRED_OFFER_AT_MS) })
     ).rejects.toMatchObject({ code: 'OFFER_EXPIRED' });
+  });
+
+  it('T7b: an offer from a previous work session is rejected', async () => {
+    const db = makeFakeFirestore();
+    seedCity(db);
+    seedDriver(db, 'A');
+    const clock = fixedClock(T0);
+    const view = await createRide(db, clock, fakeRouting());
+
+    const newSessionId = 'work_A_new_session_987654321';
+    db.collection(C.DRIVERS).doc('A').set({
+      availabilitySessionId: newSessionId,
+      locationAvailabilitySessionId: newSessionId,
+      availabilityUpdatedAtMs: T0,
+      locationUpdatedAtMs: T0,
+    }, { merge: true });
+
+    await expect(
+      acceptDriverOfferSecure({
+        db,
+        request: { auth: { uid: 'A' }, data: { offerId: `${view.rideId}_A`, idempotencyKey: 'acc-old-session-01' } },
+        context: ctx,
+        clock,
+      })
+    ).rejects.toMatchObject({
+      code: 'OFFER_EXPIRED',
+      safeMetadata: { reason: 'STALE_AVAILABILITY_SESSION' },
+    });
   });
 
   it('T8: a commission-free driver accepts with wallet R$0 and hold R$0', async () => {

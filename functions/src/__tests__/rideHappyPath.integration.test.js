@@ -14,6 +14,7 @@ const C = require('../rides/constants');
 const AT_18H = Date.parse('2026-07-16T21:00:00.000Z');
 const PASSENGER_ID = 'passenger_horizonte_18h';
 const DRIVER_ID = 'driver_car_standard';
+const WORK_SESSION_ID = 'work_happy_path_0001';
 const CTX = { traceId: 'trace_e2e_horizonte_18h', environment: 'test' };
 
 // Fictional endpoints inside the deterministic Horizonte test polygon.
@@ -42,14 +43,20 @@ function seedBase(db) {
 
   db.collection(C.PASSENGERS).doc(PASSENGER_ID).set({ activeRideId: null });
 
+  // A real candidate is not just marked online: the work-session lease and the
+  // latest GPS point must carry the same session id. This keeps the end-to-end
+  // happy path aligned with the production anti-ghost-driver contract.
   db.collection(C.DRIVERS).doc(DRIVER_ID).set({
     serviceAreaId: C.DEFAULT_SERVICE_AREA_ID,
     vehicleType: 'car',
     verificationStatus: 'approved',
     isBlocked: false,
     availabilityStatus: 'online',
+    availabilitySessionId: WORK_SESSION_ID,
+    availabilityUpdatedAtMs: AT_18H,
     activeRideId: null,
     location: { lat: PICKUP.lat, lng: PICKUP.lng },
+    locationAvailabilitySessionId: WORK_SESSION_ID,
     locationUpdatedAtMs: AT_18H,
     founderEligible: false,
     commissionFreeUntil: null,

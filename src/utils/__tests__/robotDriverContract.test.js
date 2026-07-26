@@ -52,7 +52,9 @@ describe('DEV Robot Driver contracts', () => {
 
     expect(auth).toContain("clearLocalDriverTracking('login_preflight')");
     expect(auth).toContain("clearLocalDriverTracking('sign_out')");
-    expect(auth).toContain('await stopRobotDriver()');
+    // Auth cleanup must not briefly reactivate the physical GPS after stopping
+    // the DEV robot. The final state for logout/account switch is fully stopped.
+    expect(auth).toContain('await stopRobotDriver({ restoreRealTracking: false })');
     expect(auth).toContain('await stopDriverOnlineTracking()');
     expect(auth).toContain('[AUTH_TRACKING_CLEANUP]');
   });
@@ -69,6 +71,30 @@ describe('DEV Robot Driver contracts', () => {
     expect(screen).toContain("robot?.rideStatus === 'assigned'");
     expect(screen).toContain("robot?.rideStatus === 'in_progress'");
     expect(screen).toContain('Statut réel course');
+  });
+
+  it('invalidates stale ride listeners and returns to waiting after a terminal ride', () => {
+    const engine = source('src/services/robotDriverEngine.js');
+
+    expect(engine).toContain('let rideBindingGeneration = 0');
+    expect(engine).toContain('function bindingIsCurrent(rideId, generation)');
+    expect(engine).toContain("trace('ride.snapshot_ignored'");
+    expect(engine).toContain("reason: 'stale_binding'");
+    expect(engine).toContain('async function returnRobotToWaiting');
+    expect(engine).toContain("phase: 'waiting_request'");
+    expect(engine).toContain("result: 'waiting_for_next_request'");
+    expect(engine).toContain('closeRideListener();');
+  });
+
+  it('makes active-ride cleanup idempotent and preserves Robot Driver ownership', () => {
+    const activeRide = source('src/app/(driver)/active-ride.jsx');
+
+    expect(activeRide).toContain('cleanupDoneRef');
+    expect(activeRide).toContain('cleanupInFlightRef');
+    expect(activeRide).toContain('const cleanupKey = `${rideId}:${stage}`');
+    expect(activeRide).toContain('localDevSimulationActive && !robotActive');
+    expect(activeRide).toContain('availabilitySessionId: offer.availabilitySessionId || null');
+    expect(activeRide).toContain('active_ride.cleanup_succeeded');
   });
 
   it('provides traceable manual controls for the full successful ride observation', () => {

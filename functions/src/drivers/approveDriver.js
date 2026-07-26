@@ -193,6 +193,12 @@ async function approveDriver({ db, request, context, clock }) {
       duplicateOverrideReason: conflicts.length > 0 ? effectiveOverrideReason : null,
       duplicateReviewedBy: adminUid,
       reviewedBy: adminUid,
+      // Approval grants eligibility only. The driver explicitly starts work later.
+      availabilityStatus: 'offline',
+      availabilitySessionId: null,
+      locationAvailabilitySessionId: null,
+      availabilityUpdatedAtMs: nowMs,
+      availabilityUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     if (before.freeRideCountUsed == null) update.freeRideCountUsed = 0;
@@ -232,6 +238,7 @@ async function approveDriver({ db, request, context, clock }) {
       },
       afterSummary: {
         verificationStatus: 'approved',
+        availabilityStatus: 'offline',
         approvalNumber: outcome.after.approvalNumber,
         founderNumber: outcome.after.founderNumber,
         driverPhotoPublicVersion: outcome.after.driverPhotoPublicVersion || null,

@@ -17,30 +17,121 @@ import {
 import { auth, db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
 import { disablePushNotifications } from './notificationsService';
-import { stopDriverOnlineTracking } from './driverLocationTracking';
+import {
+  getDriverTrackingSession,
+  stopDriverOnlineTracking,
+} from './driverLocationTracking';
+import { stopDriverWorkSession } from './driverAvailabilityService';
 import { getRobotDriverState, stopRobotDriver } from './robotDriverEngine';
 
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
-async function clearLocalDriverTracking(reason) {
+function shortId(value) {
+  const text = typeof value === 'string' ? value : '';
+  if (!text) return null;
+  return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
+}
+
+function activeRideAccountChangeError(reason) {
+  const error = new Error('Finalize ou cancele a corrida ativa antes de trocar de conta.');
+  error.code = 'auth/active-ride-in-progress';
+  error.reason = reason;
+  return error;
+}
+
+async function readAuthenticatedDriverState() {
+  const uid = auth.currentUser?.uid || null;
+  if (!uid) return null;
+  try {
+    const snapshot = await getDoc(doc(db, 'drivers', uid));
+    return snapshot.exists() ? { uid, ...snapshot.data() } : null;
+  } catch (error) {
+    console.warn('[AUTH_TRACKING_CLEANUP] remote driver read failed', {
+      scope: 'auth_tracking_cleanup',
+      event: 'remote_driver_read_failed',
+      authenticatedUid: shortId(uid),
+      reason: error?.code || error?.message || 'unknown',
+      atMs: Date.now(),
+    });
+    return null;
+  }
+}
+
+async function activeTrackingState() {
+  const session = await getDriverTrackingSession();
   const robot = getRobotDriverState();
-  console.log('[AUTH_TRACKING_CLEANUP] started', {
+  const localRideId = session?.rideId || robot?.rideId || null;
+  const localDriverId = session?.driverId || robot?.driverId || null;
+
+  if (localRideId) {
+    return {
+      session,
+      remoteDriver: null,
+      hasActiveRide: true,
+      activeRideId: localRideId,
+      driverId: localDriverId,
+      source: session?.rideId ? 'native_tracking_session' : 'robot_driver',
+    };
+  }
+
+  // AsyncStorage can be removed by Android or by a previous failed transition.
+  // Firestore remains authoritative for an already assigned ride.
+  const remoteDriver = await readAuthenticatedDriverState();
+  return {
+    session,
+    remoteDriver,
+    hasActiveRide: Boolean(remoteDriver?.activeRideId),
+    activeRideId: remoteDriver?.activeRideId || null,
+    driverId: localDriverId || remoteDriver?.uid || null,
+    source: remoteDriver?.activeRideId ? 'firestore_driver' : 'none',
+  };
+}
+
+async function assertNoActiveRideAccountChange(reason) {
+  const tracking = await activeTrackingState();
+  if (!tracking.hasActiveRide) return tracking;
+  console.warn('[AUTH_TRACKING_CLEANUP] account change blocked by active ride', {
+    scope: 'auth_tracking_cleanup',
+    event: 'account_change_blocked',
     reason,
-    authenticatedUid: auth.currentUser?.uid || null,
+    source: tracking.source,
+    driverId: shortId(tracking.driverId),
+    rideId: shortId(tracking.activeRideId),
+    atMs: Date.now(),
+  });
+  throw activeRideAccountChangeError(reason);
+}
+
+async function clearLocalDriverTracking(reason) {
+  const trackingSession = await getDriverTrackingSession();
+  const robot = getRobotDriverState();
+  const remoteDriver = await readAuthenticatedDriverState();
+  console.log('[AUTH_TRACKING_CLEANUP] started', {
+    scope: 'auth_tracking_cleanup',
+    event: 'cleanup_started',
+    reason,
+    authenticatedUid: shortId(auth.currentUser?.uid),
     robotEnabled: Boolean(robot?.enabled),
-    robotDriverId: robot?.driverId || null,
-    robotRideId: robot?.rideId || null,
+    robotDriverId: shortId(robot?.driverId),
+    robotRideId: shortId(robot?.rideId),
+    trackingRideId: shortId(trackingSession?.rideId),
+    localSessionId: shortId(trackingSession?.availabilitySessionId),
+    remoteSessionId: shortId(remoteDriver?.availabilitySessionId),
     atMs: Date.now(),
   });
 
   try {
     if (robot?.enabled) {
-      await stopRobotDriver();
+      // Account cleanup must end with no native task. Do not briefly restore the
+      // physical GPS when stopping the DEV simulator for sign-out/account switch.
+      await stopRobotDriver({ restoreRealTracking: false });
     }
   } catch (error) {
     console.warn('[AUTH_TRACKING_CLEANUP] robot stop failed', {
+      scope: 'auth_tracking_cleanup',
+      event: 'robot_stop_failed',
       reason,
       code: error?.code,
       message: error?.message,
@@ -49,12 +140,13 @@ async function clearLocalDriverTracking(reason) {
   }
 
   try {
-    // Always stop the native task after Robot Driver cleanup. stopRobotDriver()
-    // briefly restores native tracking by design; account changes must end with
-    // no task and no persisted ride session owned by the previous account.
+    // Invalidate the local session before revoking it remotely so queued native
+    // points cannot publish after sign-out or account switching.
     await stopDriverOnlineTracking();
   } catch (error) {
     console.warn('[AUTH_TRACKING_CLEANUP] native stop failed', {
+      scope: 'auth_tracking_cleanup',
+      event: 'native_stop_failed',
       reason,
       code: error?.code,
       message: error?.message,
@@ -62,13 +154,43 @@ async function clearLocalDriverTracking(reason) {
     });
   }
 
-  console.log('[AUTH_TRACKING_CLEANUP] completed', { reason, atMs: Date.now() });
+  const remoteSessionId = trackingSession?.availabilitySessionId
+    || remoteDriver?.availabilitySessionId
+    || null;
+  const authenticatedUid = auth.currentUser?.uid || null;
+  const sessionOwnerMatches = !trackingSession?.driverId
+    || trackingSession.driverId === authenticatedUid;
+
+  if (remoteSessionId && authenticatedUid && sessionOwnerMatches && !remoteDriver?.activeRideId) {
+    try {
+      await stopDriverWorkSession(remoteSessionId);
+    } catch (error) {
+      // The short server lease still removes a disconnected ghost driver. Account
+      // changes must not be blocked solely by a temporary network failure.
+      console.warn('[AUTH_TRACKING_CLEANUP] remote availability stop failed', {
+        scope: 'auth_tracking_cleanup',
+        event: 'remote_availability_stop_failed',
+        reason,
+        availabilitySessionId: shortId(remoteSessionId),
+        code: error?.code,
+        message: error?.message,
+        atMs: Date.now(),
+      });
+    }
+  }
+
+  console.log('[AUTH_TRACKING_CLEANUP] completed', {
+    scope: 'auth_tracking_cleanup',
+    event: 'cleanup_completed',
+    reason,
+    authenticatedUid: shortId(auth.currentUser?.uid),
+    atMs: Date.now(),
+  });
 }
 
 async function clearAuthenticatedSession() {
-  // Location tasks survive navigation and may survive sign-out. Stop them while
-  // the old Firebase user is still authenticated so they cannot keep producing
-  // permission-denied writes or leak a previous ride session into the next login.
+  // Never abandon a passenger mid-ride by switching the authenticated account.
+  await assertNoActiveRideAccountChange('sign_out');
   await clearLocalDriverTracking('sign_out');
 
   try {
@@ -106,6 +228,14 @@ async function resolveAccountRole(uid) {
   }
 
   return { role: 'unknown', profile: null };
+}
+
+async function roleResult(user) {
+  const account = await resolveAccountRole(user.uid);
+  if (account.role === 'admin') return { user, role: 'admin' };
+  if (account.role === 'driver') return { user, role: 'driver', driver: account.profile };
+  if (account.role === 'passenger') return { user, role: 'passenger', passenger: account.profile };
+  return { user, role: 'unknown' };
 }
 
 async function writeRoleProfile(user, collectionName, buildProfile, normalizedEmail) {
@@ -175,7 +305,8 @@ async function createAccountWithProfile({
     await clearAuthenticatedSession();
   } else {
     // A native background task can remain after an earlier process/session even
-    // when Firebase Auth is already signed out. Clear it before creating a user.
+    // when Firebase Auth is already signed out. Never replace an active ride.
+    await assertNoActiveRideAccountChange('register_preflight');
     await clearLocalDriverTracking('register_preflight');
   }
 
@@ -238,6 +369,9 @@ function buildInitialDriverProfile(user, email) {
     selfieStatus: 'missing',
     duplicateCheckStatus: 'clear',
     serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
+    availabilityStatus: 'offline',
+    availabilitySessionId: null,
+    availabilityUpdatedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -274,31 +408,37 @@ export async function registerPassenger(email, password, profile) {
 }
 
 // Signs the user in, then resolves their role.
-// Returns { user, role, driver?, passenger? }.
+// A same-driver reauthentication preserves an active ride and its tracking;
+// switching to any other account remains blocked until the ride is terminal.
 export async function loginUser(email, password) {
   const normalizedEmail = normalizeEmail(email);
+  const tracking = await activeTrackingState();
 
-  // Critical account-switch preflight: an Expo background location task can be
-  // alive while Auth is signed out. Clear the persisted driver/ride session
-  // before authenticating, otherwise the new user inherits permission-denied
-  // activeRideLocations writes from the previous session.
+  if (tracking.hasActiveRide) {
+    const currentUid = auth.currentUser?.uid || null;
+    const currentEmail = normalizeEmail(auth.currentUser?.email);
+    if (
+      (currentUid && currentUid !== tracking.driverId)
+      || (currentEmail && currentEmail !== normalizedEmail)
+    ) {
+      throw activeRideAccountChangeError('login_preflight');
+    }
+
+    const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+    if (credential.user.uid !== tracking.driverId) {
+      // Keep the local/remote ride ownership so the correct account can be entered next.
+      // The wrong account is immediately signed out and never inherits the ride.
+      await signOut(auth);
+      throw activeRideAccountChangeError('login_uid_mismatch');
+    }
+    return roleResult(credential.user);
+  }
+
+  // No active ride: close the previous optional work session before replacing the
+  // authenticated account. New login therefore starts unavailable by default.
   await clearLocalDriverTracking('login_preflight');
-
   const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
-  const user = credential.user;
-  const account = await resolveAccountRole(user.uid);
-
-  if (account.role === 'admin') {
-    return { user, role: 'admin' };
-  }
-  if (account.role === 'driver') {
-    return { user, role: 'driver', driver: account.profile };
-  }
-  if (account.role === 'passenger') {
-    return { user, role: 'passenger', passenger: account.profile };
-  }
-
-  return { user, role: 'unknown' };
+  return roleResult(credential.user);
 }
 
 export async function logoutUser() {

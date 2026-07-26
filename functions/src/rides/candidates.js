@@ -1,18 +1,16 @@
 // @ts-check
 // Server-side candidate selection. The Firestore query is bounded and restricted
 // to service area + vehicle type + online status. The pure selector then applies
-// account eligibility, activity, location and proximity rules while returning
+// account eligibility, work-session, location and proximity rules while returning
 // aggregate rejection diagnostics (never UIDs, coordinates or profile data).
 
 const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
 const { haversineMeters } = require('../geo/geo');
 const C = require('./constants');
 
-// A temporarily stalled Android background task must not make an explicitly
-// online driver disappear immediately. During the Horizonte launch phase, a
-// valid last-known point may be used for up to one hour, provided the driver's
-// online status was also refreshed within that hour. Fresh drivers remain first.
-const ONLINE_STALE_FALLBACK_MAX_AGE_MS = 60 * 60 * 1000;
+// Kept as a compatibility export for analytics/tests. The fallback is now bounded
+// by the same short work-session lease instead of the previous one-hour window.
+const ONLINE_STALE_FALLBACK_MAX_AGE_MS = C.AVAILABILITY_SESSION_MAX_AGE_MS;
 
 function driverLocation(d) {
   if (d.location && Number.isFinite(d.location.lat) && Number.isFinite(d.location.lng)) {
@@ -25,13 +23,30 @@ function driverLocation(d) {
 }
 
 function locationAgeMs(d, nowMs) {
-  const ts = Number(d.locationUpdatedAtMs || 0);
+  // Server timestamps are authoritative. Epoch-ms remains a compatibility
+  // fallback for legacy records and deterministic in-memory test fixtures.
+  const ts = toMillis(d.locationUpdatedAt)
+    || Number(d.locationUpdatedAtMs || 0);
   return ts > 0 ? Math.max(0, nowMs - ts) : Infinity;
 }
 
 function availabilityAgeMs(d, nowMs) {
-  const ts = toMillis(d.availabilityUpdatedAtMs || d.availabilityUpdatedAt);
+  // Never let a misconfigured phone clock extend a work session indefinitely.
+  const ts = toMillis(d.availabilityUpdatedAt)
+    || Number(d.availabilityUpdatedAtMs || 0);
   return ts > 0 ? Math.max(0, nowMs - ts) : Infinity;
+}
+
+function hasMatchingAvailabilitySession(d = {}) {
+  return typeof d.availabilitySessionId === 'string'
+    && d.availabilitySessionId.length >= 16
+    && d.locationAvailabilitySessionId === d.availabilitySessionId;
+}
+
+function hasFreshAvailabilitySession(d = {}, nowMs = Date.now()) {
+  return d.availabilityStatus === 'online'
+    && hasMatchingAvailabilitySession(d)
+    && availabilityAgeMs(d, nowMs) <= C.AVAILABILITY_SESSION_MAX_AGE_MS;
 }
 
 function emptyDiagnostics(radius) {
@@ -43,6 +58,8 @@ function emptyDiagnostics(radius) {
     rejectedCount: 0,
     rejectedOffline: 0,
     rejectedBusy: 0,
+    rejectedMissingWorkSession: 0,
+    rejectedStaleWorkSession: 0,
     rejectedMissingLocation: 0,
     rejectedStaleLocation: 0,
     rejectedOutsideRadius: 0,
@@ -52,6 +69,7 @@ function emptyDiagnostics(radius) {
     rejectedUnknownEligibility: 0,
     searchRadiusMeters: radius,
     locationMaxAgeMs: C.LOCATION_MAX_AGE_MS,
+    availabilitySessionMaxAgeMs: C.AVAILABILITY_SESSION_MAX_AGE_MS,
     staleFallbackMaxAgeMs: ONLINE_STALE_FALLBACK_MAX_AGE_MS,
     freshestLocationAgeMs: null,
     stalestLocationAgeMs: null,
@@ -91,14 +109,13 @@ async function queryCandidateDrivers({ db, serviceAreaId, vehicleType, maxCandid
 }
 
 /**
- * Pure eligibility + proximity filter with aggregate diagnostics.
- * Fresh drivers are preferred, but an explicitly online driver with a valid
- * last-known point can enter the bounded launch fallback when Android heartbeat
- * delivery pauses temporarily.
+ * Pure eligibility + work-session + proximity filter with aggregate diagnostics.
+ * A legacy online flag without a matching session-bound GPS point is deliberately
+ * treated as unavailable, preventing ghost drivers and stale positions.
  *
  * @param {Array<{id:string, data:object}>} candidates
  * @param {{pickup:object, searchRadiusMeters:number, clock:{now:()=>number}}} args
- * @returns {{eligible:Array<{driverId:string,data:object,distanceToPickupMeters:number,locationFreshness:string,locationAgeMs:number}>, diagnostics:object}}
+ * @returns {{eligible:Array<{driverId:string,data:object,distanceToPickupMeters:number,locationFreshness:string,locationAgeMs:number,availabilitySessionId:string}>, diagnostics:object}}
  */
 function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadiusMeters, clock }) {
   const nowMs = Number(clock.now());
@@ -116,6 +133,14 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
     }
     if (d.activeRideId) {
       diagnostics.rejectedBusy += 1;
+      continue;
+    }
+    if (!hasMatchingAvailabilitySession(d)) {
+      diagnostics.rejectedMissingWorkSession += 1;
+      continue;
+    }
+    if (availabilityAgeMs(d, nowMs) > C.AVAILABILITY_SESSION_MAX_AGE_MS) {
+      diagnostics.rejectedStaleWorkSession += 1;
       continue;
     }
 
@@ -137,10 +162,7 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
     const ageMs = locationAgeMs(d, nowMs);
     recordLocationAge(diagnostics, ageMs);
     const fresh = ageMs <= C.LOCATION_MAX_AGE_MS;
-    const recentOnlineStatus = availabilityAgeMs(d, nowMs) <= ONLINE_STALE_FALLBACK_MAX_AGE_MS;
-    const staleFallback = !fresh
-      && ageMs <= ONLINE_STALE_FALLBACK_MAX_AGE_MS
-      && recentOnlineStatus;
+    const staleFallback = !fresh && ageMs <= ONLINE_STALE_FALLBACK_MAX_AGE_MS;
 
     if (!fresh && !staleFallback) {
       diagnostics.rejectedStaleLocation += 1;
@@ -162,6 +184,7 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
       distanceToPickupMeters: Math.round(distanceToPickupMeters),
       locationFreshness: fresh ? 'fresh' : 'stale_online_fallback',
       locationAgeMs: Math.round(ageMs),
+      availabilitySessionId: d.availabilitySessionId,
     });
   }
 
@@ -187,5 +210,7 @@ module.exports = {
   driverLocation,
   locationAgeMs,
   availabilityAgeMs,
+  hasMatchingAvailabilitySession,
+  hasFreshAvailabilitySession,
   ONLINE_STALE_FALLBACK_MAX_AGE_MS,
 };
