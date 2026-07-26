@@ -55,14 +55,18 @@ describe('commercial policy integration contract', () => {
     expect(payment).toContain('payment.create.duplicate_ignored');
   });
 
-  it('keeps offer commission copy restricted to policy percentages', () => {
+  it('keeps offer commission copy restricted to safe server-projected percentages', () => {
     const offer = source('src/utils/rideOfferPresentation.js');
     const pricing = source('src/constants/pricingConfig.js');
 
     expect(pricing).toContain('normalCommissionBps: 1200');
     expect(pricing).toContain('normalCommissionBps: 1500');
-    expect(offer).toContain("commissionPercentLabel: '0%'");
-    expect(offer).toContain('const commissionPercentLabel = Number.isInteger(standardPercent)');
+    expect(offer).toContain('offer?.commissionDisplayBps');
+    expect(offer).toContain('SAFE_COMMISSION_DISPLAY_BPS');
+    expect(offer).toContain('commissionPercentLabel: `${displayPercent}%`');
+    expect(offer).not.toContain('BPS_DENOMINATOR');
+    expect(offer).not.toContain('rawCommission');
+    expect(offer).not.toContain('commissionCentavos:');
     expect(offer).not.toContain('effectivePercent');
     expect(offer).not.toContain('DriveLocal recebeu');
     expect(offer).not.toContain('Comissão cobrada');
