@@ -18,26 +18,50 @@ jest.mock('../../audit/auditLog', () => ({ writeAuditLog: jest.fn() }));
 const { latestDriverPayment } = require('../tickets');
 
 function dbWithPayments(rows) {
+  const clauses = [];
+
+  function builder() {
+    return {
+      where: jest.fn((field, operator, value) => {
+        clauses.push({ type: 'where', field, operator, value });
+        return builder();
+      }),
+      orderBy: jest.fn((field, direction) => {
+        clauses.push({ type: 'orderBy', field, direction });
+        return builder();
+      }),
+      limit: jest.fn((max) => {
+        clauses.push({ type: 'limit', max });
+        return builder();
+      }),
+      get: jest.fn(async () => {
+        expect(clauses).toEqual([
+          { type: 'where', field: 'driverId', operator: '==', value: 'driver-1' },
+          { type: 'where', field: 'purpose', operator: '==', value: 'wallet_topup' },
+          { type: 'orderBy', field: 'createdAtMs', direction: 'desc' },
+          { type: 'limit', max: 1 },
+        ]);
+        const selected = rows
+          .filter((row) => (
+            row.data.driverId === 'driver-1'
+            && row.data.purpose === 'wallet_topup'
+          ))
+          .sort((left, right) => right.data.createdAtMs - left.data.createdAtMs)
+          .slice(0, 1);
+        return {
+          docs: selected.map((row) => ({
+            id: row.id,
+            data: () => row.data,
+          })),
+        };
+      }),
+    };
+  }
+
   return {
     collection: jest.fn((collectionName) => {
       expect(collectionName).toBe('paymentRequests');
-      return {
-        where: jest.fn((field, operator, value) => {
-          expect(field).toBe('driverId');
-          expect(operator).toBe('==');
-          expect(value).toBe('driver-1');
-          return {
-            limit: jest.fn((max) => ({
-              get: jest.fn(async () => ({
-                docs: rows.slice(0, max).map((row) => ({
-                  id: row.id,
-                  data: () => row.data,
-                })),
-              })),
-            })),
-          };
-        }),
-      };
+      return builder();
     }),
   };
 }
