@@ -81,7 +81,7 @@ export function getVehiclePricing(serviceAreaId, vehicleType) {
 export const MIN_WALLET_BALANCE_CENTAVOS = 300;
 
 // ---------------------------------------------------------------------------
-// Subscription (centavos / month) — charged only AFTER the free period
+// Subscription (centavos / month)
 // ---------------------------------------------------------------------------
 export const SUBSCRIPTION_MONTHLY_CENTAVOS = {
   [VEHICLE_MOTO]: 990, //  R$ 9,90 / month
@@ -91,14 +91,14 @@ export const SUBSCRIPTION_MONTHLY_CENTAVOS = {
 // A paid subscription period lasts 30 rolling days.
 export const SUBSCRIPTION_PERIOD_DAYS = 30;
 
-// Non-founder drivers may complete this many finalized rides before an active
-// subscription is required (an active subscription is required from the 6th
-// completed ride onward). Independent from the commission-free period.
+// Drivers #101+ may complete at most five rides without subscription, only while
+// the same 60-day launch window is active. From the 6th ride OR at day 60
+// (whichever happens first), an active subscription is required.
 export const NON_FOUNDER_FREE_RIDES = 5;
 
-// Free launch windows measured from the ADMIN APPROVAL date (approvedAt).
-export const FOUNDER_FREE_DAYS = 60; //     first 100 approved drivers
-export const COMMISSION_FREE_DAYS = 60; //  commission is 0% for everyone for 60 days
+// Free launch windows measured from the immutable ADMIN APPROVAL date.
+export const FOUNDER_FREE_DAYS = 60; // subscription-free for founders #1..#100
+export const COMMISSION_FREE_DAYS = 60; // 0% commission for every approved driver
 
 // ---------------------------------------------------------------------------
 // Dynamic pricing (D3) — disabled by default
