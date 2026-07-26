@@ -20,7 +20,7 @@ import { getPaymentStatus, isFinalPaymentStatus } from '../services/paymentsServ
 const POLL_INTERVAL_MS = 5000;
 
 // PT-BR labels for each normalized status.
-const DEFAULT_STATUS_LABELS = {
+const STATUS_LABEL = {
   pending: 'Aguardando pagamento…',
   paid: 'Pagamento confirmado!',
   expired: 'Pix expirado. Gere um novo.',
@@ -88,7 +88,7 @@ export default function DriverPixPaymentSheet({
     setCopied(true);
   }
 
-  const labels = { ...DEFAULT_STATUS_LABELS, ...(statusLabels || {}) };
+  const labels = { ...STATUS_LABEL, ...(statusLabels || {}) };
   const label = labels[status] || labels.pending;
 
   return (
