@@ -2,11 +2,16 @@
 // Passenger CREATION lives in authService.registerPassenger (mirrors the driver
 // pattern). No CPF for passengers in V1.
 
-import { doc, getDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { getDocumentWithCacheFallback } from './firestoreRecovery';
 
-// Reads passengers/{uid}. Returns the document data, or null when missing.
+// Reads passengers/{uid}. A recent Firestore cache may restore the home screen
+// while offline; server mutations remain callable-only and are never authorized by it.
 export async function getPassenger(uid) {
-  const snap = await getDoc(doc(db, 'passengers', uid));
+  const snap = await getDocumentWithCacheFallback(
+    doc(db, 'passengers', uid),
+    'passenger_profile'
+  );
   return snap.exists() ? snap.data() : null;
 }
