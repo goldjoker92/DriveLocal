@@ -13,6 +13,7 @@ const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
 const { createRideRequestSecure } = require('./createRideRequest');
 const { acceptDriverOfferSecure } = require('./acceptOffer');
 const { declineDriverOfferSecure } = require('./declineOffer');
+const { markDriverArrived } = require('./markDriverArrived');
 const { cancelRide } = require('./cancelRide');
 const lifecycle = require('./lifecycle');
 const { resolveRideDispute } = require('./disputeResolution');
@@ -96,7 +97,7 @@ module.exports = {
   createRideRequestSecure: createRideRequestSecureFn,
   acceptDriverOfferSecure: acceptDriverOfferSecureFn,
   declineDriverOfferSecure: declineDriverOfferSecureFn,
-  markDriverArrivedSecure: bindLifecycle('markDriverArrivedSecure', lifecycle.markDriverArrived),
+  markDriverArrivedSecure: bindLifecycle('markDriverArrivedSecure', markDriverArrived),
   startRideSecure: bindLifecycle('startRideSecure', lifecycle.startRide),
   finishRideSecure: bindLifecycle('finishRideSecure', finishRideWithPixMigration),
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
