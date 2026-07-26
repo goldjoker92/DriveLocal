@@ -66,6 +66,7 @@ export default function DriverLayout() {
   const segments = useSegments();
   const lastOfferId = useRef(null);
   const reconciliationBusy = useRef(false);
+  const [activeRideId, setActiveRideId] = useState(null);
   const [activeOffer, setActiveOffer] = useState(null);
   const onRobotScreen = segments.includes('robot-driver');
   const onActiveRideScreen = segments.includes('active-ride');
@@ -208,9 +209,16 @@ export default function DriverLayout() {
       doc(db, 'drivers', uid),
       { includeMetadataChanges: true },
       (snapshot) => {
-        if (!snapshot.exists()) return;
+        if (!snapshot.exists()) {
+          setActiveRideId(null);
+          return;
+        }
+        const remote = snapshot.data();
+        // activeRideId is the authoritative pointer for restoring the exact accepted
+        // offer, including non-terminal payment disputes after a process restart.
+        setActiveRideId(remote?.activeRideId || null);
         reconcileRemoteDriver(
-          snapshot.data(),
+          remote,
           'driver_snapshot',
           snapshot.metadata || {}
         ).catch((error) => {
@@ -237,18 +245,57 @@ export default function DriverLayout() {
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
+    if (!uid || !activeRideId) {
+      setActiveOffer(null);
+      return undefined;
+    }
+
+    console.log('[DRIVER_ACTIVE_RIDE] restore_listener.started', {
+      scope: 'driver_active_ride',
+      event: 'restore_listener.started',
+      rideId: shortId(activeRideId),
+      atMs: Date.now(),
+    });
+
+    return listenToMyOffer(
+      uid,
+      (offer) => {
+        if (offer?.status === 'accepted' && offer.rideId === activeRideId) {
+          setActiveOffer(offer);
+          console.log('[DRIVER_ACTIVE_RIDE] restore_listener.succeeded', {
+            scope: 'driver_active_ride',
+            event: 'restore_listener.succeeded',
+            rideId: shortId(activeRideId),
+            status: offer.driverRideStatus || 'assigned',
+            atMs: Date.now(),
+          });
+          return;
+        }
+        setActiveOffer(null);
+      },
+      (error) => {
+        console.warn('[DRIVER_ACTIVE_RIDE] restore_listener.failed', {
+          scope: 'driver_active_ride',
+          event: 'restore_listener.failed',
+          rideId: shortId(activeRideId),
+          errorCode: error?.code || 'ACTIVE_RIDE_RESTORE_FAILED',
+          atMs: Date.now(),
+        });
+      },
+      activeRideId
+    );
+  }, [activeRideId]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
     if (!uid) return undefined;
 
     return listenToMyOffer(uid, async (offer) => {
-      if (!offer?.offerId) {
-        setActiveOffer(null);
-        return;
-      }
+      if (!offer?.offerId) return;
 
       if (offer.status === 'accepted') {
-        // The accepted offer is the existing secured driver projection. Keeping it
-        // in the route-group layout makes the active card survive screen changes,
-        // external navigation, cached snapshots and process restoration.
+        // Render immediately after acceptance. The activeRideId-bound listener above
+        // becomes the durable restoration path as soon as the driver snapshot lands.
         setActiveOffer(offer);
 
         if (offer.driverRideStatus) {
@@ -270,7 +317,6 @@ export default function DriverLayout() {
         return;
       }
 
-      setActiveOffer(null);
       if (offer.status !== 'offered' || Number(offer.expiresAtMs || 0) <= Date.now()) return;
 
       const trackingSession = await getDriverTrackingSession();
