@@ -3,6 +3,7 @@
 
 const {
   safeAcceptanceView,
+  safeDriverAcceptanceView,
   safeCommissionDisplayBps,
   safeDriverLifecycleView,
 } = require('../safeViews');
@@ -23,9 +24,11 @@ function acceptedRide(overrides = {}) {
 }
 
 describe('driver commission privacy boundary', () => {
-  it('returns only the safe percentage on acceptance', () => {
-    const view = safeAcceptanceView('ride_1', acceptedRide(), 108);
+  it('keeps exact hold only inside the backend acceptance result', () => {
+    const internal = safeAcceptanceView('ride_1', acceptedRide(), 108);
+    expect(internal.commissionHoldCentavos).toBe(108);
 
+    const view = safeDriverAcceptanceView(internal);
     expect(view).toEqual({
       rideId: 'ride_1',
       status: 'assigned',
@@ -39,7 +42,8 @@ describe('driver commission privacy boundary', () => {
   });
 
   it('maps a zero hold to zero percent without exposing the amount', () => {
-    const view = safeAcceptanceView('ride_2', acceptedRide(), 0);
+    const internal = safeAcceptanceView('ride_2', acceptedRide(), 0);
+    const view = safeDriverAcceptanceView(internal);
     expect(view.commissionDisplayBps).toBe(0);
     expect(view).not.toHaveProperty('commissionHoldCentavos');
   });
