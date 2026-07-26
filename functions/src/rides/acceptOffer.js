@@ -61,15 +61,14 @@ function publicDriverSummary(driver, vehicleType, driverId = '') {
   };
 }
 
-// Compatibility signature retained for existing tests. The returned commercial
-// snapshot is internal-only and contains no UID, contact, address or Pix data.
+// Preserve the historical return shape because this helper is directly tested.
+// The richer commercial snapshot is built separately inside the transaction.
 function resolveHold(driver, ride, nowMs) {
-  const commercialPolicySnapshot = buildCommercialPolicySnapshot(driver, nowMs);
-  const commissionFree = commercialPolicySnapshot.commissionFreeAtAcceptance;
+  const commercial = buildCommercialPolicySnapshot(driver, nowMs);
+  const commissionFree = commercial.commissionFreeAtAcceptance;
   return {
     holdAmount: commissionFree ? 0 : Number(ride.estimatedCommissionCentavos || 0),
     commissionFree,
-    commercialPolicySnapshot,
   };
 }
 
@@ -198,11 +197,8 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       });
     }
 
-    const {
-      holdAmount,
-      commissionFree,
-      commercialPolicySnapshot,
-    } = resolveHold(driver, ride, nowMs);
+    const commercialPolicySnapshot = buildCommercialPolicySnapshot(driver, nowMs);
+    const { holdAmount, commissionFree } = resolveHold(driver, ride, nowMs);
     if (!commissionFree) {
       const available = Number(driver.walletAvailableCentavos || 0);
       if (!(available > C.MIN_WALLET_BALANCE_CENTAVOS)) {
@@ -334,14 +330,17 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
   });
 
   if (result.replay) {
-    logInfo(context, 'ride.accept.duplicate_ignored', {
+    const replayMetadata = {
       operation: 'accept',
       offerId,
       rideId: result.ride.rideId,
       normalizedStatus: 'assigned',
       reasonCode: 'IDEMPOTENT_REPLAY',
       commercialPolicyVersion: result.ride.commercialPolicySnapshot?.policyVersion || null,
-    });
+    };
+    logInfo(context, 'ride.accept.duplicate_ignored', replayMetadata);
+    // Preserve the established success event for dashboards and historical tests.
+    logInfo(context, 'ride.accept.won', replayMetadata);
     return safeAcceptanceView(result.ride.rideId, result.ride, result.holdAmount);
   }
 
