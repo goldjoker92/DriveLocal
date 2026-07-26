@@ -15,6 +15,7 @@ const { acceptDriverOfferSecure } = require('./acceptOffer');
 const { declineDriverOfferSecure } = require('./declineOffer');
 const { markDriverArrived } = require('./markDriverArrived');
 const { cancelRide } = require('./cancelRide');
+const { normalizedCancellationRequest } = require('./cancellationCompatibility');
 const lifecycle = require('./lifecycle');
 const { resolveRideDispute } = require('./disputeResolution');
 const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
@@ -29,6 +30,15 @@ function bindLifecycle(name, handler) {
       handler({ db: admin.firestore(), request, context, clock: systemClock })
     )
   );
+}
+
+async function cancelRideWithCompatibility({ db, request, context, clock }) {
+  return cancelRide({
+    db,
+    request: normalizedCancellationRequest(request),
+    context,
+    clock,
+  });
 }
 
 // Older driver profiles store Pix fields on drivers/{uid}, while the secure ride
@@ -102,7 +112,7 @@ module.exports = {
   finishRideSecure: bindLifecycle('finishRideSecure', finishRideWithPixMigration),
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
   confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
-  cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRide),
+  cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRideWithCompatibility),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
   getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),
