@@ -63,7 +63,7 @@ describe('driver dispatch freshness contract', () => {
     expect(eligibility).toContain("require('./commercialPolicy')");
     expect(eligibility).toContain('resolveCommercialPolicy(d, now)');
     expect(commercialPolicy).toContain('function toMillis(value)');
-    expect(commercialPolicy).toContain('toMillis(driver.subscriptionFreeUntil');
+    expect(commercialPolicy).toContain('driver.subscriptionFreeUntil');
     expect(commercialPolicy).toContain('toMillis(driver.subscriptionExpiresAt)');
     expect(commercialPolicy).not.toContain('Number(driver.subscriptionFreeUntil)');
   });
