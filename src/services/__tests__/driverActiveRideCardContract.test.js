@@ -14,7 +14,8 @@ describe('block 15 permanent active ride card contract', () => {
     expect(layout).toContain('const [activeOffer, setActiveOffer] = useState(null)');
     expect(layout).toContain('const activeRideCardVisible = deriveDriverActiveRideCard(');
     expect(layout).toContain("if (offer.status === 'accepted')");
-    expect(layout).toContain('setActiveOffer(cardVisible ? offer : null)');
+    expect(layout).toContain('if (!cardVisible)');
+    expect(layout).toContain('setActiveOffer(offer)');
     expect(layout).toContain('<DriverActiveRideCard');
     expect(layout).toContain('status={activeOffer.driverRideStatus}');
 
@@ -38,6 +39,17 @@ describe('block 15 permanent active ride card contract', () => {
     expect(layout).toContain('restoredRideId\n    );');
     expect(recovery).toContain('A dispute stops live GPS but remains recoverable');
     expect(recovery).not.toContain("'disputed',");
+  });
+
+  it('stops terminal cache restoration before tracking or navigation', () => {
+    const layout = source('src/app/(driver)/_layout.jsx');
+    const terminalGuardIndex = layout.indexOf('if (!cardVisible)');
+    const trackingIndex = layout.indexOf('await updateActiveRideTrackingStatus');
+    const navigationIndex = layout.indexOf("router.replace({ pathname: '/active-ride'");
+
+    expect(terminalGuardIndex).toBeGreaterThan(-1);
+    expect(trackingIndex).toBeGreaterThan(terminalGuardIndex);
+    expect(navigationIndex).toBeGreaterThan(terminalGuardIndex);
   });
 
   it('uses only the accepted driver offer projection and real fare data', () => {
