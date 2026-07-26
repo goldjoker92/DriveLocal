@@ -37,11 +37,12 @@ function sameProjection(left, right) {
   );
 }
 
-function identityProjectionNeeded(before = {}, after = {}) {
+function identityProjectionNeeded(_before = {}, after = {}) {
   if (!after.passengerId || !after.acceptedDriverId) return false;
-  if (after.status === C.RIDE_STATUS.SEARCHING || after.status === C.RIDE_STATUS.PENDING) return false;
-  if (!closedProjection(after.acceptedPassengerPublic)) return true;
-  return !sameProjection(before.acceptedPassengerPublic, after.acceptedPassengerPublic);
+  if (after.status === C.RIDE_STATUS.SEARCHING) return false;
+  // A valid projection written by this trigger must not schedule one redundant
+  // invocation. Malformed/legacy maps are replaced with the closed safe shape.
+  return !closedProjection(after.acceptedPassengerPublic);
 }
 
 async function syncAcceptedPassengerIdentity({ db, rideId, context }) {
