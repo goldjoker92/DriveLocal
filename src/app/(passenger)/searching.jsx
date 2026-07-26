@@ -28,6 +28,7 @@ const STATUS_LABEL = {
   in_progress: 'Corrida em andamento.',
   awaiting_payment: 'Corrida finalizada. Abra o pagamento Pix.',
   payment_marked_sent: 'Pagamento informado. Aguardando confirmação.',
+  disputed: 'Pagamento em análise. Abra o acompanhamento Pix.',
   no_driver_available: 'Nenhum motorista disponível no momento.',
   dispatch_failed: 'Não foi possível procurar motoristas. Tente novamente.',
   cancelled: 'Corrida cancelada.',
@@ -97,7 +98,7 @@ export default function Searching() {
 
         if (['assigned', 'driver_arrived', 'in_progress'].includes(nextRide.status)) {
           router.replace({ pathname: '/driver-accepted', params: { rideId } });
-        } else if (['awaiting_payment', 'payment_marked_sent'].includes(nextRide.status)) {
+        } else if (['awaiting_payment', 'payment_marked_sent', 'disputed'].includes(nextRide.status)) {
           router.replace({ pathname: '/pix-payment', params: { rideId } });
         } else if (nextRide.status === 'completed') {
           router.replace({ pathname: '/ride-completed', params: { rideId } });
