@@ -78,6 +78,7 @@ exports.rideDisputeAdminAlertTrigger = adminAlertCallables.rideDisputeAdminAlert
 exports.paymentReviewAdminAlertTrigger = adminAlertCallables.paymentReviewAdminAlertTrigger;
 exports.riskCaseAdminAlertTrigger = adminAlertCallables.riskCaseAdminAlertTrigger;
 exports.accountDeletionAdminAlertTrigger = adminAlertCallables.accountDeletionAdminAlertTrigger;
+exports.clientErrorAdminAlertTrigger = adminAlertCallables.clientErrorAdminAlertTrigger;
 
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
