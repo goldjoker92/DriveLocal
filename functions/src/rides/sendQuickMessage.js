@@ -57,6 +57,13 @@ function safeLastByRole(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function nextSequence(value) {
+  const current = Number(value);
+  return Number.isSafeInteger(current) && current >= 0 && current < Number.MAX_SAFE_INTEGER
+    ? current + 1
+    : 1;
+}
+
 function safeRecentOperations(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -66,7 +73,8 @@ function safeRecentOperations(value) {
       && /^[a-f0-9]{24}$/.test(String(item.keyHash || ''))
       && typeof item.messageCode === 'string'
       && ['driver', 'passenger'].includes(item.senderRole)
-      && Number.isFinite(Number(item.sequence))
+      && Number.isSafeInteger(Number(item.sequence))
+      && Number(item.sequence) > 0
     ))
     .map((item) => ({
       keyHash: String(item.keyHash),
@@ -161,7 +169,7 @@ async function sendRideQuickMessage({ db, request, context, clock }) {
       });
     }
 
-    const sequence = Math.max(0, Number(ride.quickMessageSequence || 0)) + 1;
+    const sequence = nextSequence(ride.quickMessageSequence);
     const slot = sequence % QUICK_MESSAGE_HISTORY_LIMIT;
     const messageRef = rideRef.collection('quickMessages').doc(`slot_${slot}`);
     const route = recipientRole === 'driver' ? '/active-ride' : '/driver-accepted';
@@ -241,4 +249,5 @@ module.exports = {
   actorRoleForRide,
   idempotencyHash,
   safeRecentOperations,
+  nextSequence,
 };
