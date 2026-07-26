@@ -7,6 +7,7 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 const { withCallableBoundary } = require('../errors/boundary');
+const { logInfo } = require('../logging/logger');
 const { systemClock } = require('../time/clock');
 const { resolveEnvironment } = require('../config/environment');
 const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
@@ -83,7 +84,15 @@ async function finishRideWithPixMigration({ db, request, context, clock }) {
 // closed 0/12/15 percentage crosses the callable boundary to the driver app.
 async function acceptDriverOfferPublic(args) {
   const result = await acceptDriverOfferSecure(args);
-  return safeDriverAcceptanceView(result);
+  const safeView = safeDriverAcceptanceView(result);
+  logInfo(args.context, 'ride.accept.public_view_sanitized', {
+    operation: 'accept',
+    rideId: safeView.rideId,
+    status: safeView.status,
+    commissionDisplayBps: safeView.commissionDisplayBps,
+    exactCommissionExcluded: true,
+  });
+  return safeView;
 }
 
 // The internal lifecycle returns exact capture values for ledger/audit tests. The
@@ -91,7 +100,14 @@ async function acceptDriverOfferPublic(args) {
 // trust boundary to the mobile application.
 async function confirmDriverPixReceivedPublic(args) {
   const result = await lifecycle.confirmDriverPixReceived(args);
-  return safeDriverLifecycleView(result);
+  const safeView = safeDriverLifecycleView(result);
+  logInfo(args.context, 'ride.complete.public_view_sanitized', {
+    operation: 'confirm_paid',
+    rideId: safeView.rideId,
+    status: safeView.status,
+    exactCommissionExcluded: true,
+  });
+  return safeView;
 }
 
 const ROUTING_PROVIDER_API_KEY = defineSecret('ROUTING_PROVIDER_API_KEY');
