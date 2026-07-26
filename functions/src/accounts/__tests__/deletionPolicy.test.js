@@ -1,5 +1,6 @@
 const {
   RECENT_AUTH_MAX_AGE_MS,
+  DELETION_BLOCKING_RIDE_STATUSES,
   assertConfirmation,
   recentAuthentication,
   createAnonymousSubjectId,
@@ -19,6 +20,16 @@ describe('account deletion policy', () => {
     expect(recentAuthentication({ auth_time: (nowMs - RECENT_AUTH_MAX_AGE_MS + 1) / 1000 }, nowMs)).toBe(true);
     expect(recentAuthentication({ auth_time: (nowMs - RECENT_AUTH_MAX_AGE_MS - 1) / 1000 }, nowMs)).toBe(false);
     expect(recentAuthentication({}, nowMs)).toBe(false);
+  });
+
+  it('blocks both operational rides and unresolved disputes', () => {
+    expect(DELETION_BLOCKING_RIDE_STATUSES).toEqual(expect.arrayContaining([
+      'searching',
+      'assigned',
+      'in_progress',
+      'awaiting_payment',
+      'disputed',
+    ]));
   });
 
   it('creates a random non-uid anonymous subject reference', () => {
@@ -93,6 +104,7 @@ describe('account deletion policy', () => {
     const update = buildFinancialPseudonymizationUpdate({
       anonymousSubjectId: 'deleted_driver_random',
       deleteField: deleted,
+      record: { status: 'paid' },
     });
 
     expect(update.driverId).toBe('deleted_driver_random');
@@ -100,5 +112,22 @@ describe('account deletion policy', () => {
     expect(update.qrCodeBase64).toBe(deleted);
     expect(update.idempotencyKey).toBe(deleted);
     expect(update.idempotencyFingerprint).toBe(deleted);
+    expect(update).not.toHaveProperty('status');
+  });
+
+  it('cancels a still-pending provider request during deletion', () => {
+    const deleted = Symbol('delete');
+    const update = buildFinancialPseudonymizationUpdate({
+      anonymousSubjectId: 'deleted_driver_random',
+      deleteField: deleted,
+      record: { status: 'pending' },
+    });
+
+    expect(update).toMatchObject({
+      driverId: 'deleted_driver_random',
+      status: 'cancelled',
+      cancellationReason: 'account_deleted',
+      cancelledAt: 'SERVER_TIMESTAMP',
+    });
   });
 });
