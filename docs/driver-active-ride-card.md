@@ -29,16 +29,31 @@ After `in_progress`, the exact destination already projected to the accepted off
 shown. If that projection is still settling, the card displays a loading fallback
 instead of inventing an address.
 
+A missing fare or vehicle type is also rendered as a neutral loading/generic state. The
+card never turns absent data into `R$ 0,00` or assumes that an unknown vehicle is a car.
+
 ## Persistence and restoration
 
-The card is mounted in `src/app/(driver)/_layout.jsx`, above the driver stack. The
-existing `listenToMyOffer` Firestore listener restores it from an accepted offer after:
+The card is mounted in `src/app/(driver)/_layout.jsx`, above the driver stack. One
+`listenToMyOffer` Firestore listener changes mode according to the authoritative driver
+state:
+
+```text
+activeRideId absent  -> listen for current targeted offers
+activeRideId present -> listen only for that exact accepted ride
+```
+
+This restores the card after:
 
 - opening Waze or Google Maps and returning;
 - moving DriveLocal to the background;
 - navigating to another driver screen;
 - a JavaScript/process restart;
 - a cached Firestore snapshot while the network reconnects.
+
+The existing `drivers/{uid}.activeRideId` is the restoration pointer. A Pix dispute is
+non-terminal and remains recoverable. A completed or cancelled offer is rejected by the
+card model before GPS status or navigation can be restored from stale cache.
 
 The layout keeps the existing `/active-ride` navigation and GPS restoration behavior.
 No new automatic lifecycle action is introduced.
@@ -51,13 +66,14 @@ driver_arrived       -> visible
 in_progress          -> visible
 awaiting_payment     -> visible
 payment_marked_sent  -> visible
-disputed             -> supported by the card model
+disputed             -> visible and recoverable
 completed            -> hidden
 cancelled            -> hidden
 ```
 
-The existing offer listener clears its layout state when no active accepted projection
-remains. Completion and cancellation therefore remove the card without a client write.
+Completion and cancellation remove the card without a client write. The render wrapper
+uses the same pure visibility model, so no empty permanent-card space remains after a
+terminal snapshot.
 
 ## Privacy
 
@@ -82,11 +98,20 @@ It does not read or log:
 Safe trace family:
 
 ```text
+[DRIVER_ACTIVE_RIDE] restore_listener.started
+[DRIVER_ACTIVE_RIDE] restore_listener.succeeded
+[DRIVER_ACTIVE_RIDE] restore_listener.failed
 [DRIVER_ACTIVE_RIDE] card.rendered
 [DRIVER_ACTIVE_RIDE] passenger_photo.load_requested
 [DRIVER_ACTIVE_RIDE] passenger_photo.load_succeeded
 [DRIVER_ACTIVE_RIDE] passenger_photo.load_failed
 ```
+
+## Android layout
+
+The global card owns the top safe-area inset. On `/active-ride`, the driver stack removes
+the duplicate top inset so the screen begins directly below the card. Other screens keep
+their existing safe-area behavior.
 
 ## No backend or policy change
 
@@ -126,7 +151,8 @@ Manual Android verification:
 5. Open Waze, return to DriveLocal and confirm the card remains.
 6. Background and reopen the app; confirm the same accepted ride is restored.
 7. Test once with the network interrupted and restored.
-8. Complete or cancel the ride and confirm the card disappears.
-9. Test a small Android screen and enlarged font.
+8. Put a payment into dispute, restart, and confirm the card remains recoverable.
+9. Complete or cancel the ride and confirm the card disappears without a blank header.
+10. Test a small Android screen and enlarged font.
 
 No merge, Firebase deployment or production build is part of this block.
