@@ -28,13 +28,13 @@ async function chooseDriverReason() {
   const category = await new Promise((resolve) => {
     Alert.alert(
       'Por que cancelar?',
-      '“Passageiro não apareceu” fica disponível separadamente após o tempo mínimo de espera.',
+      '“Passageiro não apareceu” fica disponível separadamente após o tempo mínimo de espera. Toque fora para manter a corrida.',
       [
         { text: 'Local de embarque', onPress: () => resolve('pickup') },
         { text: 'Segurança ou veículo', onPress: () => resolve('operation') },
         { text: 'Outro motivo', onPress: () => resolve('driver_other') },
       ],
-      { cancelable: false },
+      { cancelable: true, onDismiss: () => resolve(null) },
     );
   });
 
@@ -62,13 +62,13 @@ async function choosePassengerReason() {
   const category = await new Promise((resolve) => {
     Alert.alert(
       'Por que cancelar?',
-      'Selecione uma categoria. Nenhuma taxa de cancelamento será cobrada nesta versão.',
+      'Selecione uma categoria. Nenhuma taxa de cancelamento será cobrada nesta versão. Toque fora para manter a corrida.',
       [
         { text: 'Tempo do motorista', onPress: () => resolve('timing') },
         { text: 'Identidade ou segurança', onPress: () => resolve('safety') },
         { text: 'Mudança de planos', onPress: () => resolve('plans') },
       ],
-      { cancelable: false },
+      { cancelable: true, onDismiss: () => resolve(null) },
     );
   });
 
