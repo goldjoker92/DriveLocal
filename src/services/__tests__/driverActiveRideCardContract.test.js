@@ -12,9 +12,9 @@ describe('block 15 permanent active ride card contract', () => {
     expect(layout).toContain("import DriverActiveRideCard from '../../components/DriverActiveRideCard'");
     expect(layout).toContain('const [activeRideId, setActiveRideId] = useState(null)');
     expect(layout).toContain('const [activeOffer, setActiveOffer] = useState(null)');
+    expect(layout).toContain('const activeRideCardVisible = deriveDriverActiveRideCard(');
     expect(layout).toContain("if (offer.status === 'accepted')");
-    expect(layout).toContain('setActiveOffer(offer)');
-    expect(layout).toContain('setActiveOffer(null)');
+    expect(layout).toContain('setActiveOffer(cardVisible ? offer : null)');
     expect(layout).toContain('<DriverActiveRideCard');
     expect(layout).toContain('status={activeOffer.driverRideStatus}');
 
@@ -24,18 +24,20 @@ describe('block 15 permanent active ride card contract', () => {
     expect(stackIndex).toBeGreaterThan(cardIndex);
   });
 
-  it('restores the exact accepted offer from the authoritative driver activeRideId', () => {
+  it('uses one listener and restores the exact offer from authoritative activeRideId', () => {
     const layout = source('src/app/(driver)/_layout.jsx');
     const recovery = source('src/services/networkRecoveryPolicy.js');
 
+    expect((layout.match(/listenToMyOffer\(/g) || [])).toHaveLength(1);
     expect(layout).toContain('setActiveRideId(remote?.activeRideId || null)');
+    expect(layout).toContain('const restoredRideId = activeRideId || null');
     expect(layout).toContain('restore_listener.started');
     expect(layout).toContain('restore_listener.succeeded');
     expect(layout).toContain('restore_listener.failed');
-    expect(layout).toContain('offer.rideId === activeRideId');
-    expect(layout).toContain('activeRideId\n    );');
-    expect(recovery).toContain("'disputed'");
-    expect(recovery).not.toMatch(/TERMINAL_RIDE_STATUSES[^\n]*disputed/);
+    expect(layout).toContain('offer.rideId !== restoredRideId');
+    expect(layout).toContain('restoredRideId\n    );');
+    expect(recovery).toContain('A dispute stops live GPS but remains recoverable');
+    expect(recovery).not.toContain("'disputed',");
   });
 
   it('uses only the accepted driver offer projection and real fare data', () => {
@@ -47,10 +49,12 @@ describe('block 15 permanent active ride card contract', () => {
     expect(component).toContain('getAcceptedPassengerPhotoDownloadUrl');
     expect(component).toContain('CORRIDA ATIVA');
     expect(component).toContain('Valor da corrida');
+    expect(component).toContain('Carregando valor…');
     expect(model).toContain('offer?.estimatedFareCentavos');
     expect(model).toContain('offer?.exactPickup?.label');
     expect(model).toContain('offer?.exactDestination?.label');
     expect(model).toContain('offer?.acceptedPassengerPublic');
+    expect(model).toContain("type: 'unknown'");
     expect(rides).toContain("data.status === 'accepted'");
     expect(rides).toContain('syncDriverRideHint(selected, rideId');
   });
