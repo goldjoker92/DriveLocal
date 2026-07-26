@@ -4,6 +4,11 @@
 import { httpsCallable } from 'firebase/functions';
 import { doc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { functions, db } from '../config/firebase';
+import {
+  DRIVER_CANCELLATION_REASONS,
+  PASSENGER_CANCELLATION_REASONS,
+  normalizeCancellationReason,
+} from '../constants/rideCancellation';
 import { logRideClientEvent } from '../utils/clientRideLog';
 import { getDriverTrackingSession } from './driverLocationTracking';
 
@@ -102,12 +107,29 @@ async function callRide(name, rideId, extra) {
   }
 }
 
+function cancellationRole(reasonCode, explicitRole) {
+  if (explicitRole === 'driver' || explicitRole === 'passenger') return explicitRole;
+  const code = String(reasonCode || '');
+  if (code === 'passageiro_cancelou' || PASSENGER_CANCELLATION_REASONS.some((reason) => reason.code === code)) {
+    return 'passenger';
+  }
+  if (code === 'motorista_cancelou' || DRIVER_CANCELLATION_REASONS.some((reason) => reason.code === code)) {
+    return 'driver';
+  }
+  return null;
+}
+
 export const markDriverArrived = (rideId) => callRide('markDriverArrivedSecure', rideId);
 export const startRide = (rideId) => callRide('startRideSecure', rideId);
 export const finishRide = (rideId) => callRide('finishRideSecure', rideId);
 export const markPassengerPixSent = (rideId) => callRide('markPassengerPixSentSecure', rideId);
 export const confirmDriverPixReceived = (rideId) => callRide('confirmDriverPixReceivedSecure', rideId);
-export const cancelRide = (rideId, reasonCode) => callRide('cancelRideSecure', rideId, { reasonCode });
+export const cancelRide = (rideId, reasonCode, role = null) => {
+  const actorRole = cancellationRole(reasonCode, role);
+  const normalizedReasonCode = normalizeCancellationReason(reasonCode, actorRole);
+  return callRide('cancelRideSecure', rideId, { reasonCode: normalizedReasonCode });
+};
+export const reportPassengerNotFound = (rideId) => cancelRide(rideId, 'passenger_no_show', 'driver');
 export const reportPaymentIssue = (rideId, reasonCode) => callRide('reportRidePaymentIssueSecure', rideId, { reasonCode });
 
 export function listenToRide(rideId, onData, onError) {
