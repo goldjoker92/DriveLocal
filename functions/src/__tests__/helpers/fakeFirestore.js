@@ -1,7 +1,7 @@
 // In-memory fake Firestore for deterministic UNIT tests (no emulator, no cloud).
 // Supports the minimal surface used by the domain helpers:
 //   db.collection(name).doc(id?) -> { id, ref, set(data,{merge}), get(), delete() }
-//   db.collection(name).where(field,'==',value).where(...).limit(n).get()
+//   db.collection(name).where(field,'==',value).where(...).orderBy(field,direction).limit(n).get()
 //        -> snapshot { size, docs:[{id,data(),ref}], forEach(cb) }
 //   db.runTransaction(fn) -> fn({ get(ref), set(ref,data,{merge}), delete(ref) })
 // Integration/concurrency behavior is covered separately against the emulator.
@@ -101,25 +101,51 @@ function makeFakeFirestore() {
     return ref;
   }
 
-  function makeQuery(collectionName, filters, limit) {
+  function compareValues(a, b) {
+    if (a === b) return 0;
+    if (a == null) return -1;
+    if (b == null) return 1;
+    return a < b ? -1 : 1;
+  }
+
+  function makeQuery(collectionName, filters, limitCount, orders) {
     return {
       where(field, op, value) {
-        return makeQuery(collectionName, [...filters, { field, op, value }], limit);
+        return makeQuery(collectionName, [...filters, { field, op, value }], limitCount, orders);
+      },
+      orderBy(field, direction = 'asc') {
+        return makeQuery(
+          collectionName,
+          filters,
+          limitCount,
+          [...orders, { field, direction: String(direction).toLowerCase() }]
+        );
       },
       limit(n) {
-        return makeQuery(collectionName, filters, n);
+        return makeQuery(collectionName, filters, n, orders);
       },
       async get() {
         const prefix = `${collectionName}/`;
-        const docs = [];
+        let docs = [];
         for (const [key, data] of store.entries()) {
           if (!key.startsWith(prefix)) continue;
           const ok = filters.every((f) => f.op === '==' && data && data[f.field] === f.value);
           if (!ok) continue;
           const id = key.slice(prefix.length);
           docs.push({ id, data: () => data, ref: docRef(collectionName, id) });
-          if (limit != null && docs.length >= limit) break;
         }
+        if (orders.length > 0) {
+          docs.sort((left, right) => {
+            const leftData = left.data() || {};
+            const rightData = right.data() || {};
+            for (const order of orders) {
+              const compared = compareValues(leftData[order.field], rightData[order.field]);
+              if (compared !== 0) return order.direction === 'desc' ? -compared : compared;
+            }
+            return left.id.localeCompare(right.id);
+          });
+        }
+        if (limitCount != null) docs = docs.slice(0, limitCount);
         return {
           size: docs.length,
           docs,
@@ -134,8 +160,19 @@ function makeFakeFirestore() {
     collection(collectionName) {
       return {
         doc: (id) => docRef(collectionName, id),
-        where: (field, op, value) => makeQuery(collectionName, [{ field, op, value }], null),
-        limit: (n) => makeQuery(collectionName, [], n),
+        where: (field, op, value) => makeQuery(
+          collectionName,
+          [{ field, op, value }],
+          null,
+          []
+        ),
+        orderBy: (field, direction) => makeQuery(
+          collectionName,
+          [],
+          null,
+          [{ field, direction: String(direction || 'asc').toLowerCase() }]
+        ),
+        limit: (n) => makeQuery(collectionName, [], n, []),
       };
     },
     async runTransaction(fn) {
