@@ -4,10 +4,12 @@ import { APP_ENVIRONMENT } from '../config/runtimeEnvironment';
 //
 // These logs are intentionally rich enough to debug the whole passenger flow
 // (request -> quote -> dispatch -> assignment -> payment), while still excluding
-// exact coordinates, street labels, Pix payloads, phone numbers, tokens and
-// counterparty identifiers. Production builds do not emit these traces.
+// exact coordinates, street labels, Pix payloads, phone numbers, tokens,
+// counterparty identifiers and exact platform commission amounts. Production
+// builds do not emit these traces.
 const DEV_RUNTIME = typeof __DEV__ !== 'undefined' && __DEV__ === true;
 const CLIENT_RIDE_LOGS_ENABLED = APP_ENVIRONMENT === 'development' || DEV_RUNTIME;
+const SAFE_COMMISSION_DISPLAY_BPS = new Set([0, 1200, 1500]);
 
 function safeString(value, max = 120) {
   if (value == null) return null;
@@ -19,6 +21,11 @@ function safeNumber(value) {
   if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function safeCommissionDisplayBps(value) {
+  const bps = safeNumber(value);
+  return SAFE_COMMISSION_DISPLAY_BPS.has(bps) ? bps : null;
 }
 
 function compact(object) {
@@ -44,6 +51,7 @@ export function sanitizeRideForClientLog(ride) {
     estimatedFareCentavos: safeNumber(ride.estimatedFareCentavos),
     finalFareCentavos: safeNumber(ride.finalFareCentavos),
     paymentAmountCentavos: safeNumber(ride.paymentAmountCentavos),
+    commissionDisplayBps: safeCommissionDisplayBps(ride.commissionDisplayBps),
     routeDistanceMeters: safeNumber(ride.routeDistanceMeters),
     routeDurationSeconds: safeNumber(ride.routeDurationSeconds),
     pricingConfigVersion: safeString(ride.pricingConfigVersion, 80),
