@@ -23,7 +23,7 @@ describe('block 17 compact timed offer contract', () => {
 
     const countdownIndex = card.indexOf('view.secondsLeft');
     const receiveIndex = card.indexOf('VOCÊ RECEBE');
-    const summaryIndex = card.indexOf('styles.summary');
+    const summaryIndex = card.indexOf('<View style={styles.summary}>');
     expect(countdownIndex).toBeGreaterThan(-1);
     expect(receiveIndex).toBeGreaterThan(countdownIndex);
     expect(summaryIndex).toBeGreaterThan(receiveIndex);
