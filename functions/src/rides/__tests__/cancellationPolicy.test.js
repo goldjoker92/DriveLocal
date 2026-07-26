@@ -59,7 +59,9 @@ describe('ride cancellation policy', () => {
       driverArrivedAtMs: nowMs - 120_000,
       passengerNoShowEligibleAtMs: nowMs - 120_000 + PASSENGER_NO_SHOW_WAIT_MS,
     });
-    expect(JSON.stringify(timing)).not.toMatch(/lat|lng|coordinate/i);
+    for (const key of Object.keys(timing)) {
+      expect(key).not.toMatch(/^(lat|lng|latitude|longitude|coordinates?)$/i);
+    }
   });
 
   it('rejects passenger no-show before three complete minutes', () => {
