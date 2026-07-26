@@ -5,7 +5,7 @@
 
 const DEFAULT_FIRST_NAME = 'Passageiro';
 const MAX_FIRST_NAME_LENGTH = 40;
-const PUBLIC_PHOTO_VERSION_PATTERN = /^[A-Za-z0-9_-]{8,80}$/;
+const PUBLIC_PHOTO_VERSION_PATTERN = /^[A-Za-z0-9_-]{12,80}$/;
 
 function normalizeText(value) {
   if (value == null) return '';
@@ -31,20 +31,20 @@ function passengerFirstName(passenger) {
   return fromFullName || DEFAULT_FIRST_NAME;
 }
 
-// A profile path is accepted only when a backend/admin-approved version points to
-// its canonical immutable object. Client-controlled generic URLs are ignored.
-function approvedPassengerPhotoPath(passenger, passengerId) {
+// The public object id is opaque and globally unique. It never contains the
+// passenger Firebase uid, email, phone or another account-derived identifier.
+function approvedPassengerPhotoPath(passenger) {
   const verified = passenger?.passengerPhotoPublicVerified === true;
   const version = normalizeText(passenger?.passengerPhotoPublicVersion);
   const path = normalizeText(passenger?.passengerPhotoPublicPath);
-  if (!verified || !passengerId || !PUBLIC_PHOTO_VERSION_PATTERN.test(version)) return null;
+  if (!verified || !PUBLIC_PHOTO_VERSION_PATTERN.test(version)) return null;
 
-  const expected = `publicPassengerPhotos/${passengerId}/${version}.jpg`;
+  const expected = `publicPassengerPhotos/${version}.jpg`;
   return path === expected ? expected : null;
 }
 
-function buildAcceptedPassengerPublic(passenger, passengerId) {
-  const photoStoragePath = approvedPassengerPhotoPath(passenger, passengerId);
+function buildAcceptedPassengerPublic(passenger) {
+  const photoStoragePath = approvedPassengerPhotoPath(passenger);
   return Object.freeze({
     firstName: passengerFirstName(passenger),
     photoStoragePath,
