@@ -92,6 +92,7 @@ exports.clientErrorAdminAlertTrigger = adminAlertCallables.clientErrorAdminAlert
 
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
+exports.getDriverWalletSnapshot = walletCallables.getDriverWalletSnapshot;
 
 // Launch antifraud and business observability. Analytics/case decisions are
 // admin-only. Automated scans create review signals or temporary new-ride gates;
