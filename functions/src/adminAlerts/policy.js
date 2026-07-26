@@ -103,7 +103,9 @@ function descriptorForPayment(data = {}) {
     severity: SEVERITY.HIGH,
     titleCode: 'payment_manual_review',
     actionCode: 'review_payment',
-    targetRoute: '/topups-pending',
+    // The existing /topups-pending screen still contains development-only mock rows.
+    // Production alerts must never route an admin to fictitious payment data.
+    targetRoute: '/dashboard',
     targetId: data.paymentRequestId || null,
     // Only stable machine codes are allowed here. Provider descriptions and raw
     // webhook text are intentionally excluded from the alert record.
