@@ -67,6 +67,8 @@ exports.createSupportTicketSecure = supportCallables.createSupportTicketSecure;
 exports.listMySupportTicketsSecure = supportCallables.listMySupportTicketsSecure;
 exports.listAdminSupportTicketsSecure = supportCallables.listAdminSupportTicketsSecure;
 exports.updateAdminSupportTicketSecure = supportCallables.updateAdminSupportTicketSecure;
+exports.pseudonymizeSupportTicketsOnAccountDeletion =
+  supportCallables.pseudonymizeSupportTicketsOnAccountDeletion;
 
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
