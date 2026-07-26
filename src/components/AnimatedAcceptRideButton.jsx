@@ -88,11 +88,11 @@ export default function AnimatedAcceptRideButton({
   const visibleTitle = loading ? 'ACEITANDO…' : title;
 
   return (
-    <Animated.View style={[styles.halo, { transform: [{ scale: pulseScale }] }]}> 
+    <Animated.View style={[styles.halo, { transform: [{ scale: pulseScale }] }]}>
       <Animated.View style={{ transform: [{ scale: pressScale }] }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={loading ? 'Aceitando corrida' : visibleTitle}
+          accessibilityLabel={loading ? 'Aceitando corrida' : 'Aceitar corrida'}
           onPress={handlePress}
           onPressIn={() => animatePress(0.97, 35, 0)}
           onPressOut={() => animatePress(1, 24, 7)}
