@@ -82,7 +82,10 @@ describe('Android live driver tracking contracts', () => {
     expect(layout).toContain('snapshotNeedsServerConfirmation');
     expect(layout).toContain('{ includeMetadataChanges: true }');
     expect(layout).toContain('layout.reconciliation_deferred');
-    expect(layout).toContain("reason: 'snapshot_from_cache'");
+    // Both metadata states must defer reconciliation. The production logger uses
+    // one ternary expression, so assert the complete decision rather than a
+    // formatting-specific standalone `reason` property.
+    expect(layout).toContain("metadata.hasPendingWrites ? 'pending_writes' : 'snapshot_from_cache'");
     expect(layout).toContain("reason: 'local_transition_grace'");
   });
 
