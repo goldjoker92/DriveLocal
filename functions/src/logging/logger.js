@@ -26,12 +26,32 @@ const SENSITIVE_KEY_PATTERNS = [
   'email', 'pixkey', 'pix_key', 'address', 'endereco',
   'rawpayload', 'providerpayload',
 ];
+
+// Exact identity keys. They cannot use substring matching because safe correlation
+// fields such as actorUidHash and driverIdHash must remain visible.
+const SENSITIVE_IDENTITY_KEYS = new Set([
+  'uid',
+  'actoruid',
+  'subjectuid',
+  'recipientuid',
+  'targetuid',
+  'targetuserid',
+  'userid',
+  'driverid',
+  'passengerid',
+]);
+
 const REDACTED = '[REDACTED]';
 const MAX_DEPTH = 8;
 
+function normalizedKey(key) {
+  return String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 function isSensitiveKey(key) {
   const k = String(key).toLowerCase();
-  return SENSITIVE_KEY_PATTERNS.some((p) => k.includes(p));
+  return SENSITIVE_IDENTITY_KEYS.has(normalizedKey(key))
+    || SENSITIVE_KEY_PATTERNS.some((p) => k.includes(p));
 }
 
 /**
@@ -63,7 +83,9 @@ function createTraceId() {
 
 /**
  * Builds an immutable logger context carried through a request. A traceId is
- * generated when not supplied.
+ * generated when not supplied. actorUid remains available to handlers that may
+ * already read it, but structured logging always redacts it and exposes only its
+ * non-reversible actorUidHash.
  * @param {{traceId?:string, functionName?:string, environment?:string, actorType?:string, actorUid?:string}} [fields]
  */
 function createLoggerContext(fields = {}) {
@@ -73,6 +95,7 @@ function createLoggerContext(fields = {}) {
     environment: fields.environment,
     actorType: fields.actorType,
     actorUid: fields.actorUid,
+    actorUidHash: fields.actorUid ? shortHash(fields.actorUid) : undefined,
   });
 }
 
@@ -114,5 +137,6 @@ module.exports = {
   measureDuration,
   shortHash,
   SENSITIVE_KEY_PATTERNS,
+  SENSITIVE_IDENTITY_KEYS,
   REDACTED,
 };
