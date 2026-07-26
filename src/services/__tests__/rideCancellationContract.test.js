@@ -28,7 +28,7 @@ describe('ride cancellation integration contracts', () => {
     const guard = source('src/components/DriverPassengerWaitGuard.jsx');
     expect(guard).toContain('noShowRemainingMs(ride.driverArrivedAtMs, nowMs)');
     expect(guard).toContain('disabled={busy || !noShowAvailable}');
-    expect(guard).toContain('Nenhuma taxa');
+    expect(guard).toContain('sem taxa automática');
   });
 
   it('contains only predefined cancellation options', () => {
