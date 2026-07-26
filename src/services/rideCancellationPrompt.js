@@ -17,9 +17,9 @@ function choosePair({ title, reasons, firstCode, secondCode }) {
       [
         { text: labelFor(reasons, firstCode), onPress: () => resolve(firstCode) },
         { text: labelFor(reasons, secondCode), onPress: () => resolve(secondCode) },
-        { text: 'Voltar', style: 'cancel', onPress: () => resolve(null) },
+        { text: 'Manter corrida', style: 'cancel', onPress: () => resolve(null) },
       ],
-      { cancelable: true, onDismiss: () => resolve(null) },
+      { cancelable: false },
     );
   });
 }
@@ -34,11 +34,11 @@ async function chooseDriverReason() {
         { text: 'Segurança ou veículo', onPress: () => resolve('operation') },
         { text: 'Outro motivo', onPress: () => resolve('driver_other') },
       ],
-      { cancelable: true, onDismiss: () => resolve(null) },
+      { cancelable: false },
     );
   });
 
-  if (!category || category === 'driver_other') return category;
+  if (category === 'driver_other') return category;
   if (category === 'pickup') {
     return choosePair({
       title: 'Problema no embarque',
@@ -47,12 +47,15 @@ async function chooseDriverReason() {
       secondCode: 'unsafe_pickup',
     });
   }
-  return choosePair({
-    title: 'Problema operacional',
-    reasons: DRIVER_CANCELLATION_REASONS,
-    firstCode: 'vehicle_problem',
-    secondCode: 'driver_other',
-  });
+  if (category === 'operation') {
+    return choosePair({
+      title: 'Problema operacional',
+      reasons: DRIVER_CANCELLATION_REASONS,
+      firstCode: 'vehicle_problem',
+      secondCode: 'driver_other',
+    });
+  }
+  return null;
 }
 
 async function choosePassengerReason() {
@@ -65,7 +68,7 @@ async function choosePassengerReason() {
         { text: 'Identidade ou segurança', onPress: () => resolve('safety') },
         { text: 'Mudança de planos', onPress: () => resolve('plans') },
       ],
-      { cancelable: true, onDismiss: () => resolve(null) },
+      { cancelable: false },
     );
   });
 
