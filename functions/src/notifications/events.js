@@ -31,7 +31,7 @@ function buildNotificationEvent(p) {
       eventType: p.eventType,
       rideId: p.rideId,
       offerId: p.offerId || null,
-      messageCode: p.messageCode || null,
+      ...(p.messageCode ? { messageCode: p.messageCode } : {}),
       recipientUid: p.recipientUid,
       recipientRole: p.recipientRole,
       route: p.route || null,
