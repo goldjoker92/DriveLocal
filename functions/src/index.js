@@ -16,6 +16,10 @@ exports.reportClientErrorSecure = clientErrorCallables.reportClientErrorSecure;
 const accountCallables = require('./accounts/callables');
 exports.requestAccountDeletionSecure = accountCallables.requestAccountDeletionSecure;
 exports.processAccountDeletionRequest = accountCallables.processAccountDeletionRequest;
+const {
+  passengerPublicPhotoCleanupTrigger,
+} = require('./accounts/passengerPhotoCleanup');
+exports.passengerPublicPhotoCleanupTrigger = passengerPublicPhotoCleanupTrigger;
 
 const driverCallables = require('./drivers/callables');
 exports.approveDriverSecure = driverCallables.approveDriverSecure;
