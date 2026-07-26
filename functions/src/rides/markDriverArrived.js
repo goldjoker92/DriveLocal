@@ -29,6 +29,16 @@ function arrivalArgs(request) {
   };
 }
 
+function setSafeWaitProjectionTx(tx, offerRef, arrivedAtMs, passengerNoShowEligibleAtMs) {
+  tx.set(offerRef, {
+    driverRideStatus: C.RIDE_STATUS.DRIVER_ARRIVED,
+    driverArrivedAtMs: arrivedAtMs,
+    passengerNoShowEligibleAtMs,
+    passengerNoShowWaitMs: PASSENGER_NO_SHOW_WAIT_MS,
+    updatedAt: ts(),
+  }, { merge: true });
+}
+
 async function markDriverArrived({ db, request, context, clock }) {
   const driverId = request?.auth?.uid;
   if (!driverId) {
@@ -55,13 +65,25 @@ async function markDriverArrived({ db, request, context, clock }) {
     }
 
     if (ride.status === C.RIDE_STATUS.DRIVER_ARRIVED) {
-      const arrivedAtMs = Number(ride.driverArrivedAtMs || 0) || null;
+      // Backfill private wait timing for rides that crossed a deployment boundary.
+      // If an old malformed record has no arrival timestamp, start a fresh full wait
+      // period rather than allowing an immediate passenger-no-show cancellation.
+      const existingArrivedAtMs = Number(ride.driverArrivedAtMs || 0);
+      const arrivedAtMs = existingArrivedAtMs > 0 ? existingArrivedAtMs : Number(clock.now());
+      const passengerNoShowEligibleAtMs = arrivedAtMs + PASSENGER_NO_SHOW_WAIT_MS;
+      if (existingArrivedAtMs <= 0) {
+        tx.set(rideRef, {
+          driverArrivedAtMs: arrivedAtMs,
+          driverArrivedAt: ts(),
+          passengerNoShowEligibleAtMs,
+          updatedAt: ts(),
+        }, { merge: true });
+      }
+      setSafeWaitProjectionTx(tx, offerRef, arrivedAtMs, passengerNoShowEligibleAtMs);
       return {
         replay: true,
         arrivedAtMs,
-        passengerNoShowEligibleAtMs: arrivedAtMs == null
-          ? null
-          : arrivedAtMs + PASSENGER_NO_SHOW_WAIT_MS,
+        passengerNoShowEligibleAtMs,
       };
     }
     if (ride.status !== C.RIDE_STATUS.ASSIGNED) {
@@ -83,13 +105,7 @@ async function markDriverArrived({ db, request, context, clock }) {
 
     // This offer is readable only by its driver. No coordinates, passenger PII or
     // destination are added — only the status and server-authoritative wait times.
-    tx.set(offerRef, {
-      driverRideStatus: C.RIDE_STATUS.DRIVER_ARRIVED,
-      driverArrivedAtMs: nowMs,
-      passengerNoShowEligibleAtMs,
-      passengerNoShowWaitMs: PASSENGER_NO_SHOW_WAIT_MS,
-      updatedAt: ts(),
-    }, { merge: true });
+    setSafeWaitProjectionTx(tx, offerRef, nowMs, passengerNoShowEligibleAtMs);
 
     enqueueEventTx(tx, db, buildNotificationEvent({
       rideId,
@@ -108,16 +124,15 @@ async function markDriverArrived({ db, request, context, clock }) {
     };
   });
 
-  if (!out.replay) {
-    logInfo(context, 'ride.arrived', {
-      operation: 'arrive',
-      rideId,
-      fromStatus: C.RIDE_STATUS.ASSIGNED,
-      toStatus: C.RIDE_STATUS.DRIVER_ARRIVED,
-      callerRole: 'driver',
-      noShowWaitMs: PASSENGER_NO_SHOW_WAIT_MS,
-    });
-  }
+  logInfo(context, out.replay ? 'ride.arrived_replayed' : 'ride.arrived', {
+    operation: 'arrive',
+    rideId,
+    fromStatus: out.replay ? C.RIDE_STATUS.DRIVER_ARRIVED : C.RIDE_STATUS.ASSIGNED,
+    toStatus: C.RIDE_STATUS.DRIVER_ARRIVED,
+    callerRole: 'driver',
+    noShowWaitMs: PASSENGER_NO_SHOW_WAIT_MS,
+    projectionBackfilled: out.replay === true,
+  });
 
   return {
     rideId,
@@ -131,4 +146,5 @@ async function markDriverArrived({ db, request, context, clock }) {
 module.exports = {
   markDriverArrived,
   arrivalArgs,
+  setSafeWaitProjectionTx,
 };
