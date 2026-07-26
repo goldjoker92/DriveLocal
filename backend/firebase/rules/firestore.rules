@@ -307,6 +307,13 @@ service cloud.firestore {
         (resource.data.passengerId == request.auth.uid || isAdmin());
       allow update: if false;
       allow delete: if false;
+
+      // Six server-owned message slots. The accepted driver may read this safe
+      // subcollection without gaining access to the parent ride or destination.
+      match /quickMessages/{messageId} {
+        allow read: if isAdmin() || isRidePassenger(rideId) || isAcceptedRideDriver(rideId);
+        allow create, update, delete: if false;
+      }
     }
 
     match /driverOffers/{offerId} {
