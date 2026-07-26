@@ -19,14 +19,22 @@ describe('ride cancellation integration contracts', () => {
     const guard = source('src/components/DriverPassengerWaitGuard.jsx');
     expect(layout).toContain('DriverPassengerWaitGuard');
     expect(layout).toContain('<DriverPassengerWaitGuard route={pathname} />');
-    expect(guard).toContain("ride.status !== 'driver_arrived'");
+    expect(guard).toContain("nextOffer?.driverRideStatus === 'driver_arrived'");
     expect(guard).toContain('PASSAGEIRO NÃO APARECEU');
     expect(guard).toContain('reportPassengerNotFound(activeRideId)');
   });
 
+  it('uses only the private driver offer for wait timing', () => {
+    const guard = source('src/components/DriverPassengerWaitGuard.jsx');
+    expect(guard).toContain('offer?.driverArrivedAtMs');
+    expect(guard).toContain('offer?.passengerNoShowEligibleAtMs');
+    expect(guard).not.toContain('listenToRide(');
+    expect(guard).not.toContain("from '../services/ridesService';\nimport");
+  });
+
   it('shows the timer and keeps the no-show action disabled until eligible', () => {
     const guard = source('src/components/DriverPassengerWaitGuard.jsx');
-    expect(guard).toContain('noShowRemainingMs(ride.driverArrivedAtMs, nowMs)');
+    expect(guard).toContain('noShowRemainingMs(driverArrivedAtMs, nowMs)');
     expect(guard).toContain('disabled={busy || !noShowAvailable}');
     expect(guard).toContain('sem taxa automática');
   });
