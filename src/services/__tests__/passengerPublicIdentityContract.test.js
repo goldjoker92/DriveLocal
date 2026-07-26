@@ -39,6 +39,8 @@ describe('accepted passenger public identity contract', () => {
     expect(identity).not.toContain('publicPassengerPhotos/${passengerId}');
     expect(projection).toContain("keys.join('|') !== 'firstName|photoStoragePath|photoVerified'");
     expect(projection).toContain('isPublicPassengerPhotoPath(value.photoStoragePath)');
+    expect(projection).toContain('DELETED_PASSENGER_PUBLIC');
+    expect(projection).toContain('after.passengerDeleted === true');
   });
 
   it('keeps the source passenger profile private and photo approval server-owned', () => {
@@ -46,7 +48,9 @@ describe('accepted passenger public identity contract', () => {
     expect(rules).toContain('match /passengers/{uid}');
     expect(rules).toContain('allow read: if isOwner(uid) || isAdmin();');
     expect(rules).not.toMatch(/match \/passengers\/\{uid\}[\s\S]{0,250}isAcceptedRideDriver/);
-    const passengerUpdateBlock = rules.match(/function passengerUpdateSafe\(\)[\s\S]*?\n    }/)[0];
+    const passengerUpdateMatch = rules.match(/function passengerUpdateSafe\(\)[\s\S]*?\n    }/);
+    expect(passengerUpdateMatch).not.toBeNull();
+    const passengerUpdateBlock = passengerUpdateMatch[0];
     expect(passengerUpdateBlock).not.toContain('passengerPhotoPublicPath');
     expect(passengerUpdateBlock).not.toContain('passengerPhotoPublicVerified');
     expect(passengerUpdateBlock).not.toContain('passengerPhotoPublicVersion');
@@ -72,12 +76,14 @@ describe('accepted passenger public identity contract', () => {
   it('keeps the reusable mobile card free of private passenger fields', () => {
     const card = source('src/components/AcceptedPassengerIdentityCard.jsx');
     const photoService = source('src/services/passengerPublicPhotoService.js');
-    const combined = `${card}\n${photoService}`;
+    const mobileIdentity = source('src/utils/passengerPublicIdentity.js');
+    const combined = `${card}\n${photoService}\n${mobileIdentity}`;
 
     expect(card).toContain('identity?.firstName');
     expect(card).toContain('identity?.photoVerified');
     expect(card).toContain('identity?.photoStoragePath');
-    expect(card).toContain("normalized.split(' ')[0]");
+    expect(card).toContain('safeAcceptedPassengerFirstName(identity)');
+    expect(mobileIdentity).toContain("normalized.split(' ')[0]");
     expect(combined).not.toMatch(/\b(email|whatsApp|cpf|fullName|passengerId|phone|telefone)\b/);
     expect(card).not.toContain('photoStoragePath,');
     expect(card).not.toContain('firstName,');
