@@ -34,6 +34,14 @@ function hash(value, length = 28) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex').slice(0, length);
 }
 
+function safeReasonCode(value, fallback = 'REVIEW_REQUIRED') {
+  const normalized = String(value || fallback)
+    .trim()
+    .replace(/[^A-Za-z0-9_.:/-]/g, '_')
+    .slice(0, 100);
+  return normalized || fallback;
+}
+
 function alertDocumentId(sourceType, sourceId) {
   return `aa_${hash(`${sourceType}:${sourceId}`)}`;
 }
@@ -125,7 +133,7 @@ async function syncAdminAlert({ db, sourceType, sourceId, sourceData, context, c
       sourceFingerprint: fingerprint,
       targetRoute: descriptor.targetRoute,
       targetId: descriptor.targetId,
-      reasonCode: String(descriptor.reasonCode || 'REVIEW_REQUIRED').slice(0, 100),
+      reasonCode: safeReasonCode(descriptor.reasonCode),
       amountCentavos: descriptor.amountCentavos,
       occurrenceCount: Number(before?.occurrenceCount || 0) + 1,
       firstDetectedAtMs: Number(before?.firstDetectedAtMs || 0) || nowMs,
@@ -135,6 +143,8 @@ async function syncAdminAlert({ db, sourceType, sourceId, sourceData, context, c
       updatedAtMs: nowMs,
       updatedAt: nowTimestamp(),
       resolutionCode: reopened ? null : before?.resolutionCode || null,
+      acknowledgedAtMs: reopened ? null : before?.acknowledgedAtMs || null,
+      acknowledgedAt: reopened ? null : before?.acknowledgedAt || null,
       resolvedAtMs: reopened ? null : before?.resolvedAtMs || null,
       resolvedAt: reopened ? null : before?.resolvedAt || null,
       resolvedBy: reopened ? null : before?.resolvedBy || null,
@@ -266,6 +276,8 @@ async function updateAdminAlert({ db, request, context, clock }) {
       });
     }
 
+    const reopening = args.status === STATUS.OPEN;
+    const acknowledging = [STATUS.ACKNOWLEDGED, STATUS.IN_PROGRESS].includes(args.status);
     const update = {
       status: args.status,
       resolutionCode: args.resolutionCode,
@@ -274,12 +286,12 @@ async function updateAdminAlert({ db, request, context, clock }) {
       updatedAt: nowTimestamp(),
       lastAdminActionAtMs: nowMs,
       lastAdminActionAt: nowTimestamp(),
-      acknowledgedAtMs: args.status === STATUS.ACKNOWLEDGED
-        ? nowMs
-        : before.acknowledgedAtMs || null,
-      acknowledgedAt: args.status === STATUS.ACKNOWLEDGED
-        ? nowTimestamp()
-        : before.acknowledgedAt || null,
+      acknowledgedAtMs: reopening
+        ? null
+        : before.acknowledgedAtMs || (acknowledging ? nowMs : null),
+      acknowledgedAt: reopening
+        ? null
+        : before.acknowledgedAt || (acknowledging ? nowTimestamp() : null),
       resolvedAtMs: args.status === STATUS.RESOLVED ? nowMs : null,
       resolvedAt: args.status === STATUS.RESOLVED ? nowTimestamp() : null,
       resolvedBy: args.status === STATUS.RESOLVED ? 'admin' : null,
@@ -332,6 +344,7 @@ async function updateAdminAlert({ db, request, context, clock }) {
 module.exports = {
   alertDocumentId,
   descriptorFingerprint,
+  safeReasonCode,
   safeAlertProjection,
   syncAdminAlert,
   listAdminAlerts,
