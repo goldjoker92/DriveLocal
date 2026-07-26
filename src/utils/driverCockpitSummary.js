@@ -46,20 +46,30 @@ export function driverCockpitPeriodKeys(nowMs = Date.now()) {
   };
 }
 
-function firstNameToken(value) {
+function normalizeDisplayName(value) {
   const normalized = typeof value === 'string'
     ? value.normalize('NFKC').trim().replace(/\s+/g, ' ')
     : '';
   if (!normalized || normalized.includes('@')) return '';
+  const safe = normalized
+    .replace(/[^\p{L}\p{M}\p{N}'’\- .]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
+  return /\p{L}/u.test(safe) ? safe : '';
+}
+
+function firstNameToken(value) {
+  const normalized = normalizeDisplayName(value);
+  if (!normalized) return '';
   const token = normalized.split(' ')[0]
-    .replace(/[^\p{L}\p{M}'’-]/gu, '')
     .replace(/^['’\-]+|['’\-]+$/g, '')
     .slice(0, 40);
   return /\p{L}/u.test(token) ? token : '';
 }
 
 export function driverCockpitDisplayName(driver) {
-  const display = firstNameToken(driver?.displayName);
+  const display = normalizeDisplayName(driver?.displayName);
   if (display) return display;
   const fromFullName = firstNameToken(driver?.fullName);
   return fromFullName || 'Motorista';
