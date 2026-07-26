@@ -49,7 +49,12 @@ describe('admin alert policy', () => {
       status: 'manual_review',
       paymentRequestId: 'pay-1',
       amountCentavos: 3000,
-    })).toMatchObject({ alertType: 'payment_manual_review', targetId: 'pay-1' });
+      manualReviewReason: 'PRIVATE_PROVIDER_TEXT',
+    })).toMatchObject({
+      alertType: 'payment_manual_review',
+      targetId: 'pay-1',
+      reasonCode: 'MANUAL_REVIEW',
+    });
 
     expect(alertDescriptor(SOURCE_TYPE.RISK_CASE, {
       status: 'open',
@@ -71,6 +76,47 @@ describe('admin alert policy', () => {
     });
     expect(alertDescriptor(SOURCE_TYPE.ACCOUNT_DELETION, { status: 'blocked' })).toBeNull();
     expect(alertDescriptor(SOURCE_TYPE.ACCOUNT_DELETION, { status: 'processing' })).toBeNull();
+  });
+
+  it('alerts on fatal crashes or three repeated errors without copying crash text', () => {
+    const fatal = alertDescriptor(SOURCE_TYPE.CLIENT_ERROR, {
+      status: 'open',
+      reportId: 'cer_hash_fingerprint_bucket',
+      severity: 'fatal',
+      isFatal: true,
+      occurrenceCount: 1,
+      message: 'PRIVATE_MESSAGE',
+      stack: 'PRIVATE_STACK',
+      actorUid: 'PRIVATE_UID',
+    });
+    expect(fatal).toMatchObject({
+      alertType: 'client_error_fatal',
+      severity: SEVERITY.CRITICAL,
+      reasonCode: 'FATAL_CLIENT_ERROR',
+      targetId: 'cer_hash_fingerprint_bucket',
+    });
+    expect(JSON.stringify(fatal)).not.toMatch(/PRIVATE_MESSAGE|PRIVATE_STACK|PRIVATE_UID/);
+
+    expect(alertDescriptor(SOURCE_TYPE.CLIENT_ERROR, {
+      status: 'open',
+      severity: 'error',
+      occurrenceCount: 2,
+    })).toBeNull();
+    expect(alertDescriptor(SOURCE_TYPE.CLIENT_ERROR, {
+      status: 'open',
+      reportId: 'cer_repeated',
+      severity: 'error',
+      occurrenceCount: 3,
+    })).toMatchObject({
+      alertType: 'client_error_repeated',
+      severity: SEVERITY.HIGH,
+      reasonCode: 'REPEATED_CLIENT_ERROR',
+    });
+    expect(alertDescriptor(SOURCE_TYPE.CLIENT_ERROR, {
+      status: 'resolved',
+      severity: 'fatal',
+      isFatal: true,
+    })).toBeNull();
   });
 
   it('keeps explicit admin transitions and terminal resolution codes', () => {
