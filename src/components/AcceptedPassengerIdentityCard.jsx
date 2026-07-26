@@ -9,9 +9,16 @@ import {
   isAcceptedPassengerPhotoPath,
 } from '../services/passengerPublicPhotoService';
 
-function safeFirstName(identity) {
-  const text = typeof identity?.firstName === 'string' ? identity.firstName.trim() : '';
-  return text.slice(0, 40) || 'Passageiro';
+export function safeAcceptedPassengerFirstName(identity) {
+  const normalized = typeof identity?.firstName === 'string'
+    ? identity.firstName.normalize('NFKC').trim().replace(/\s+/g, ' ')
+    : '';
+  if (!normalized || normalized.includes('@')) return 'Passageiro';
+  const firstToken = normalized.split(' ')[0]
+    .replace(/[^\p{L}\p{M}'’-]/gu, '')
+    .replace(/^['’\-]+|['’\-]+$/g, '')
+    .slice(0, 40);
+  return /\p{L}/u.test(firstToken) ? firstToken : 'Passageiro';
 }
 
 function shortRideId(value) {
@@ -21,7 +28,10 @@ function shortRideId(value) {
 }
 
 export default function AcceptedPassengerIdentityCard({ identity, rideId = null }) {
-  const firstName = useMemo(() => safeFirstName(identity), [identity?.firstName]);
+  const firstName = useMemo(
+    () => safeAcceptedPassengerFirstName(identity),
+    [identity?.firstName]
+  );
   const initial = firstName.slice(0, 1).toUpperCase();
   const verifiedPath = identity?.photoVerified === true
     && isAcceptedPassengerPhotoPath(identity?.photoStoragePath)
