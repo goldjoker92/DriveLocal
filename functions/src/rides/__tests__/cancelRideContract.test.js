@@ -6,10 +6,11 @@ function source(relativePath) {
 }
 
 describe('secure cancellation integration contracts', () => {
-  it('binds cancelRideSecure to the strict cancellation module', () => {
+  it('binds cancelRideSecure to the strict cancellation module through the legacy bridge', () => {
     const callables = source('src/rides/callables.js');
     expect(callables).toContain("const { cancelRide } = require('./cancelRide')");
-    expect(callables).toContain("cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRide)");
+    expect(callables).toContain('normalizedCancellationRequest(request)');
+    expect(callables).toContain("cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRideWithCompatibility)");
     expect(callables).not.toContain("cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide)");
   });
 
