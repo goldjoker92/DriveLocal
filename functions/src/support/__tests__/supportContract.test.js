@@ -35,6 +35,44 @@ describe('support workflow integration contracts', () => {
     expect(handler).not.toContain('freeText');
   });
 
+  it('uses deterministic indexed queues for payments, users and admins', () => {
+    const handler = source('src/support/tickets.js');
+    const indexes = JSON.parse(source('../backend/firebase/indexes/firestore.indexes.json'));
+    const supportIndexes = indexes.indexes.filter((index) => index.collectionGroup === 'supportTickets');
+    const paymentIndexes = indexes.indexes.filter((index) => index.collectionGroup === 'paymentRequests');
+
+    expect(handler).toContain(".where('purpose', '==', purpose)");
+    expect(handler).toContain(".orderBy('createdAtMs', 'desc')");
+    expect(handler).toContain(".where('status', 'in', ACTIVE_STATUSES)");
+    expect(handler).toContain('.limit(MAX_USER_TICKETS)');
+    expect(handler).toContain("query.orderBy('createdAtMs', 'desc').limit(args.limit)");
+
+    expect(paymentIndexes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        fields: [
+          { fieldPath: 'driverId', order: 'ASCENDING' },
+          { fieldPath: 'purpose', order: 'ASCENDING' },
+          { fieldPath: 'createdAtMs', order: 'DESCENDING' },
+        ],
+      }),
+    ]));
+    expect(supportIndexes).toHaveLength(3);
+    expect(supportIndexes.map((index) => index.fields)).toEqual(expect.arrayContaining([
+      [
+        { fieldPath: 'actorUid', order: 'ASCENDING' },
+        { fieldPath: 'status', order: 'ASCENDING' },
+      ],
+      [
+        { fieldPath: 'actorUid', order: 'ASCENDING' },
+        { fieldPath: 'createdAtMs', order: 'DESCENDING' },
+      ],
+      [
+        { fieldPath: 'status', order: 'ASCENDING' },
+        { fieldPath: 'createdAtMs', order: 'DESCENDING' },
+      ],
+    ]));
+  });
+
   it('keeps support tickets behind callable-only Firestore access', () => {
     const rules = source('../backend/firebase/rules/firestore.rules');
     expect(rules).not.toContain('match /supportTickets/{ticketId}');
