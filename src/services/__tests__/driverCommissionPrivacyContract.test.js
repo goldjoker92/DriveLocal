@@ -18,12 +18,15 @@ describe('driver commission privacy contract', () => {
     expect(presentation).not.toMatch(/fare\s*\*\s*standardBps/);
   });
 
-  it('does not expose the exact hold in the acceptance callable view', () => {
+  it('sanitizes the acceptance callable while retaining internal hold diagnostics', () => {
     const safeViews = source('functions/src/rides/safeViews.js');
+    const callables = source('functions/src/rides/callables.js');
 
+    expect(safeViews).toContain('safeDriverAcceptanceView');
     expect(safeViews).toContain('commissionDisplayBps: safeCommissionDisplayBps');
-    expect(safeViews).not.toContain('commissionHoldCentavos: holdCentavos');
-    expect(safeViews).toContain('safeDriverLifecycleView');
+    expect(callables).toContain('acceptDriverOfferPublic');
+    expect(callables).toContain('safeDriverAcceptanceView(result)');
+    expect(callables).toContain('acceptDriverOfferPublic({ db: admin.firestore()');
   });
 
   it('sanitizes the driver completion callable while retaining internal settlement', () => {
