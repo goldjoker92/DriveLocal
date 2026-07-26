@@ -9,7 +9,7 @@ import {
   where,
   onSnapshot,
 } from 'firebase/firestore';
-import { functions, db } from '../config/firebase';
+import { functions, db, auth } from '../config/firebase';
 import {
   DRIVER_CANCELLATION_REASONS,
   PASSENGER_CANCELLATION_REASONS,
@@ -19,6 +19,15 @@ import { QUICK_MESSAGE_HISTORY_LIMIT } from '../constants/rideQuickMessages';
 import { logRideClientEvent } from '../utils/clientRideLog';
 import { getDriverTrackingSession } from './driverLocationTracking';
 import { chooseCancellationReason } from './rideCancellationPrompt';
+import {
+  clearRideRecoveryHint,
+  reportFirestoreListenerError,
+  reportFirestoreSnapshot,
+  runNetworkAwareAction,
+  runRecoverableAction,
+  saveRideRecoveryHint,
+} from './networkRecoveryService';
+import { isTerminalRideStatus } from './networkRecoveryPolicy';
 
 const LEGACY_CANCELLATION_CODES = new Set(['motorista_cancelou', 'passageiro_cancelou']);
 
@@ -30,6 +39,50 @@ function makeIdempotencyKey(prefix) {
 function hasCoordinatePair(point) {
   if (!point || point.lat == null || point.lng == null || point.lat === '' || point.lng === '') return false;
   return Number.isFinite(Number(point.lat)) && Number.isFinite(Number(point.lng));
+}
+
+function safeActionDiscriminator(extra = {}) {
+  return String(extra.messageCode || extra.reasonCode || 'default')
+    .replace(/[^A-Za-z0-9_.:-]/g, '_')
+    .slice(0, 80);
+}
+
+async function syncPassengerRideHint(ride) {
+  const uid = auth.currentUser?.uid;
+  if (!uid || !ride?.rideId) return;
+  if (isTerminalRideStatus(ride.status)) {
+    await clearRideRecoveryHint({ uid, rideId: ride.rideId });
+    return;
+  }
+  await saveRideRecoveryHint({
+    uid,
+    role: 'passenger',
+    rideId: ride.rideId,
+    status: ride.status,
+  });
+}
+
+async function syncDriverRideHint(offer, explicitRideId, fromCache) {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  if (offer?.status === 'accepted' && offer?.rideId) {
+    if (isTerminalRideStatus(offer.driverRideStatus)) {
+      await clearRideRecoveryHint({ uid, rideId: offer.rideId });
+      return;
+    }
+    await saveRideRecoveryHint({
+      uid,
+      role: 'driver',
+      rideId: offer.rideId,
+      status: offer.driverRideStatus || 'assigned',
+    });
+    return;
+  }
+  // A confirmed server snapshot without the explicitly requested accepted offer
+  // proves that an old local hint is no longer a valid active driver ride.
+  if (explicitRideId && fromCache !== true) {
+    await clearRideRecoveryHint({ uid, rideId: explicitRideId });
+  }
 }
 
 export async function requestRide({ vehicleType, pickup, destination, idempotencyKeyRef }) {
@@ -49,12 +102,12 @@ export async function requestRide({ vehicleType, pickup, destination, idempotenc
   });
   try {
     const call = httpsCallable(functions, 'createRideRequestSecure');
-    const res = await call({
+    const res = await runNetworkAwareAction('createRideRequestSecure', () => call({
       vehicleType,
       pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label },
       destination: { lat: destination.lat, lng: destination.lng, label: destination.label },
       idempotencyKey,
-    });
+    }));
     logRideClientEvent('ride.request.callable_succeeded', {
       action: 'createRideRequestSecure', rideId: res.data?.rideId,
       resultStatus: res.data?.status, vehicleType,
@@ -75,7 +128,12 @@ export async function acceptOffer(offerId) {
   logRideClientEvent('ride.offer.accept_started', { action: 'acceptDriverOfferSecure' });
   try {
     const call = httpsCallable(functions, 'acceptDriverOfferSecure');
-    const res = await call({ offerId, idempotencyKey: makeIdempotencyKey('acc') });
+    const res = await runRecoverableAction({
+      actionName: 'acceptDriverOfferSecure',
+      actionKey: offerId,
+      idempotencyPrefix: 'acc',
+      execute: (idempotencyKey) => call({ offerId, idempotencyKey }),
+    });
     logRideClientEvent('ride.offer.accept_succeeded', {
       action: 'acceptDriverOfferSecure', rideId: res.data?.rideId,
       resultStatus: res.data?.status, durationMs: Date.now() - startedAt, ride: res.data,
@@ -91,7 +149,10 @@ export async function acceptOffer(offerId) {
 
 export async function declineOffer(offerId, reasonCode = 'driver_declined') {
   const call = httpsCallable(functions, 'declineDriverOfferSecure');
-  const res = await call({ offerId, reasonCode });
+  const res = await runNetworkAwareAction(
+    'declineDriverOfferSecure',
+    () => call({ offerId, reasonCode })
+  );
   logRideClientEvent('ride.offer.declined', {
     action: 'declineDriverOfferSecure', rideId: res.data?.rideId, resultStatus: res.data?.status,
   });
@@ -103,7 +164,13 @@ async function callRide(name, rideId, extra) {
   logRideClientEvent('ride.lifecycle.callable_started', { action: name, rideId });
   try {
     const call = httpsCallable(functions, name);
-    const res = await call({ rideId, idempotencyKey: makeIdempotencyKey('lc'), ...(extra || {}) });
+    const discriminator = safeActionDiscriminator(extra);
+    const res = await runRecoverableAction({
+      actionName: name,
+      actionKey: `${rideId}:${discriminator}`,
+      idempotencyPrefix: 'lc',
+      execute: (idempotencyKey) => call({ rideId, idempotencyKey, ...(extra || {}) }),
+    });
     logRideClientEvent('ride.lifecycle.callable_succeeded', {
       action: name, rideId, resultStatus: res.data?.status,
       durationMs: Date.now() - startedAt, ride: res.data,
@@ -157,14 +224,27 @@ export const reportPaymentIssue = (rideId, reasonCode) => callRide('reportRidePa
 
 export function listenToRide(rideId, onData, onError) {
   logRideClientEvent('ride.snapshot.listener_started', { rideId });
-  return onSnapshot(doc(db, 'rideRequests', rideId), (snap) => {
-    const ride = snap.exists() ? { rideId: snap.id, ...snap.data() } : null;
-    logRideClientEvent('ride.snapshot.received', { rideId, status: ride?.status || 'missing', ride });
-    onData(ride);
-  }, (error) => {
-    logRideClientEvent('ride.snapshot.listener_failed', { rideId, error }, 'error');
-    if (onError) onError(error);
-  });
+  return onSnapshot(
+    doc(db, 'rideRequests', rideId),
+    { includeMetadataChanges: true },
+    (snap) => {
+      reportFirestoreSnapshot('ride_snapshot', snap.metadata || {});
+      const ride = snap.exists() ? { rideId: snap.id, ...snap.data() } : null;
+      logRideClientEvent('ride.snapshot.received', {
+        rideId,
+        status: ride?.status || 'missing',
+        source: snap.metadata?.fromCache ? 'cache' : 'server',
+        ride,
+      });
+      if (ride) syncPassengerRideHint(ride).catch(() => undefined);
+      onData(ride);
+    },
+    (error) => {
+      reportFirestoreListenerError('ride_snapshot', error);
+      logRideClientEvent('ride.snapshot.listener_failed', { rideId, error }, 'error');
+      if (onError) onError(error);
+    }
+  );
 }
 
 export function listenToRideQuickMessages(rideId, onData, onError) {
@@ -172,35 +252,53 @@ export function listenToRideQuickMessages(rideId, onData, onError) {
   // Firestore index and keeps this listener compatible with existing test mocks.
   const messagesRef = collection(db, 'rideRequests', rideId, 'quickMessages');
   logRideClientEvent('ride.quick_messages.listener_started', { rideId });
-  return onSnapshot(messagesRef, (snap) => {
-    const nowMs = Date.now();
-    const messages = snap.docs
-      .map((messageSnap) => ({ messageId: messageSnap.id, ...messageSnap.data() }))
-      .filter((message) => !message.expiresAtMs || Number(message.expiresAtMs) > nowMs)
-      .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0))
-      .slice(0, QUICK_MESSAGE_HISTORY_LIMIT);
-    logRideClientEvent('ride.quick_messages.snapshot_received', {
-      rideId,
-      messageCount: messages.length,
-      latestMessageCode: messages[0]?.messageCode || null,
-    });
-    onData(messages);
-  }, (error) => {
-    logRideClientEvent('ride.quick_messages.listener_failed', { rideId, error }, 'error');
-    if (onError) onError(error);
-  });
+  return onSnapshot(
+    messagesRef,
+    { includeMetadataChanges: true },
+    (snap) => {
+      reportFirestoreSnapshot('ride_quick_messages', snap.metadata || {});
+      const nowMs = Date.now();
+      const messages = snap.docs
+        .map((messageSnap) => ({ messageId: messageSnap.id, ...messageSnap.data() }))
+        .filter((message) => !message.expiresAtMs || Number(message.expiresAtMs) > nowMs)
+        .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0))
+        .slice(0, QUICK_MESSAGE_HISTORY_LIMIT);
+      logRideClientEvent('ride.quick_messages.snapshot_received', {
+        rideId,
+        messageCount: messages.length,
+        latestMessageCode: messages[0]?.messageCode || null,
+      });
+      onData(messages);
+    },
+    (error) => {
+      reportFirestoreListenerError('ride_quick_messages', error);
+      logRideClientEvent('ride.quick_messages.listener_failed', { rideId, error }, 'error');
+      if (onError) onError(error);
+    }
+  );
 }
 
 export function listenToRideLocation(rideId, onData, onError) {
   logRideClientEvent('ride.location.listener_started', { rideId });
-  return onSnapshot(doc(db, 'activeRideLocations', rideId), (snap) => {
-    const location = snap.exists() ? { rideId: snap.id, ...snap.data() } : null;
-    logRideClientEvent('ride.location.snapshot_received', { rideId, status: location ? 'available' : 'missing' });
-    onData(location);
-  }, (error) => {
-    logRideClientEvent('ride.location.listener_failed', { rideId, error }, 'error');
-    if (onError) onError(error);
-  });
+  return onSnapshot(
+    doc(db, 'activeRideLocations', rideId),
+    { includeMetadataChanges: true },
+    (snap) => {
+      reportFirestoreSnapshot('ride_location', snap.metadata || {});
+      const location = snap.exists() ? { rideId: snap.id, ...snap.data() } : null;
+      logRideClientEvent('ride.location.snapshot_received', {
+        rideId,
+        status: location ? 'available' : 'missing',
+        source: snap.metadata?.fromCache ? 'cache' : 'server',
+      });
+      onData(location);
+    },
+    (error) => {
+      reportFirestoreListenerError('ride_location', error);
+      logRideClientEvent('ride.location.listener_failed', { rideId, error }, 'error');
+      if (onError) onError(error);
+    }
+  );
 }
 
 function newer(current, candidate) {
@@ -214,62 +312,71 @@ export function listenToMyOffer(driverUid, onData, onError, rideId = null) {
   const q = query(collection(db, 'driverOffers'), where('driverId', '==', driverUid));
   let snapshotRevision = 0;
 
-  return onSnapshot(q, async (snap) => {
-    const revision = ++snapshotRevision;
-    let offered = null;
-    let accepted = null;
-    const nowMs = Date.now();
-    snap.forEach((d) => {
-      const data = d.data();
-      if (rideId && data.rideId !== rideId) return;
-      const candidate = { offerId: d.id, ...data };
-      if (data.status === 'accepted') {
-        // Driver home ignores historical terminal offers. An explicitly opened ride,
-        // however, keeps receiving its final status so success/error feedback can be
-        // shown before the payment screen closes.
-        if (rideId || !TERMINAL_DRIVER_RIDE_STATUSES.has(data.driverRideStatus)) {
-          accepted = newer(accepted, candidate);
+  return onSnapshot(
+    q,
+    { includeMetadataChanges: true },
+    async (snap) => {
+      reportFirestoreSnapshot('driver_offer', snap.metadata || {});
+      const revision = ++snapshotRevision;
+      let offered = null;
+      let accepted = null;
+      const nowMs = Date.now();
+      snap.forEach((d) => {
+        const data = d.data();
+        if (rideId && data.rideId !== rideId) return;
+        const candidate = { offerId: d.id, ...data };
+        if (data.status === 'accepted') {
+          // Driver home ignores historical terminal offers. An explicitly opened ride,
+          // however, keeps receiving its final status so success/error feedback can be
+          // shown before the payment screen closes.
+          if (rideId || !TERMINAL_DRIVER_RIDE_STATUSES.has(data.driverRideStatus)) {
+            accepted = newer(accepted, candidate);
+          }
+        } else if (data.status === 'offered' && Number(data.expiresAtMs || 0) > nowMs) {
+          offered = newer(offered, candidate);
         }
-      } else if (data.status === 'offered' && Number(data.expiresAtMs || 0) > nowMs) {
-        offered = newer(offered, candidate);
-      }
-    });
+      });
 
-    let selected = accepted || offered;
+      let selected = accepted || offered;
 
-    // Accepted rides remain recoverable even after a process restart. A merely
-    // offered ride, however, belongs to exactly one work session and must never be
-    // shown from an old Android notification or an old Firestore snapshot.
-    if (selected?.status === 'offered') {
-      const trackingSession = await getDriverTrackingSession();
-      if (revision !== snapshotRevision) return;
-      const sessionMatches = Boolean(
-        trackingSession?.driverId === driverUid
-        && trackingSession?.availabilitySessionId
-        && selected.availabilitySessionId === trackingSession.availabilitySessionId
-      );
-      if (!sessionMatches) {
-        logRideClientEvent('ride.driver_offer.stale_session_ignored', {
-          action: 'filter_targeted_offer',
-          rideId: selected.rideId,
-          offerId: selected.offerId,
-          reason: trackingSession ? 'availability_session_mismatch' : 'local_work_session_missing',
-          resultStatus: 'ignored',
-        }, 'warning');
-        selected = null;
+      // Accepted rides remain recoverable even after a process restart. A merely
+      // offered ride, however, belongs to exactly one work session and must never be
+      // shown from an old Android notification or an old Firestore snapshot.
+      if (selected?.status === 'offered') {
+        const trackingSession = await getDriverTrackingSession();
+        if (revision !== snapshotRevision) return;
+        const sessionMatches = Boolean(
+          trackingSession?.driverId === driverUid
+          && trackingSession?.availabilitySessionId
+          && selected.availabilitySessionId === trackingSession.availabilitySessionId
+        );
+        if (!sessionMatches) {
+          logRideClientEvent('ride.driver_offer.stale_session_ignored', {
+            action: 'filter_targeted_offer',
+            rideId: selected.rideId,
+            offerId: selected.offerId,
+            reason: trackingSession ? 'availability_session_mismatch' : 'local_work_session_missing',
+            resultStatus: 'ignored',
+          }, 'warning');
+          selected = null;
+        }
       }
+
+      syncDriverRideHint(selected, rideId, snap.metadata?.fromCache).catch(() => undefined);
+      logRideClientEvent('ride.driver_offer.snapshot_received', {
+        rideId: selected?.rideId || rideId,
+        offerStatus: selected?.status || 'missing',
+        driverRideStatus: selected?.driverRideStatus || null,
+        source: snap.metadata?.fromCache ? 'cache' : 'server',
+        hasPaymentAmount: selected?.paymentAmountCentavos != null,
+        hasPaymentPayload: !!selected?.paymentPixPayload,
+      });
+      onData(selected);
+    },
+    (err) => {
+      reportFirestoreListenerError('driver_offer', err);
+      logRideClientEvent('ride.driver_offer.listener_failed', { rideId, error: err }, 'error');
+      if (onError) onError(err);
     }
-
-    logRideClientEvent('ride.driver_offer.snapshot_received', {
-      rideId: selected?.rideId || rideId,
-      offerStatus: selected?.status || 'missing',
-      driverRideStatus: selected?.driverRideStatus || null,
-      hasPaymentAmount: selected?.paymentAmountCentavos != null,
-      hasPaymentPayload: !!selected?.paymentPixPayload,
-    });
-    onData(selected);
-  }, (err) => {
-    logRideClientEvent('ride.driver_offer.listener_failed', { rideId, error: err }, 'error');
-    if (onError) onError(err);
-  });
+  );
 }
