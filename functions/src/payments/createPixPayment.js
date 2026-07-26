@@ -84,14 +84,14 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) {
     throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
-      internalMessage: `driver not found: ${driverId}`,
+      internalMessage: 'authenticated driver profile not found',
       safeMetadata: { field: 'driverId' },
     });
   }
   const driver = driverSnap.data() || {};
   if (accountDeletionPending(driver)) {
     throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      internalMessage: `driver ${driverId} requested account deletion`,
+      internalMessage: 'authenticated driver requested account deletion',
       safeMetadata: { reason: 'ACCOUNT_DELETION_PENDING' },
     });
   }
@@ -145,7 +145,7 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
       return acq.resultReference || null;
     }
     throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT, {
-      internalMessage: `payment creation already in progress for key "${idempotencyKey}"`,
+      internalMessage: 'payment creation already in progress for this idempotency operation',
     });
   }
 
