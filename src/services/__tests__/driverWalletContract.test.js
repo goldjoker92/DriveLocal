@@ -5,16 +5,34 @@ function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-describe('block 18 real driver wallet contract', () => {
-  it('removes every wallet mock from the production screen', () => {
-    const screen = source('src/app/(driver)/wallet.jsx');
+function productionSourceFiles(rootRelativePath) {
+  const root = path.join(process.cwd(), rootRelativePath);
+  const files = [];
 
-    expect(screen).not.toContain('mockDrivers');
-    expect(screen).not.toContain('MOCK_TX');
-    expect(screen).not.toContain('mock balance');
-    expect(screen).not.toContain('mock history');
-    expect(screen).toContain('listenToDriverWallet');
-    expect(screen).toContain('loadDriverWalletSnapshot');
+  function walk(directory) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        walk(absolute);
+      } else if (/\.(?:js|jsx)$/.test(entry.name)) {
+        files.push(absolute);
+      }
+    }
+  }
+
+  walk(root);
+  return files;
+}
+
+describe('block 18 real driver wallet contract', () => {
+  it('removes every wallet mock from production source', () => {
+    const offenders = productionSourceFiles('src')
+      .filter((absolute) => /mockDrivers|MOCK_TX/.test(fs.readFileSync(absolute, 'utf8')))
+      .map((absolute) => path.relative(process.cwd(), absolute));
+
+    expect(offenders).toEqual([]);
+    expect(fs.existsSync(path.join(process.cwd(), 'src/mock/mockDrivers.js'))).toBe(false);
   });
 
   it('renders real available, held and total balances without a fake zero default', () => {
@@ -22,12 +40,14 @@ describe('block 18 real driver wallet contract', () => {
     const card = source('src/components/WalletCard.jsx');
     const service = source('src/services/driverWalletService.js');
 
+    expect(screen).toContain('listenToDriverWallet');
+    expect(screen).toContain('loadDriverWalletSnapshot');
     expect(screen).toContain('availableCents={balanceLoading ? null : wallet.availableCentavos}');
     expect(screen).toContain('heldCents={balanceLoading ? null : wallet.heldCentavos}');
     expect(screen).toContain('balanceCents={balanceLoading ? null : wallet.balanceCentavos}');
-    expect(card).toContain("balanceCents = null");
-    expect(card).toContain("availableCents = null");
-    expect(card).toContain("heldCents = null");
+    expect(card).toContain('balanceCents = null');
+    expect(card).toContain('availableCents = null');
+    expect(card).toContain('heldCents = null');
     expect(card).toContain("return Number.isInteger(value) && value >= 0 ? formatBRL(value) : 'Carregando…'");
     expect(service).toContain("doc(db, 'drivers', driverId)");
     expect(service).toContain('{ includeMetadataChanges: true }');
@@ -43,7 +63,7 @@ describe('block 18 real driver wallet contract', () => {
     expect(mobileService).toContain("httpsCallable(functions, 'getDriverWalletSnapshot')");
     expect(mobileService).not.toContain("collection(db, 'walletTransactions'");
     expect(mobileService).not.toContain("collection(db, 'paymentRequests'");
-    expect(backend).toContain("const driverId = request?.auth?.uid");
+    expect(backend).toContain('const driverId = request?.auth?.uid');
     expect(backend).toContain(".where('driverId', '==', driverId)");
     expect(backend).toContain(".where('purpose', '==', 'wallet_topup')");
     expect(backend).not.toContain('providerOrderId:');
@@ -86,7 +106,7 @@ describe('block 18 real driver wallet contract', () => {
     expect(screen).toContain('formatTopupPreset(amount, wallet.topupLocked)');
     expect(screen).toContain("? '🔒 Outro valor'");
     expect(screen).toContain('disabled={topupControlsDisabled}');
-    expect(view).toContain("return locked ? `🔒 ${value}` : value");
+    expect(view).toContain('return locked ? `🔒 ${value}` : value');
     expect(view).toContain('const locked = policyLocked && (!unlockAtMs || unlockAtMs > nowMs)');
     expect(screen).toContain('setTimeout(() => setClockNowMs(Date.now()), delayMs)');
 
@@ -122,11 +142,11 @@ describe('block 18 real driver wallet contract', () => {
     const backend = source('functions/src/payments/createPixPayment.js');
 
     expect(screen).toContain('parseWalletTopupInput(customValue)');
-    expect(screen).toContain("{ customAmount: true }");
+    expect(screen).toContain('{ customAmount: true }');
     expect(screen).toContain('Mínimo R$ 10,00 • máximo R$ 200,00');
     expect(view).toContain('WALLET_TOPUP_MIN_CENTAVOS = 1000');
     expect(view).toContain('WALLET_TOPUP_MAX_CENTAVOS = 20000');
-    expect(view).toContain("/^\\d+(?:\\.\\d{1,2})?$/");
+    expect(view).toContain('/^\\d+(?:\\.\\d{1,2})?$/');
     expect(service).toContain('customAmount: customAmount === true');
     expect(constants).toContain('WALLET_TOPUP_MIN_CENTAVOS: 1000');
     expect(constants).toContain('WALLET_TOPUP_MAX_CENTAVOS: 20000');
