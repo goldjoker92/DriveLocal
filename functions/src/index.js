@@ -45,6 +45,7 @@ exports.finishRideSecure = rideCallables.finishRideSecure;
 exports.markPassengerPixSentSecure = rideCallables.markPassengerPixSentSecure;
 exports.confirmDriverPixReceivedSecure = rideCallables.confirmDriverPixReceivedSecure;
 exports.cancelRideSecure = rideCallables.cancelRideSecure;
+exports.sendRideQuickMessageSecure = rideCallables.sendRideQuickMessageSecure;
 exports.reportRidePaymentIssueSecure = rideCallables.reportRidePaymentIssueSecure;
 exports.resolveRideDisputeSecure = rideCallables.resolveRideDisputeSecure;
 exports.getAdminRideSummarySecure = rideCallables.getAdminRideSummarySecure;
