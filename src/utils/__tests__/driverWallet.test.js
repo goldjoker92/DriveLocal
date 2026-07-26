@@ -97,6 +97,26 @@ describe('real driver wallet view', () => {
     expect(view.topupUnlockAtMs).toBe(unlockAtMs);
   });
 
+  it('unlocks a mounted wallet when the authoritative date has passed', () => {
+    const unlockAtMs = NOW - 1;
+    const view = deriveDriverWalletView({
+      serviceAreaId: 'HORIZONTE_CE_BR',
+      vehicleType: 'moto',
+      commissionFreeUntil: unlockAtMs,
+      walletBalanceCentavos: 1000,
+      walletAvailableCentavos: 1000,
+      walletHeldCentavos: 0,
+    }, {
+      // The last fetched server snapshot may still carry the pre-boundary flag.
+      topupPolicy: { locked: true, unlockAtMs },
+      transactions: [],
+      payments: [],
+    }, NOW);
+
+    expect(view.topupLocked).toBe(false);
+    expect(view.topupUnlockAtMs).toBe(unlockAtMs);
+  });
+
   it('expands holds, captures and releases into understandable real history rows', () => {
     expect(expandWalletTransaction({
       id: 'hold',
