@@ -15,10 +15,13 @@ describe('driver arrival privacy boundary', () => {
 
   it('copies waiting timestamps but no passenger identity or destination to the offer', () => {
     const handler = source('src/rides/markDriverArrived.js');
-    const offerStart = handler.indexOf('tx.set(offerRef');
-    const offerEnd = handler.indexOf('}, { merge: true });', offerStart);
-    const offerProjection = handler.slice(offerStart, offerEnd);
+    const helperStart = handler.indexOf('function setSafeWaitProjectionTx');
+    const helperEnd = handler.indexOf('async function markDriverArrived', helperStart);
+    const offerProjection = handler.slice(helperStart, helperEnd);
 
+    expect(helperStart).toBeGreaterThan(-1);
+    expect(helperEnd).toBeGreaterThan(helperStart);
+    expect(offerProjection).toContain('tx.set(offerRef');
     expect(offerProjection).toContain('driverArrivedAtMs');
     expect(offerProjection).toContain('passengerNoShowEligibleAtMs');
     expect(offerProjection).toContain('passengerNoShowWaitMs');
@@ -34,6 +37,8 @@ describe('driver arrival privacy boundary', () => {
     const offersStart = rules.indexOf('match /driverOffers/{offerId}', rideMatchStart);
     const rideRules = rules.slice(rideMatchStart, offersStart);
 
+    expect(rideMatchStart).toBeGreaterThan(-1);
+    expect(offersStart).toBeGreaterThan(rideMatchStart);
     expect(rideRules).toContain('resource.data.passengerId == request.auth.uid || isAdmin()');
     expect(rideRules).not.toContain('acceptedDriverId == request.auth.uid');
   });
