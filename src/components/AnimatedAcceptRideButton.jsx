@@ -16,7 +16,12 @@ import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
 
-export default function AnimatedAcceptRideButton({ onPress, disabled = false, loading = false }) {
+export default function AnimatedAcceptRideButton({
+  onPress,
+  title = 'ACEITAR',
+  disabled = false,
+  loading = false,
+}) {
   const pulseScale = useRef(new Animated.Value(1)).current;
   const pressScale = useRef(new Animated.Value(1)).current;
   const shineProgress = useRef(new Animated.Value(0)).current;
@@ -80,13 +85,14 @@ export default function AnimatedAcceptRideButton({ onPress, disabled = false, lo
     inputRange: [0, 1],
     outputRange: [-140, 520],
   });
+  const visibleTitle = loading ? 'ACEITANDO…' : title;
 
   return (
-    <Animated.View style={[styles.halo, { transform: [{ scale: pulseScale }] }]}>
+    <Animated.View style={[styles.halo, { transform: [{ scale: pulseScale }] }]}> 
       <Animated.View style={{ transform: [{ scale: pressScale }] }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={loading ? 'Aceitando corrida' : 'Aceitar corrida'}
+          accessibilityLabel={loading ? 'Aceitando corrida' : visibleTitle}
           onPress={handlePress}
           onPressIn={() => animatePress(0.97, 35, 0)}
           onPressOut={() => animatePress(1, 24, 7)}
@@ -106,8 +112,9 @@ export default function AnimatedAcceptRideButton({ onPress, disabled = false, lo
           />
           <View style={styles.content}>
             {loading ? <ActivityIndicator size="small" color={colors.white} /> : null}
-            <Text style={styles.text}>{loading ? 'Aceitando…' : 'Aceitar corrida'}</Text>
-            {!loading ? <Text style={styles.arrow}>→</Text> : null}
+            <Text style={styles.text} numberOfLines={1} adjustsFontSizeToFit>
+              {visibleTitle}
+            </Text>
           </View>
         </Pressable>
       </Animated.View>
@@ -148,6 +155,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.20)',
   },
   content: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -155,14 +163,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   text: {
+    flexShrink: 1,
     fontFamily,
     color: colors.white,
     ...typography.bodyBold,
-  },
-  arrow: {
-    fontFamily,
-    color: colors.white,
-    fontSize: 20,
-    lineHeight: 22,
+    textAlign: 'center',
+    letterSpacing: 0.3,
   },
 });
