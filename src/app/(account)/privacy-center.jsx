@@ -140,7 +140,7 @@ export default function PrivacyCenter() {
         <AppCard>
           <SectionTitle>EXCLUIR MINHA CONTA</SectionTitle>
           <Copy tone="text">
-            Você não pode excluir a conta durante uma corrida ativa.
+            Você não pode excluir a conta durante uma corrida ativa ou enquanto uma disputa estiver aberta.
           </Copy>
           <Copy>
             Fotos, documentos, tokens de notificação, dados de perfil e outros dados pessoais diretos serão removidos. Corridas e registros financeiros indispensáveis serão minimizados e desvinculados da sua identidade.
