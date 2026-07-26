@@ -18,7 +18,10 @@ const { cancelRide } = require('./cancelRide');
 const { normalizedCancellationRequest } = require('./cancellationCompatibility');
 const { sendRideQuickMessage } = require('./sendQuickMessage');
 const lifecycle = require('./lifecycle');
-const { safeDriverLifecycleView } = require('./safeViews');
+const {
+  safeDriverAcceptanceView,
+  safeDriverLifecycleView,
+} = require('./safeViews');
 const { resolveRideDispute } = require('./disputeResolution');
 const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
 const C = require('./constants');
@@ -76,6 +79,13 @@ async function finishRideWithPixMigration({ db, request, context, clock }) {
   return lifecycle.finishRide({ db, request, context, clock });
 }
 
+// Core acceptance keeps exact hold values for backend ledger/audit tests. Only the
+// closed 0/12/15 percentage crosses the callable boundary to the driver app.
+async function acceptDriverOfferPublic(args) {
+  const result = await acceptDriverOfferSecure(args);
+  return safeDriverAcceptanceView(result);
+}
+
 // The internal lifecycle returns exact capture values for ledger/audit tests. The
 // public driver callable deliberately strips those values before crossing the
 // trust boundary to the mobile application.
@@ -102,7 +112,7 @@ const createRideRequestSecureFn = onCall(
 const acceptDriverOfferSecureFn = onCall(
   { region: REGION },
   withCallableBoundary('acceptDriverOfferSecure', (request, context) =>
-    acceptDriverOfferSecure({ db: admin.firestore(), request, context, clock: systemClock })
+    acceptDriverOfferPublic({ db: admin.firestore(), request, context, clock: systemClock })
   )
 );
 
@@ -129,5 +139,6 @@ module.exports = {
   getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),
   listAdminDisputedRidesSecure: bindLifecycle('listAdminDisputedRidesSecure', listAdminDisputedRides),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
+  acceptDriverOfferPublic,
   confirmDriverPixReceivedPublic,
 };
