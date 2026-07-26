@@ -10,13 +10,9 @@ jest.mock('expo-constants', () => ({
 
 jest.mock('expo-device', () => ({ isDevice: true }));
 
-jest.mock('react-native', () => {
-  const actual = jest.requireActual('react-native');
-  return {
-    ...actual,
-    Platform: { ...actual.Platform, OS: 'android' },
-  };
-});
+jest.mock('react-native', () => ({
+  Platform: { OS: 'android' },
+}));
 
 jest.mock('expo-notifications', () => ({
   AndroidImportance: { MAX: 5, HIGH: 4 },
