@@ -25,6 +25,14 @@
       ]
     },
     {
+      "collectionGroup": "walletTransactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "createdAtMs", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "paymentRequests",
       "queryScope": "COLLECTION",
       "fields": [
