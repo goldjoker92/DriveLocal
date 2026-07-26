@@ -4,7 +4,6 @@
 // authorizes a commission, subscription or wallet mutation.
 
 import {
-  BPS_DENOMINATOR,
   MIN_WALLET_BALANCE_CENTAVOS,
   getVehiclePricing,
 } from '../constants/pricingConfig';
@@ -13,6 +12,7 @@ import { getSubscriptionMonthlyCentavos } from './driverSubscription';
 import { resolveCommercialPolicy } from './commercialPolicy';
 
 const PICKUP_AVERAGE_SPEED_KPH = Object.freeze({ moto: 25, car: 22 });
+const SAFE_COMMISSION_DISPLAY_BPS = new Set([0, 1200, 1500]);
 
 export function vehicleLabel(vehicleType) {
   return vehicleType === 'moto' ? 'Moto' : 'Carro';
@@ -51,45 +51,50 @@ export function acceptanceRatePercent(driver) {
   return null;
 }
 
+function normalizeCommissionDisplayBps({
+  commissionDisplayBps,
+  commissionFree,
+  vehicleType,
+  serviceAreaId,
+}) {
+  const supplied = Number(commissionDisplayBps);
+  if (SAFE_COMMISSION_DISPLAY_BPS.has(supplied)) return supplied;
+  if (commissionFree) return 0;
+
+  const pricing = getVehiclePricing(serviceAreaId, vehicleType);
+  const standardBps = Number(pricing?.normalCommissionBps || 0);
+  return SAFE_COMMISSION_DISPLAY_BPS.has(standardBps) ? standardBps : 0;
+}
+
+// Despite the historical function name, this helper no longer calculates or
+// returns an exact commission amount. The passenger pays the full fare directly
+// to the driver by Pix; the wallet settlement is a separate server-only concern.
 export function calculateOfferCommission({
   fareCentavos,
   vehicleType,
   serviceAreaId,
   commissionFree,
+  commissionDisplayBps,
 }) {
   const fare = Math.max(0, Math.round(Number(fareCentavos) || 0));
-  const pricing = getVehiclePricing(serviceAreaId, vehicleType);
-  const standardBps = Number(pricing?.normalCommissionBps || 0);
-  const standardPercent = standardBps / 100;
-
-  if (commissionFree || fare === 0 || standardBps <= 0) {
-    return {
-      commissionCentavos: 0,
-      commissionPercentLabel: '0%',
-      minimumGuaranteeApplied: false,
-    };
-  }
-
-  const rawCommission = Math.round((fare * standardBps) / BPS_DENOMINATOR);
-  const minimumNet = Math.max(0, Number(pricing?.minimumDriverNetCentavos || 0));
-  const cap = Math.max(0, fare - minimumNet);
-  const commissionCentavos = Math.max(0, Math.min(rawCommission, cap));
-
-  // Driver-facing copy is deliberately restricted to 0%, 12% or 15%:
-  //   - 0% when the real commission is zero, including a minimum-net cap;
-  //   - otherwise the standard vehicle policy rate.
-  // Centavo adjustments never become custom percentages in the driver UI.
-  const commissionPercentLabel = Number.isInteger(standardPercent)
-    ? `${standardPercent}%`
-    : `${standardPercent.toFixed(1).replace('.', ',')}%`;
-  const displayedCommissionPercentLabel = commissionCentavos === 0
-    ? '0%'
-    : commissionPercentLabel;
+  const displayBps = normalizeCommissionDisplayBps({
+    commissionDisplayBps,
+    commissionFree,
+    vehicleType,
+    serviceAreaId,
+  });
+  const displayPercent = displayBps / 100;
 
   return {
-    commissionCentavos,
-    commissionPercentLabel: displayedCommissionPercentLabel,
-    minimumGuaranteeApplied: commissionCentavos < rawCommission,
+    commissionDisplayBps: displayBps,
+    commissionPercentLabel: `${displayPercent}%`,
+    // A zero server-projected rate outside the free window means the backend
+    // minimum-net cap removed the hold. No centavo amount is sent to the app.
+    minimumGuaranteeApplied: displayBps === 0 && !commissionFree && fare > 0,
+    driverReceivesCentavos: fare,
+    // Compatibility alias for the current screen. It now means the full direct
+    // Pix receipt, not fare minus a hidden wallet commission.
+    driverNetCentavos: fare,
   };
 }
 
@@ -104,6 +109,7 @@ export function deriveRideOfferPresentation(driver, offer, nowMs = Date.now()) {
     vehicleType,
     serviceAreaId,
     commissionFree: commercial.freePeriodActive,
+    commissionDisplayBps: offer?.commissionDisplayBps,
   });
   const walletBalanceCentavos = Math.max(
     0,
@@ -124,10 +130,11 @@ export function deriveRideOfferPresentation(driver, offer, nowMs = Date.now()) {
     pickupEtaMinutes: estimatePickupMinutes(offer?.distanceToPickupMeters, vehicleType),
     commissionFree: commercial.freePeriodActive,
     commissionFreeUntilLabel: formatDateBR(commercial.freePeriodUntilMs),
-    commissionCentavos: commission.commissionCentavos,
+    commissionDisplayBps: commission.commissionDisplayBps,
     commissionPercentLabel: commission.commissionPercentLabel,
     minimumGuaranteeApplied: commission.minimumGuaranteeApplied,
-    driverNetCentavos: Math.max(0, fareCentavos - commission.commissionCentavos),
+    driverReceivesCentavos: commission.driverReceivesCentavos,
+    driverNetCentavos: commission.driverNetCentavos,
     founder: commercial.founder,
     founderBenefitActive: commercial.founderFreeActive,
     founderBenefitUntilLabel: formatDateBR(commercial.founderSubscriptionUntilMs),
