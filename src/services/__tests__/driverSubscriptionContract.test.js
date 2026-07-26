@@ -90,9 +90,18 @@ describe('block 19 real Pix subscription contract', () => {
     const paymentService = source('src/services/paymentsService.js');
     const paymentSheet = source('src/components/DriverPixPaymentSheet.jsx');
     const creation = source('functions/src/payments/createPixPayment.js');
+    const subscriptionStart = paymentService.indexOf(
+      'export async function requestSubscriptionPix()'
+    );
+    const walletStart = paymentService.indexOf(
+      'export async function requestWalletTopupPix'
+    );
+    const subscriptionClientBlock = paymentService.slice(subscriptionStart, walletStart);
 
-    expect(paymentService).toContain("purpose: 'driver_subscription'");
-    expect(paymentService).not.toMatch(/requestSubscriptionPix[\s\S]*amountCentavos/);
+    expect(subscriptionStart).toBeGreaterThan(-1);
+    expect(walletStart).toBeGreaterThan(subscriptionStart);
+    expect(subscriptionClientBlock).toContain("purpose: 'driver_subscription'");
+    expect(subscriptionClientBlock).not.toContain('amountCentavos');
     expect(screen).toContain('title="Assinatura via Pix"');
     expect(screen).toContain('Aguardando pagamento…');
     expect(screen).toContain('Pagamento confirmado — assinatura ativada!');
