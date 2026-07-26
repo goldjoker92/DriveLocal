@@ -1,6 +1,7 @@
 // @ts-check
-// Safe projections returned by the callables. They deliberately exclude internal
-// financial/provider fields and any counterparty PII.
+// Projections used at the ride callable boundary. Core handlers may retain exact
+// financial values for server-side tests, ledger and audit; public driver views
+// strip them before the response leaves Cloud Functions.
 
 const DRIVER_COMMISSION_DISPLAY_BPS = new Set([0, 1200, 1500]);
 
@@ -32,22 +33,34 @@ function safeCommissionDisplayBps(ride, exactCommissionCentavos) {
   return ride?.vehicleType === 'moto' ? 1200 : 1500;
 }
 
-// Winning-driver acceptance view (returned by acceptDriverOfferSecure). Includes
-// the exact pickup so the driver can navigate, the full fare paid directly by Pix,
-// and only the safe 0/12/15 commission percentage. The exact wallet hold remains
-// server/ledger/admin-only.
+// Internal acceptance result used by backend integration tests and audit flows.
+// It intentionally keeps the exact hold inside the Functions process. The callable
+// binding must pass this result through safeDriverAcceptanceView before returning.
 function safeAcceptanceView(rideId, ride, holdCentavos) {
   return {
     rideId,
     status: ride.status,
     vehicleType: ride.vehicleType,
     estimatedFareCentavos: ride.estimatedFareCentavos,
-    commissionDisplayBps: safeCommissionDisplayBps(ride, holdCentavos),
+    commissionHoldCentavos: holdCentavos,
     pickup: {
       lat: ride.pickup.lat,
       lng: ride.pickup.lng,
       label: ride.pickup.label || null,
     },
+  };
+}
+
+function safeDriverAcceptanceView(result = {}) {
+  return {
+    rideId: result.rideId != null ? result.rideId : null,
+    status: result.status != null ? result.status : null,
+    vehicleType: result.vehicleType != null ? result.vehicleType : null,
+    estimatedFareCentavos: result.estimatedFareCentavos != null
+      ? result.estimatedFareCentavos
+      : null,
+    commissionDisplayBps: safeCommissionDisplayBps(result, result.commissionHoldCentavos),
+    pickup: result.pickup || null,
   };
 }
 
@@ -64,6 +77,7 @@ function safeDriverLifecycleView(result = {}) {
 module.exports = {
   safeRideView,
   safeAcceptanceView,
+  safeDriverAcceptanceView,
   safeCommissionDisplayBps,
   safeDriverLifecycleView,
 };
