@@ -28,7 +28,8 @@ function computeSubscriptionExtension(driverData, nowMs) {
   // Existing records may contain an epoch number, Date or Firestore Timestamp.
   // Normalize before comparing so early renewal never discards remaining days.
   const currentExpiry = toMillis(d.subscriptionExpiresAt);
-  const isActive = d.subscriptionActive === true && currentExpiry > nowMs;
+  const activeFlag = d.subscriptionActive === true || d.subscriptionStatus === 'active';
+  const isActive = activeFlag && currentExpiry > nowMs;
   const base = isActive ? currentExpiry : nowMs;
   const newExpiry = base + C.SUBSCRIPTION_DURATION_DAYS * C.DAY_MS;
 
