@@ -66,6 +66,20 @@ export async function listDisputedRides(max = DEFAULT_LIMIT) {
   return result?.rides || [];
 }
 
+// --- Minimal support queue --------------------------------------------------
+export async function listAdminSupportTickets(status = 'open', max = DEFAULT_LIMIT) {
+  const result = await call('listAdminSupportTicketsSecure', { status, limit: max });
+  return result?.tickets || [];
+}
+
+export const updateAdminSupportTicket = ({ ticketId, status, resolutionCode = null }) =>
+  call('updateAdminSupportTicketSecure', {
+    ticketId,
+    status,
+    resolutionCode,
+    idempotencyKey: idempotencyKey('support'),
+  });
+
 // --- Wallet adjustment ------------------------------------------------------
 export function adjustDriverWallet({
   driverId,
