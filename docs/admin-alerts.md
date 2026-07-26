@@ -16,9 +16,11 @@ executada automaticamente por um alerta.
 | `paymentRequests` | pagamento `manual_review` | alta | `/dashboard` |
 | `fraudCases` | caso `high` ou `critical` aberto/em análise | alta/crítica | `/antifraud` |
 | `accountDeletionRequests` | processamento `failed` | crítica | `/dashboard` |
+| `clientErrorReports` | fatal imediato ou erro repetido pelo menos 3 vezes | alta/crítica | `/dashboard` |
 
 Uma exclusão de conta apenas `blocked` por corrida/litígio ativo não é falha de
-infraestrutura e não abre alerta.
+infraestrutura e não abre alerta. Um warning ou erro client isolé ne crée pas non
+plus d’alerte administrateur.
 
 ## Deduplicação
 
@@ -31,6 +33,9 @@ sha256(sourceType + sourceId)
 Le même incident met à jour la même alerte. Une mise à jour de source qui ne
 change ni type, ni sévérité, ni raison, ni montant, ni état ne produit aucune
 nouvelle écriture.
+
+Les rapports client sont déjà regroupés par empreinte, acteur hashé et fenêtre de
+dix minutes avant d’entrer dans ce flux.
 
 Les triggers vérifient la source avant et après :
 
@@ -60,8 +65,10 @@ resolved → open
 ```
 
 Une alerte est automatiquement résolue avec `source_resolved` lorsque la source
-ne correspond plus à une condition actionnable. Si le même incident change puis
-redevient actionnable, la même alerte est rouverte et son compteur augmente.
+ne correspond plus à une condition actionnable. Si l’admin avait déjà résolu
+l’alerte, la fermeture de la source conserve la résolution admin et marque
+uniquement `sourceActive=false`. Si le même incident redevient actionnable, la
+même alerte est rouverte et son compteur augmente.
 
 ## Résolutions administratives
 
@@ -111,10 +118,13 @@ photo/document
 clé ou payload Pix
 texte de webhook fournisseur
 texte utilisateur libre
+message ou stack de crash
+componentStack
 ```
 
 L’identifiant brut d’une demande de suppression de compte n’est pas stocké dans
-`targetId`, car il peut être dérivé d’une identité.
+`targetId`, car il peut être dérivé d’une identité. Le `reportId` client est déjà
+composé d’un hash acteur, d’une empreinte et d’un bucket temporel, jamais d’un UID.
 
 ## Accès
 
@@ -149,6 +159,7 @@ admin_alert.created
 admin_alert.updated
 admin_alert.reopened
 admin_alert.resolved
+admin_alert.source_inactive
 admin_alert.listed
 admin_alert.status_changed
 admin_alert.status_replayed
@@ -183,6 +194,10 @@ admin_alert.source_sync_failed
     dashboard, jamais l’écran `/topups-pending` qui contient encore des mocks.
 12. Simuler une suppression de compte `failed` et vérifier qu’aucun UID/request ID
     brut n’apparaît dans Firestore, l’écran ou les logs.
+13. Créer un rapport client fatal et vérifier une alerte critique unique.
+14. Créer deux erreurs client identiques et vérifier l’absence d’alerte haute.
+15. Passer le compteur de cette empreinte à trois et vérifier l’alerte haute sans
+    message, stack ou UID dans `adminAlerts`.
 
 ## Déploiement
 
