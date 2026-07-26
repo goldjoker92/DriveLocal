@@ -23,13 +23,15 @@ async function seedPayment(db, id, driverId, amountCentavos) {
 }
 
 describe('paid subscription renewal application', () => {
-  it('extends an active Timestamp plan from its current expiration and applies only once', async () => {
+  it('extends a legacy active Timestamp plan and applies only once', async () => {
     const db = makeFakeFirestore();
     const currentExpiry = NOW + 12 * DAY_MS;
     await db.collection('drivers').doc('d1').set({
       serviceAreaId: 'HORIZONTE_CE_BR',
       vehicleType: 'moto',
-      subscriptionActive: true,
+      // Legacy records may carry only the status string; the backend must align
+      // with the mobile commercial-policy interpretation.
+      subscriptionActive: false,
       subscriptionStatus: 'active',
       subscriptionExpiresAt: { toMillis: () => currentExpiry },
       approvedAtMs: NOW - 40 * DAY_MS,
