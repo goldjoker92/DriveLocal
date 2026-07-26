@@ -184,13 +184,11 @@ function ticketDocumentId(uid, idempotencyKey) {
   return `st_${hash(`${uid}:${idempotencyKey}`, 28)}`;
 }
 
-async function activeActorTickets(db, uid) {
-  const snap = await db.collection(SUPPORT_TICKETS)
+function activeActorTicketsQuery(db, uid) {
+  return db.collection(SUPPORT_TICKETS)
     .where('actorUid', '==', uid)
     .where('status', 'in', ACTIVE_STATUSES)
-    .limit(MAX_OPEN_TICKETS + 1)
-    .get();
-  return snap.docs.map((docSnap) => ({ ticketId: docSnap.id, ...docSnap.data() }));
+    .limit(MAX_OPEN_TICKETS + 1);
 }
 
 async function recentActorTickets(db, uid) {
@@ -245,10 +243,9 @@ async function createSupportTicket({ db, request, context, clock }) {
     });
   }
 
-  const [rideSnapshot, paymentSnapshot, actorTickets] = await Promise.all([
+  const [rideSnapshot, paymentSnapshot] = await Promise.all([
     loadRideContext(db, uid, role, args.rideId),
     role === 'driver' ? latestDriverPayment(db, uid, definition.paymentPurpose) : null,
-    activeActorTickets(db, uid),
   ]);
   const nowMs = Number(clock.now());
   const paymentRequestId = paymentSnapshot?.paymentRequestId || null;
@@ -258,32 +255,19 @@ async function createSupportTicket({ db, request, context, clock }) {
     rideId: args.rideId,
     paymentRequestId,
   });
-  const duplicate = actorTickets.find((ticket) => (
-    ticket.issueFingerprint === fingerprint
-    && nowMs - Number(ticket.createdAtMs || 0) <= DUPLICATE_WINDOW_MS
-  ));
-  if (duplicate) {
-    logInfo(context, 'support.ticket_duplicate_reused', {
-      operation: 'create_support_ticket',
-      ticketId: duplicate.ticketId,
-      categoryCode: args.categoryCode,
-      actorRole: role,
-      hasRideContext: Boolean(args.rideId),
-      hasPaymentContext: Boolean(paymentRequestId),
-    });
-    return { ...myTicketProjection(duplicate), replay: true, duplicate: true };
-  }
-  if (actorTickets.length >= MAX_OPEN_TICKETS) {
-    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      internalMessage: 'support actor open-ticket limit reached',
-      safeMetadata: { reason: 'OPEN_TICKET_LIMIT', maxOpenTickets: MAX_OPEN_TICKETS },
-    });
-  }
-
   const ticketId = ticketDocumentId(uid, args.idempotencyKey);
   const ticketRef = db.collection(SUPPORT_TICKETS).doc(ticketId);
+
   const created = await db.runTransaction(async (tx) => {
+    // All anti-abuse and idempotency reads happen inside the same transaction so
+    // concurrent requests cannot both pass the five-open-ticket limit.
+    const activeSnap = await tx.get(activeActorTicketsQuery(db, uid));
     const existingSnap = await tx.get(ticketRef);
+    const activeTickets = activeSnap.docs.map((docSnap) => ({
+      ticketId: docSnap.id,
+      ...docSnap.data(),
+    }));
+
     if (existingSnap.exists) {
       const existing = { ticketId, ...existingSnap.data() };
       if (
@@ -295,7 +279,21 @@ async function createSupportTicket({ db, request, context, clock }) {
           internalMessage: 'support idempotency key reused for another request',
         });
       }
-      return { ticket: existing, replay: true };
+      return { ticket: existing, replay: true, duplicate: false };
+    }
+
+    const duplicate = activeTickets.find((ticket) => (
+      ticket.issueFingerprint === fingerprint
+      && nowMs - Number(ticket.createdAtMs || 0) <= DUPLICATE_WINDOW_MS
+    ));
+    if (duplicate) {
+      return { ticket: duplicate, replay: true, duplicate: true };
+    }
+    if (activeTickets.length >= MAX_OPEN_TICKETS) {
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+        internalMessage: 'support actor open-ticket limit reached',
+        safeMetadata: { reason: 'OPEN_TICKET_LIMIT', maxOpenTickets: MAX_OPEN_TICKETS },
+      });
     }
 
     const record = {
@@ -328,18 +326,27 @@ async function createSupportTicket({ db, request, context, clock }) {
       updatedAt: ts(),
     };
     tx.create(ticketRef, record);
-    return { ticket: record, replay: false };
+    return { ticket: record, replay: false, duplicate: false };
   });
 
-  logInfo(context, created.replay ? 'support.ticket_replayed' : 'support.ticket_created', {
+  const eventName = created.duplicate
+    ? 'support.ticket_duplicate_reused'
+    : created.replay
+      ? 'support.ticket_replayed'
+      : 'support.ticket_created';
+  logInfo(context, eventName, {
     operation: 'create_support_ticket',
-    ticketId,
+    ticketId: created.ticket.ticketId || ticketId,
     categoryCode: args.categoryCode,
     actorRole: role,
     hasRideContext: Boolean(args.rideId),
     hasPaymentContext: Boolean(paymentRequestId),
   });
-  return { ...myTicketProjection({ ticketId, ...created.ticket }), replay: created.replay };
+  return {
+    ...myTicketProjection(created.ticket),
+    replay: created.replay,
+    ...(created.duplicate ? { duplicate: true } : {}),
+  };
 }
 
 async function listMySupportTickets({ db, request }) {
@@ -514,6 +521,6 @@ module.exports = {
   ticketDocumentId,
   myTicketProjection,
   adminTicketProjection,
-  activeActorTickets,
+  activeActorTicketsQuery,
   recentActorTickets,
 };
