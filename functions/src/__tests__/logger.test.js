@@ -35,7 +35,7 @@ describe('logger — recursive redaction', () => {
     expect(out.pixKey).toBe(REDACTED);
     expect(out.nested.cpf).toBe(REDACTED);
     expect(out.nested.vehicleType).toBe('moto'); // safe metadata retained
-    expect(out.driverId).toBe('d1');
+    expect(out.driverId).toBe(REDACTED); // raw account identity never reaches logs
     expect(out.traceId).toBe('trace_1');
   });
   it('redacts sensitive keys inside arrays', () => {
