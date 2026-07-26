@@ -32,20 +32,37 @@ function createDb(initial = {}) {
     };
   }
 
-  function querySnapshot(collectionName, field, expected, max) {
+  function querySnapshot(collectionName, clauses, max) {
     const prefix = `${collectionName}/`;
     const docs = [...documents.entries()]
-      .filter(([path, value]) => (
-        path.startsWith(prefix)
-        && !path.slice(prefix.length).includes('/')
-        && value?.[field] === expected
-      ))
+      .filter(([path, value]) => {
+        if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) return false;
+        return clauses.every((clause) => {
+          if (clause.operator === '==') return value?.[clause.field] === clause.expected;
+          if (clause.operator === 'in') return clause.expected.includes(value?.[clause.field]);
+          return false;
+        });
+      })
       .slice(0, max)
       .map(([path, value]) => {
         const id = path.slice(prefix.length);
         return { id, ref: documentRef(collectionName, id), data: () => value };
       });
     return { docs, empty: docs.length === 0, size: docs.length };
+  }
+
+  function queryBuilder(collectionName, clauses = [], max = Infinity) {
+    return {
+      where(field, operator, expected) {
+        return queryBuilder(collectionName, [...clauses, { field, operator, expected }], max);
+      },
+      limit(nextMax) {
+        return queryBuilder(collectionName, clauses, nextMax);
+      },
+      async get() {
+        return querySnapshot(collectionName, clauses, max);
+      },
+    };
   }
 
   const tx = {
@@ -64,12 +81,7 @@ function createDb(initial = {}) {
           return documentRef(collectionName, id);
         },
         where(field, operator, expected) {
-          expect(operator).toBe('==');
-          return {
-            limit(max) {
-              return { get: async () => querySnapshot(collectionName, field, expected, max) };
-            },
-          };
+          return queryBuilder(collectionName).where(field, operator, expected);
         },
       };
     },
