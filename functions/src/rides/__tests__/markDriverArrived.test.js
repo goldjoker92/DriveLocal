@@ -44,6 +44,16 @@ function createFirestore(initialDocuments) {
   };
 }
 
+function arrivalRequest() {
+  return {
+    auth: { uid: 'driver-1' },
+    data: {
+      rideId: 'ride-1',
+      idempotencyKey: 'arrival-test-key-0001',
+    },
+  };
+}
+
 describe('markDriverArrived safe wait projection', () => {
   it('copies only server timing metadata to the winning driver offer', async () => {
     const nowMs = 1_000_000;
@@ -65,13 +75,7 @@ describe('markDriverArrived safe wait projection', () => {
 
     const result = await markDriverArrived({
       db: store.db,
-      request: {
-        auth: { uid: 'driver-1' },
-        data: {
-          rideId: 'ride-1',
-          idempotencyKey: 'arrival-test-key-0001',
-        },
-      },
+      request: arrivalRequest(),
       context: { traceId: 'trace-arrival' },
       clock: { now: () => nowMs },
     });
@@ -107,6 +111,76 @@ describe('markDriverArrived safe wait projection', () => {
       rideId: 'ride-1',
       recipientRole: 'passenger',
       status: C.NOTIFICATION_STATUS.PENDING,
+    });
+  });
+
+  it('backfills the private offer during an idempotent arrival replay', async () => {
+    const originalArrivedAtMs = 800_000;
+    const store = createFirestore({
+      [`${C.RIDE_REQUESTS}/ride-1`]: {
+        rideId: 'ride-1',
+        status: C.RIDE_STATUS.DRIVER_ARRIVED,
+        acceptedDriverId: 'driver-1',
+        passengerId: 'passenger-1',
+        driverArrivedAtMs: originalArrivedAtMs,
+      },
+      [`${C.DRIVER_OFFERS}/ride-1_driver-1`]: {
+        rideId: 'ride-1',
+        driverId: 'driver-1',
+        status: C.OFFER_STATUS.ACCEPTED,
+        driverRideStatus: C.RIDE_STATUS.DRIVER_ARRIVED,
+      },
+    });
+
+    const result = await markDriverArrived({
+      db: store.db,
+      request: arrivalRequest(),
+      context: { traceId: 'trace-replay' },
+      clock: { now: () => 1_000_000 },
+    });
+
+    expect(result.replay).toBe(true);
+    expect(result.driverArrivedAtMs).toBe(originalArrivedAtMs);
+    expect(result.passengerNoShowEligibleAtMs)
+      .toBe(originalArrivedAtMs + PASSENGER_NO_SHOW_WAIT_MS);
+    expect(store.get(C.DRIVER_OFFERS, 'ride-1_driver-1')).toMatchObject({
+      driverArrivedAtMs: originalArrivedAtMs,
+      passengerNoShowEligibleAtMs: originalArrivedAtMs + PASSENGER_NO_SHOW_WAIT_MS,
+    });
+    expect(store.get(C.NOTIFICATION_EVENTS, 'ride-1_ride_arrived_passenger')).toBeUndefined();
+  });
+
+  it('starts a fresh full wait when a legacy arrived ride lacks its timestamp', async () => {
+    const nowMs = 1_000_000;
+    const store = createFirestore({
+      [`${C.RIDE_REQUESTS}/ride-1`]: {
+        rideId: 'ride-1',
+        status: C.RIDE_STATUS.DRIVER_ARRIVED,
+        acceptedDriverId: 'driver-1',
+        passengerId: 'passenger-1',
+      },
+      [`${C.DRIVER_OFFERS}/ride-1_driver-1`]: {
+        rideId: 'ride-1',
+        driverId: 'driver-1',
+        status: C.OFFER_STATUS.ACCEPTED,
+      },
+    });
+
+    const result = await markDriverArrived({
+      db: store.db,
+      request: arrivalRequest(),
+      context: { traceId: 'trace-repair' },
+      clock: { now: () => nowMs },
+    });
+
+    expect(result).toMatchObject({
+      replay: true,
+      driverArrivedAtMs: nowMs,
+      passengerNoShowEligibleAtMs: nowMs + PASSENGER_NO_SHOW_WAIT_MS,
+    });
+    expect(store.get(C.RIDE_REQUESTS, 'ride-1')).toMatchObject({
+      driverArrivedAtMs: nowMs,
+      passengerNoShowEligibleAtMs: nowMs + PASSENGER_NO_SHOW_WAIT_MS,
     });
   });
 });
