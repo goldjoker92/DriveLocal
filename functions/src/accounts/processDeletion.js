@@ -114,19 +114,51 @@ async function pseudonymizeFinancialRecords(db, uid, anonymousSubjectId) {
   return counts;
 }
 
-async function pseudonymizeSecurityRecords(db, uid, anonymousSubjectId) {
+async function pseudonymizeRiskProfile(db, role, uid, anonymousSubjectId) {
+  // riskEngine.profileId() is `${actorType}_${actorId}`. The document id itself
+  // therefore contains the Firebase uid and must be migrated, not merely updated.
+  const oldRef = db.collection(riskC.COLLECTIONS.RISK_PROFILES).doc(`${role}_${uid}`);
+  const oldSnapshot = await oldRef.get();
+  if (!oldSnapshot.exists) return false;
+
+  const before = oldSnapshot.data() || {};
+  const newRef = db.collection(riskC.COLLECTIONS.RISK_PROFILES)
+    .doc(`${role}_${anonymousSubjectId}`);
+  const batch = db.batch();
+  batch.set(newRef, {
+    actorType: role,
+    actorId: anonymousSubjectId,
+    totalSignals: Number(before.totalSignals || 0),
+    openSignals: Number(before.openSignals || 0),
+    lastReasonCode: before.lastReasonCode || null,
+    lastSeverity: before.lastSeverity || null,
+    lastSignalAtMs: Number(before.lastSignalAtMs || 0) || null,
+    lastSignalAt: before.lastSignalAt || null,
+    accountDeleted: true,
+    accountDeletionPolicyVersion: POLICY_VERSION,
+    accountDeletedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  batch.delete(oldRef);
+  await batch.commit();
+  return true;
+}
+
+async function pseudonymizeSecurityRecords(db, role, uid, anonymousSubjectId) {
   const timestamp = serverTimestamp();
   const counts = {};
+
+  // Actual fields are defined by auditLog.js, riskEngine.js and reconciliation.js:
+  // audit records use actorUid/targetId; risk events and cases use actorId/sourceId;
+  // financial alerts use sourceId. Querying exact equality avoids touching ride ids.
   const specs = [
     [infraC.AUDIT_LOGS, 'actorUid'],
-    [riskC.COLLECTIONS.RISK_EVENTS, 'actorUid'],
-    [riskC.COLLECTIONS.RISK_EVENTS, 'driverId'],
-    [riskC.COLLECTIONS.RISK_EVENTS, 'passengerId'],
-    [riskC.COLLECTIONS.FRAUD_CASES, 'actorUid'],
-    [riskC.COLLECTIONS.FRAUD_CASES, 'driverId'],
-    [riskC.COLLECTIONS.FRAUD_CASES, 'passengerId'],
-    [riskC.COLLECTIONS.FINANCIAL_ALERTS, 'driverId'],
-    [riskC.COLLECTIONS.FINANCIAL_ALERTS, 'passengerId'],
+    [infraC.AUDIT_LOGS, 'targetId'],
+    [riskC.COLLECTIONS.RISK_EVENTS, 'actorId'],
+    [riskC.COLLECTIONS.RISK_EVENTS, 'sourceId'],
+    [riskC.COLLECTIONS.FRAUD_CASES, 'actorId'],
+    [riskC.COLLECTIONS.FRAUD_CASES, 'sourceId'],
+    [riskC.COLLECTIONS.FINANCIAL_ALERTS, 'sourceId'],
   ];
 
   for (const [collectionName, field] of specs) {
@@ -139,6 +171,12 @@ async function pseudonymizeSecurityRecords(db, uid, anonymousSubjectId) {
       updatedAt: timestamp,
     }));
   }
+  counts.riskProfileMigrated = await pseudonymizeRiskProfile(
+    db,
+    role,
+    uid,
+    anonymousSubjectId
+  );
   return counts;
 }
 
@@ -246,17 +284,17 @@ async function processAccountDeletion({ db, requestRef, requestData, context, cl
     const counts = {
       rides: await anonymizeRides(db, role, uid, anonymousSubjectId),
       financial: await pseudonymizeFinancialRecords(db, uid, anonymousSubjectId),
-      security: await pseudonymizeSecurityRecords(db, uid, anonymousSubjectId),
+      security: await pseudonymizeSecurityRecords(db, role, uid, anonymousSubjectId),
       operationalDeleted: await deleteOperationalRecords(db, uid),
     };
 
     // Direct profile/private data is deleted only after dependent records are
-    // detached from the Firebase uid.
+    // detached from the Firebase uid. The role-prefixed risk profile was migrated
+    // in pseudonymizeSecurityRecords(), so it is not deleted here by a wrong id.
     const profileBatch = db.batch();
     profileBatch.delete(db.collection(C.DRIVERS).doc(uid));
     profileBatch.delete(db.collection(C.PASSENGERS).doc(uid));
     profileBatch.delete(db.collection(C.PRIVATE_DRIVER_DATA).doc(uid));
-    profileBatch.delete(db.collection(riskC.COLLECTIONS.RISK_PROFILES).doc(uid));
     await profileBatch.commit();
 
     counts.storagePrefixes = await deleteStorageForSubject(uid);
@@ -316,6 +354,8 @@ module.exports = {
   mutateMatches,
   anonymizeRides,
   pseudonymizeFinancialRecords,
+  pseudonymizeRiskProfile,
+  pseudonymizeSecurityRecords,
   deleteOperationalRecords,
   runtimeUpdate,
 };
