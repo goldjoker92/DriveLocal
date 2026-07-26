@@ -15,7 +15,6 @@ function supportSource(route) {
   if (path.includes('active-ride')) return 'active_ride';
   if (path.includes('driver-accepted')) return 'driver_accepted';
   if (path.includes('pix-payment')) return 'pix_payment';
-  if (path.includes('driver-home')) return 'driver_home';
   return null;
 }
 
