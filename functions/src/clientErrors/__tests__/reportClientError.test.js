@@ -85,7 +85,9 @@ describe('reportClientError', () => {
     });
 
     expect(collection).toHaveBeenCalledWith('clientErrorReports');
-    expect(doc).toHaveBeenCalledWith(expect.stringMatching(/^cer_actorhash123_/));
+    // Document IDs accept only hexadecimal hash characters. The mocked
+    // `actorhash123` is therefore deliberately normalized to `aca123`.
+    expect(doc).toHaveBeenCalledWith(expect.stringMatching(/^cer_aca123_/));
     expect(tx.create).toHaveBeenCalledTimes(1);
     expect(tx.set).not.toHaveBeenCalled();
 
