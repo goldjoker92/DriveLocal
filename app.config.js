@@ -1,10 +1,25 @@
 const appJson = require('./app.json');
+const { loadFirebaseBuildConfig } = require('./scripts/build/firebaseBuildConfig');
 
 const expoConfig = appJson.expo ?? {};
+const packageName = expoConfig.android?.package || 'com.drivelocal.app';
+const firebaseBuild = loadFirebaseBuildConfig({
+  env: process.env,
+  cwd: __dirname,
+  packageName,
+  fallbackPath: expoConfig.android?.googleServicesFile || './google-services.json',
+});
+const {
+  appEnvironment,
+  easBuildActive,
+  expectedProjectId,
+  firebaseConfig,
+  firebaseProjectId,
+  googleServicesFile,
+  source: firebaseConfigSource,
+} = firebaseBuild;
+
 const googleMapsAndroidApiKey = String(process.env.GOOGLE_MAPS_ANDROID_API_KEY || '').trim();
-const easBuildActive = ['1', 'true'].includes(
-  String(process.env.EAS_BUILD || '').trim().toLowerCase()
-);
 
 if (!googleMapsAndroidApiKey) {
   const message =
@@ -17,12 +32,23 @@ if (!googleMapsAndroidApiKey) {
   console.warn(message);
 }
 
-const normalizedAppEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
-// Only an explicit development value may enable development behavior. Missing,
-// misspelled or unknown environments are treated as production (fail closed).
-const appEnvironment = ['dev', 'development'].includes(normalizedAppEnv)
-  ? 'development'
-  : 'production';
+if (!easBuildActive && firebaseProjectId !== expectedProjectId) {
+  // Local commands intentionally remain usable with the checked-in DEV file even
+  // when APP_ENV is absent and UI behavior fails closed to production. EAS builds
+  // can never use this exception; scripts/build/firebaseBuildConfig.js blocks it.
+  console.warn(
+    `[app.config] Local Firebase fallback selected ${firebaseProjectId} while `
+    + `APP_ENV resolves to ${appEnvironment}. EAS builds remain strict.`
+  );
+}
+
+// Safe build trace: project identifiers are public Firebase metadata. Never log
+// API keys, app IDs, file contents or resolved secret-file paths.
+console.info(
+  `[app.config] Firebase project=${firebaseProjectId} environment=${appEnvironment} `
+  + `source=${firebaseConfigSource} easBuild=${easBuildActive}`
+);
+
 const devRideSimulatorEnabled = appEnvironment === 'development'
   && process.env.ENABLE_DEV_RIDE_SIMULATOR === '1';
 
@@ -101,11 +127,9 @@ module.exports = ({ config }) => ({
 
   android: {
     ...(expoConfig.android ?? {}),
-
-    googleServicesFile:
-      process.env.GOOGLE_SERVICES_JSON ??
-      expoConfig.android?.googleServicesFile ??
-      './google-services.json',
+    // The exact same file is parsed above to configure the Firebase JS SDK.
+    // This prevents native Firebase and JS Firebase from targeting different projects.
+    googleServicesFile,
   },
 
   extra: {
@@ -113,5 +137,10 @@ module.exports = ({ config }) => ({
     googleMapsAndroidConfigured: Boolean(googleMapsAndroidApiKey),
     appEnvironment,
     devRideSimulatorEnabled,
+    easBuildActive,
+    firebaseBuildValidated: true,
+    firebaseConfig,
+    firebaseProjectId,
+    firebaseConfigSource,
   },
 });
