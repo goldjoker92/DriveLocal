@@ -75,17 +75,20 @@ export function calculateOfferCommission({
   const cap = Math.max(0, fare - minimumNet);
   const commissionCentavos = Math.max(0, Math.min(rawCommission, cap));
 
-  // Driver-facing copy intentionally shows only the policy percentage (12% moto
-  // or 15% car). Any centavo adjustment caused by the minimum-net guarantee stays
-  // in backend/ledger/admin reconciliation and is never converted to a custom
-  // percentage in the driver UI.
+  // Driver-facing copy is deliberately restricted to 0%, 12% or 15%:
+  //   - 0% when the real commission is zero, including a minimum-net cap;
+  //   - otherwise the standard vehicle policy rate.
+  // Centavo adjustments never become custom percentages in the driver UI.
   const commissionPercentLabel = Number.isInteger(standardPercent)
     ? `${standardPercent}%`
     : `${standardPercent.toFixed(1).replace('.', ',')}%`;
+  const displayedCommissionPercentLabel = commissionCentavos === 0
+    ? '0%'
+    : commissionPercentLabel;
 
   return {
     commissionCentavos,
-    commissionPercentLabel,
+    commissionPercentLabel: displayedCommissionPercentLabel,
     minimumGuaranteeApplied: commissionCentavos < rawCommission,
   };
 }
