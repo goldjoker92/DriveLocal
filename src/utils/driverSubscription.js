@@ -1,28 +1,24 @@
 // Driver subscription helpers (DriveLocal V1).
 //
 // Pure functions over an already-loaded drivers/{uid} object. No Firestore here.
-//
-// Business rule: the EFFECTIVE subscription status is calculated at read time
-// from subscriptionExpiresAt and `now`. Do NOT rely on a cron to flip
-// active -> expired. A stored subscriptionStatus may exist, but treat it as a
-// cache/display value only — this function is the source of truth.
+// The backend remains authoritative; this module only keeps every mobile screen
+// aligned with the same commercial-policy projection.
 
 import {
   SUBSCRIPTION_MONTHLY_CENTAVOS,
   SUBSCRIPTION_PERIOD_DAYS,
-  NON_FOUNDER_FREE_RIDES,
 } from '../constants/pricingConfig';
+import {
+  DAY_MS,
+  SUBSCRIPTION_COVERAGE_SOURCE,
+  founderSubscriptionUntilMs,
+  resolveCommercialPolicy,
+  toMillis as policyToMillis,
+} from './commercialPolicy';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-// Normalizes a Firestore Timestamp / Date / epoch-ms to epoch-ms (0 if absent).
+// Compatibility export used by existing screens/tests.
 export function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value === 'number') return value;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  if (value instanceof Date) return value.getTime();
-  return 0;
+  return policyToMillis(value);
 }
 
 // Monthly subscription price (centavos) for a vehicle type. 0 when unknown.
@@ -30,116 +26,105 @@ export function getSubscriptionMonthlyCentavos(vehicleType) {
   return SUBSCRIPTION_MONTHLY_CENTAVOS[vehicleType] || 0;
 }
 
-// Effective subscription status, computed from stored dates and `now`.
-//
-// Returns { status, expiresAtMs, freeUntilMs } where status is one of:
-//   'free'     -> inside the free launch window (founder or 60-day free window)
-//   'active'   -> a paid subscription is still valid (now < subscriptionExpiresAt)
-//   'expired'  -> had a subscription/free window that has now lapsed
-//   'required' -> never activated, must subscribe before further rides
+// Effective paid/free subscription status, computed from stored dates and `now`.
+// The five-ride grace is an ELIGIBILITY source, not a fake active subscription,
+// therefore it is exposed by getSubscriptionEligibility instead of this status.
 export function getEffectiveSubscriptionStatus(driver, now = Date.now()) {
   const d = driver || {};
-  const nowMs = toMillis(now) || now;
+  const nowMs = toMillis(now) || Number(now) || Date.now();
+  const policy = resolveCommercialPolicy(d, nowMs);
+  const freeUntilMs = founderSubscriptionUntilMs(d);
 
-  // Free launch window (founder subscription-free window or the 60-day free window).
-  const freeUntilMs = toMillis(d.subscriptionFreeUntil || d.founderFreeUntil);
-  if (freeUntilMs > 0 && nowMs < freeUntilMs) {
+  if (policy.founderFreeActive) {
     return { status: 'free', expiresAtMs: 0, freeUntilMs };
   }
 
-  // Paid subscription window.
   const expiresAtMs = toMillis(d.subscriptionExpiresAt);
-  if (expiresAtMs > 0) {
-    return nowMs < expiresAtMs
-      ? { status: 'active', expiresAtMs, freeUntilMs }
-      : { status: 'expired', expiresAtMs, freeUntilMs };
+  if (policy.paidSubscriptionActive) {
+    return { status: 'active', expiresAtMs, freeUntilMs };
   }
-
-  // A free window existed and lapsed -> expired; otherwise never set -> required.
-  if (freeUntilMs > 0) {
-    return { status: 'expired', expiresAtMs: 0, freeUntilMs };
+  if (expiresAtMs > 0 || freeUntilMs > 0) {
+    return { status: 'expired', expiresAtMs, freeUntilMs };
   }
   return { status: 'required', expiresAtMs: 0, freeUntilMs: 0 };
 }
 
-// True when the driver currently has valid subscription coverage (free or paid).
+// True only for a real founder-free or paid subscription window. A non-founder
+// five-ride grace permits offers but is deliberately not labeled as subscription.
 export function hasActiveSubscription(driver, now = Date.now()) {
-  const s = getEffectiveSubscriptionStatus(driver, now);
-  return s.status === 'free' || s.status === 'active';
+  const policy = resolveCommercialPolicy(driver, now);
+  return policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.FOUNDER_FREE_WINDOW
+    || policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.PAID_SUBSCRIPTION;
 }
 
-// Computes the new expiration (epoch-ms) when a subscription is renewed.
-//
 // Business rule: newExpiration = max(now, currentSubscriptionExpiresAt) + 30 days.
 // This never makes the driver lose remaining paid days when they renew early.
 export function computeRenewedExpirationMs(driver, now = Date.now()) {
-  const nowMs = toMillis(now) || now;
+  const nowMs = toMillis(now) || Number(now) || Date.now();
   const currentMs = toMillis(driver && driver.subscriptionExpiresAt);
   const base = Math.max(nowMs, currentMs);
   return base + SUBSCRIPTION_PERIOD_DAYS * DAY_MS;
 }
 
-// True when the driver holds founder status (tolerates both field names used
-// across the codebase: mocks use isFounder, approveDriver writes founderEligible).
-function isFounderDriver(driver) {
-  const d = driver || {};
-  return d.isFounder === true || d.founderEligible === true;
-}
-
-// SINGLE SOURCE OF TRUTH for the subscription/trial gate (governance D6).
-// Independent from the commission-free period (which is decided separately by
-// ridePricing.isCommissionFree). Answers: is an active subscription REQUIRED
-// before this driver may receive/accept the next ride?
+// SINGLE SOURCE OF TRUTH for mobile subscription/trial presentation.
 //
 // Rules:
-//   - Founder: covered while inside the free window (or with a paid subscription);
-//     after it, a paid subscription is required. Founders do NOT use the 5-ride
-//     grace, so freeRidesRemaining is always 0 for them.
-//   - Non-founder: the first NON_FOUNDER_FREE_RIDES (5) finalized rides need no
-//     subscription; from the 6th onward a free/active subscription is required.
-//
-// Returns { required, covered, reason, freeRidesRemaining, subscriptionStatus }.
+//   - founders #1..#100: subscription-free for 60 days from approval;
+//   - drivers #101+: up to five completed rides without subscription, only inside
+//     that same 60-day window;
+//   - after day 60: paid subscription required for everyone;
+//   - after ride five but before day 60: subscription required, commission still 0%.
 export function getSubscriptionEligibility(driver, now = Date.now()) {
-  const d = driver || {};
-  const sub = getEffectiveSubscriptionStatus(d, now);
-  const covered = sub.status === 'free' || sub.status === 'active';
+  const policy = resolveCommercialPolicy(driver, now);
+  const sub = getEffectiveSubscriptionStatus(driver, now);
 
-  if (isFounderDriver(d)) {
-    return {
-      required: !covered,
-      covered,
-      reason: covered ? 'FOUNDER_COVERED' : 'FOUNDER_SUBSCRIPTION_REQUIRED',
-      freeRidesRemaining: 0,
-      subscriptionStatus: sub.status,
-    };
-  }
-
-  const used = Number(d.freeRideCountUsed) || 0;
-  const freeRidesRemaining = Math.max(0, NON_FOUNDER_FREE_RIDES - used);
-
-  if (covered) {
+  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.FOUNDER_FREE_WINDOW) {
     return {
       required: false,
       covered: true,
-      reason: 'SUBSCRIPTION_ACTIVE',
-      freeRidesRemaining,
-      subscriptionStatus: sub.status,
+      reason: 'FOUNDER_COVERED',
+      freeRidesRemaining: 0,
+      freeRideCountUsed: policy.freeRideCountUsed,
+      subscriptionStatus: 'free',
+      coverageSource: policy.subscriptionCoverageSource,
+      policyVersion: policy.policyVersion,
     };
   }
-  if (freeRidesRemaining > 0) {
+
+  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.NON_FOUNDER_RIDE_GRACE) {
     return {
       required: false,
       covered: false,
       reason: 'FREE_RIDES_REMAINING',
-      freeRidesRemaining,
+      freeRidesRemaining: policy.freeRidesRemaining,
+      freeRideCountUsed: policy.freeRideCountUsed,
       subscriptionStatus: sub.status,
+      coverageSource: policy.subscriptionCoverageSource,
+      policyVersion: policy.policyVersion,
     };
   }
+
+  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.PAID_SUBSCRIPTION) {
+    return {
+      required: false,
+      covered: true,
+      reason: 'SUBSCRIPTION_ACTIVE',
+      freeRidesRemaining: policy.freeRidesRemaining,
+      freeRideCountUsed: policy.freeRideCountUsed,
+      subscriptionStatus: 'active',
+      coverageSource: policy.subscriptionCoverageSource,
+      policyVersion: policy.policyVersion,
+    };
+  }
+
   return {
     required: true,
     covered: false,
-    reason: 'SUBSCRIPTION_REQUIRED',
+    reason: policy.founder ? 'FOUNDER_SUBSCRIPTION_REQUIRED' : 'SUBSCRIPTION_REQUIRED',
     freeRidesRemaining: 0,
+    freeRideCountUsed: policy.freeRideCountUsed,
     subscriptionStatus: sub.status,
+    coverageSource: policy.subscriptionCoverageSource,
+    policyVersion: policy.policyVersion,
   };
 }
