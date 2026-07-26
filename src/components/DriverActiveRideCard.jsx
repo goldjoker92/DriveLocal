@@ -110,6 +110,9 @@ export default function DriverActiveRideCard({ offer, status = null }) {
   if (!card.visible) return null;
 
   const initial = card.passengerFirstName.slice(0, 1).toUpperCase();
+  const fareLabel = card.fareCentavos == null
+    ? 'Carregando valor…'
+    : formatBRL(card.fareCentavos);
 
   return (
     <AppCard style={styles.card}>
@@ -117,7 +120,7 @@ export default function DriverActiveRideCard({ offer, status = null }) {
         <Text style={styles.eyebrow}>CORRIDA ATIVA</Text>
         <View style={styles.liveBadge}>
           <View style={styles.liveDot} />
-          <Text style={styles.liveText}>EM ANDAMENTO</Text>
+          <Text style={styles.liveText}>ATIVA</Text>
         </View>
       </View>
 
@@ -150,7 +153,7 @@ export default function DriverActiveRideCard({ offer, status = null }) {
 
       <View style={styles.priceRow}>
         <Text style={styles.priceLabel}>Valor da corrida</Text>
-        <Text style={styles.priceValue}>{formatBRL(card.fareCentavos)}</Text>
+        <Text style={styles.priceValue}>{fareLabel}</Text>
       </View>
     </AppCard>
   );
@@ -289,5 +292,7 @@ const styles = StyleSheet.create({
     fontFamily,
     color: colors.text,
     ...typography.h3,
+    flexShrink: 1,
+    textAlign: 'right',
   },
 });
