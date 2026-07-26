@@ -7,8 +7,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
-  limit,
   onSnapshot,
 } from 'firebase/firestore';
 import { functions, db } from '../config/firebase';
@@ -170,17 +168,17 @@ export function listenToRide(rideId, onData, onError) {
 }
 
 export function listenToRideQuickMessages(rideId, onData, onError) {
-  const messagesQuery = query(
-    collection(db, 'rideRequests', rideId, 'quickMessages'),
-    orderBy('createdAtMs', 'desc'),
-    limit(QUICK_MESSAGE_HISTORY_LIMIT),
-  );
+  // The backend owns exactly six reusable slots, so sorting locally avoids a new
+  // Firestore index and keeps this listener compatible with existing test mocks.
+  const messagesRef = collection(db, 'rideRequests', rideId, 'quickMessages');
   logRideClientEvent('ride.quick_messages.listener_started', { rideId });
-  return onSnapshot(messagesQuery, (snap) => {
+  return onSnapshot(messagesRef, (snap) => {
     const nowMs = Date.now();
     const messages = snap.docs
       .map((messageSnap) => ({ messageId: messageSnap.id, ...messageSnap.data() }))
-      .filter((message) => !message.expiresAtMs || Number(message.expiresAtMs) > nowMs);
+      .filter((message) => !message.expiresAtMs || Number(message.expiresAtMs) > nowMs)
+      .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0))
+      .slice(0, QUICK_MESSAGE_HISTORY_LIMIT);
     logRideClientEvent('ride.quick_messages.snapshot_received', {
       rideId,
       messageCount: messages.length,
