@@ -9,8 +9,8 @@ describe('block 16 rebuilt active ride screen contract', () => {
   it('keeps the operational hierarchy on the secured active ride screen', () => {
     const screen = source('src/app/(driver)/active-ride.jsx');
 
-    expect(screen).toContain("listenToMyOffer(");
-    expect(screen).toContain('rideId\n    );');
+    expect(screen).toContain('listenToMyOffer(');
+    expect(screen).toMatch(/listenToMyOffer\([\s\S]*?rideId\s*\n\s*\);/);
     expect(screen).toContain('<DriverActiveRideStageCard');
     expect(screen).toContain('<DriverActiveRideNavigationCard');
     expect(screen).toContain('<PixPaymentSummary');
@@ -47,10 +47,10 @@ describe('block 16 rebuilt active ride screen contract', () => {
   it('does not duplicate primary lifecycle buttons inside the scroll view', () => {
     const screen = source('src/app/(driver)/active-ride.jsx');
 
-    expect(screen).not.toContain('title={busy === \'arrive\'');
-    expect(screen).not.toContain('title={busy === \'start\'');
-    expect(screen).not.toContain('title={busy === \'finish\'');
-    expect(screen).not.toContain('title={busy === \'confirm\'');
+    expect(screen).not.toContain("title={busy === 'arrive'");
+    expect(screen).not.toContain("title={busy === 'start'");
+    expect(screen).not.toContain("title={busy === 'finish'");
+    expect(screen).not.toContain("title={busy === 'confirm'");
     expect(screen).toContain('title="Problema no pagamento"');
     expect(screen).toContain('title="Cancelar corrida"');
   });
@@ -74,9 +74,10 @@ describe('block 16 rebuilt active ride screen contract', () => {
     const screen = source('src/app/(driver)/active-ride.jsx');
     const stage = source('src/components/DriverActiveRideStageCard.jsx');
 
-    expect(screen).toContain("? 'stopped'");
-    expect(screen).toContain("? 'checking'");
-    expect(screen).toContain(": 'attention'");
+    expect(screen).toContain("const trackingState = !TRACKED_STATUSES.has(status)");
+    expect(screen).toMatch(/!TRACKED_STATUSES\.has\(status\)\s*\?\s*'stopped'/);
+    expect(screen).toMatch(/trackingStatus === 'checking'\s*\?\s*'checking'/);
+    expect(screen).toContain(": 'attention';");
     expect(stage).toContain("stopped: 'GPS ENCERRADO'");
     expect(stage).toContain("attention: 'GPS REQUER ATENÇÃO'");
   });
