@@ -11,6 +11,9 @@ import {
 } from '../constants/rideCancellation';
 import { logRideClientEvent } from '../utils/clientRideLog';
 import { getDriverTrackingSession } from './driverLocationTracking';
+import { chooseCancellationReason } from './rideCancellationPrompt';
+
+const LEGACY_CANCELLATION_CODES = new Set(['motorista_cancelou', 'passageiro_cancelou']);
 
 function makeIdempotencyKey(prefix) {
   const rand = Math.random().toString(36).slice(2, 12);
@@ -119,16 +122,27 @@ function cancellationRole(reasonCode, explicitRole) {
   return null;
 }
 
+function cancellationSelectionDismissedError() {
+  const error = new Error('A corrida foi mantida.');
+  error.code = 'CANCELLATION_SELECTION_DISMISSED';
+  return error;
+}
+
 export const markDriverArrived = (rideId) => callRide('markDriverArrivedSecure', rideId);
 export const startRide = (rideId) => callRide('startRideSecure', rideId);
 export const finishRide = (rideId) => callRide('finishRideSecure', rideId);
 export const markPassengerPixSent = (rideId) => callRide('markPassengerPixSentSecure', rideId);
 export const confirmDriverPixReceived = (rideId) => callRide('confirmDriverPixReceivedSecure', rideId);
-export const cancelRide = (rideId, reasonCode, role = null) => {
+export async function cancelRide(rideId, reasonCode, role = null) {
   const actorRole = cancellationRole(reasonCode, role);
-  const normalizedReasonCode = normalizeCancellationReason(reasonCode, actorRole);
+  let selectedReasonCode = reasonCode;
+  if (LEGACY_CANCELLATION_CODES.has(String(reasonCode || ''))) {
+    selectedReasonCode = await chooseCancellationReason(actorRole);
+    if (!selectedReasonCode) throw cancellationSelectionDismissedError();
+  }
+  const normalizedReasonCode = normalizeCancellationReason(selectedReasonCode, actorRole);
   return callRide('cancelRideSecure', rideId, { reasonCode: normalizedReasonCode });
-};
+}
 export const reportPassengerNotFound = (rideId) => cancelRide(rideId, 'passenger_no_show', 'driver');
 export const reportPaymentIssue = (rideId, reasonCode) => callRide('reportRidePaymentIssueSecure', rideId, { reasonCode });
 
