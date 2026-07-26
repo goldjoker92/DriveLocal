@@ -1,3 +1,24 @@
+jest.mock('firebase-admin', () => ({
+  firestore: {
+    FieldValue: {
+      serverTimestamp: () => 'SERVER_TIMESTAMP',
+    },
+  },
+}));
+
+jest.mock('../../logging/logger', () => ({
+  logInfo: jest.fn(),
+  logWarning: jest.fn(),
+}));
+
+jest.mock('../../audit/auditLog', () => ({
+  writeAuditLog: jest.fn(),
+}));
+
+jest.mock('../../risk/riskEngine', () => ({
+  bestEffortRiskSignal: jest.fn(),
+}));
+
 const { assertCancellationAllowed, cancellationActor } = require('../cancelRide');
 const { PASSENGER_NO_SHOW_WAIT_MS } = require('../cancellationPolicy');
 
