@@ -87,6 +87,9 @@ export function accountDeletionErrorMessage(error) {
   if (reason === 'ACTIVE_RIDE_PRESENT') {
     return 'Finalize ou cancele sua corrida ativa antes de excluir a conta.';
   }
+  if (reason === 'OPEN_DISPUTE_PRESENT') {
+    return 'Resolva a disputa de pagamento aberta antes de excluir a conta.';
+  }
   if (reason === 'RECENT_LOGIN_REQUIRED' || code === 'auth/requires-recent-login') {
     return 'Entre novamente na conta e repita a solicitação.';
   }
