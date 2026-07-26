@@ -12,8 +12,8 @@ describe('account deletion integration contracts', () => {
 
     expect(index).toContain('requestAccountDeletionSecure');
     expect(index).toContain('processAccountDeletionRequest');
-    expect(bindings).toContain("onDocumentCreated");
-    expect(bindings).toContain('accountDeletionRequests');
+    expect(bindings).toContain('onDocumentCreated');
+    expect(bindings).toContain('ACCOUNT_DELETION_REQUESTS');
   });
 
   it('deletes operational PII and both private/public driver storage prefixes', () => {
@@ -25,7 +25,7 @@ describe('account deletion integration contracts', () => {
     expect(processor).toContain("['clientErrorReports', 'actorUid']");
     expect(processor).toContain('`drivers/${uid}/`');
     expect(processor).toContain('`publicDriverPhotos/${uid}/`');
-    expect(processor).toContain('privateDriverData');
+    expect(processor).toContain('C.PRIVATE_DRIVER_DATA');
   });
 
   it('keeps financial records only after pseudonymization and secret removal', () => {
