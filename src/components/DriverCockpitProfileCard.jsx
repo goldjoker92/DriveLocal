@@ -24,6 +24,12 @@ function photoStatusCopy(status, hasPublicPhoto) {
   return { label: 'Foto necessária', tone: 'neutral' };
 }
 
+function approvalStatusCopy(driver, founder, founderNumber) {
+  if (driver?.verificationStatus !== 'approved') return 'Cadastro ainda não aprovado';
+  if (founder) return `Motorista aprovado • Fundador ${founderNumber || ''}`.trim();
+  return 'Motorista aprovado';
+}
+
 export default function DriverCockpitProfileCard({ driver, online, onPhotoPress }) {
   const displayName = useMemo(() => driverCockpitDisplayName(driver), [
     driver?.displayName,
@@ -82,9 +88,7 @@ export default function DriverCockpitProfileCard({ driver, online, onPhotoPress 
     return () => { active = false; };
   }, [approvedPath]);
 
-  const approvalCopy = founder
-    ? `Motorista aprovado • Fundador ${founderNumber || ''}`.trim()
-    : 'Motorista aprovado';
+  const approvalCopy = approvalStatusCopy(driver, founder, founderNumber);
 
   return (
     <AppCard style={styles.card}>
