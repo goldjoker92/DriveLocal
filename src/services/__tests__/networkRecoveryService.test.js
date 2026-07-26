@@ -8,14 +8,13 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 const mockGetIdToken = jest.fn(async () => 'TOKEN');
-jest.mock('../../config/firebase', () => ({
-  auth: {
-    currentUser: {
-      uid: 'user-1',
-      getIdToken: mockGetIdToken,
-    },
+const mockAuth = {
+  currentUser: {
+    uid: 'user-1',
+    getIdToken: mockGetIdToken,
   },
-}));
+};
+jest.mock('../../config/firebase', () => ({ auth: mockAuth }));
 
 const {
   __resetNetworkRecoveryForTests,
@@ -38,6 +37,7 @@ function businessError() {
 describe('network recovery service', () => {
   beforeEach(async () => {
     jest.restoreAllMocks();
+    mockAuth.currentUser = { uid: 'user-1', getIdToken: mockGetIdToken };
     mockStorage.clear();
     await __resetNetworkRecoveryForTests();
   });
@@ -96,6 +96,33 @@ describe('network recovery service', () => {
       execute: async (key) => {
         keys.push(key);
         return { status: 'in_progress' };
+      },
+    });
+
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
+  it('never shares an uncertain key between two authenticated accounts', async () => {
+    const keys = [];
+    await expect(runRecoverableAction({
+      actionName: 'confirmDriverPixReceivedSecure',
+      actionKey: 'ride-shared:default',
+      idempotencyPrefix: 'lc',
+      execute: async (key) => {
+        keys.push(key);
+        throw unavailableError();
+      },
+    })).rejects.toMatchObject({ code: 'functions/unavailable' });
+
+    mockAuth.currentUser = { uid: 'user-2', getIdToken: mockGetIdToken };
+    await runRecoverableAction({
+      actionName: 'confirmDriverPixReceivedSecure',
+      actionKey: 'ride-shared:default',
+      idempotencyPrefix: 'lc',
+      execute: async (key) => {
+        keys.push(key);
+        return { status: 'completed' };
       },
     });
 
