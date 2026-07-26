@@ -70,6 +70,15 @@ exports.updateAdminSupportTicketSecure = supportCallables.updateAdminSupportTick
 exports.pseudonymizeSupportTicketsOnAccountDeletion =
   supportCallables.pseudonymizeSupportTicketsOnAccountDeletion;
 
+const adminAlertCallables = require('./adminAlerts/callables');
+exports.listAdminAlertsSecure = adminAlertCallables.listAdminAlertsSecure;
+exports.updateAdminAlertSecure = adminAlertCallables.updateAdminAlertSecure;
+exports.supportTicketAdminAlertTrigger = adminAlertCallables.supportTicketAdminAlertTrigger;
+exports.rideDisputeAdminAlertTrigger = adminAlertCallables.rideDisputeAdminAlertTrigger;
+exports.paymentReviewAdminAlertTrigger = adminAlertCallables.paymentReviewAdminAlertTrigger;
+exports.riskCaseAdminAlertTrigger = adminAlertCallables.riskCaseAdminAlertTrigger;
+exports.accountDeletionAdminAlertTrigger = adminAlertCallables.accountDeletionAdminAlertTrigger;
+
 const walletCallables = require('./wallet/callables');
 exports.adjustDriverWalletSecure = walletCallables.adjustDriverWalletSecure;
 
