@@ -14,6 +14,7 @@ const {
   sendRideQuickMessage,
   idempotencyHash,
   safeRecentOperations,
+  nextSequence,
 } = require('../sendQuickMessage');
 
 function createReadOnlyDb(ride) {
@@ -62,6 +63,16 @@ describe('quick message idempotency receipts', () => {
     expect(out).toHaveLength(10);
     expect(out[0].sequence).toBe(3);
     expect(out[9].sequence).toBe(12);
+  });
+
+  it('increments valid sequences and repairs corrupted values', () => {
+    expect(nextSequence(0)).toBe(1);
+    expect(nextSequence(6)).toBe(7);
+    expect(nextSequence('9')).toBe(10);
+    expect(nextSequence(Number.NaN)).toBe(1);
+    expect(nextSequence(3.5)).toBe(1);
+    expect(nextSequence(-1)).toBe(1);
+    expect(nextSequence(Number.MAX_SAFE_INTEGER)).toBe(1);
   });
 
   it('replays the exact same action from its original sequence', async () => {
