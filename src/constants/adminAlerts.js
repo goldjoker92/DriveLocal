@@ -19,6 +19,8 @@ export const ADMIN_ALERT_TITLES = Object.freeze({
   risk_case_high: 'Caso antifraude de alta prioridade',
   risk_case_critical: 'Caso antifraude crítico',
   account_deletion_failed: 'Falha na exclusão de conta',
+  client_error_fatal: 'Falha crítica no aplicativo',
+  client_error_repeated: 'Erro repetido no aplicativo',
 });
 
 export const ADMIN_ALERT_ACTIONS = Object.freeze({
@@ -27,6 +29,7 @@ export const ADMIN_ALERT_ACTIONS = Object.freeze({
   review_payment: 'ABRIR PAINEL',
   review_risk_case: 'ABRIR ANTIFRAUDE',
   review_account_deletion: 'ABRIR PAINEL',
+  review_client_error: 'ABRIR PAINEL',
 });
 
 export const ADMIN_ALERT_RESOLUTIONS = Object.freeze({
