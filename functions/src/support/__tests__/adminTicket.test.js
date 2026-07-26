@@ -13,9 +13,9 @@ jest.mock('../../logging/logger', () => ({
   shortHash: jest.fn(),
 }));
 
-const writeAuditLog = jest.fn(async () => 'audit-1');
+const mockWriteAuditLog = jest.fn(async () => 'audit-1');
 jest.mock('../../audit/auditLog', () => ({
-  writeAuditLog: (...args) => writeAuditLog(...args),
+  writeAuditLog: (...args) => mockWriteAuditLog(...args),
 }));
 
 const { updateAdminSupportTicket } = require('../tickets');
@@ -67,7 +67,7 @@ function createDb() {
 }
 
 describe('admin support ticket transition', () => {
-  beforeEach(() => writeAuditLog.mockClear());
+  beforeEach(() => mockWriteAuditLog.mockClear());
 
   it('resolves a ticket with a predefined resolution and audit', async () => {
     const store = createDb();
@@ -98,7 +98,7 @@ describe('admin support ticket transition', () => {
       adminUpdatedAtMs: 2_000_000,
       updatedAtMs: 2_000_000,
     });
-    expect(writeAuditLog).toHaveBeenCalledWith(
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(
       store.db,
       expect.objectContaining({
         actorUid: 'admin-1',
