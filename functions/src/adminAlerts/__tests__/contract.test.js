@@ -31,8 +31,10 @@ describe('admin alert integration contracts', () => {
 
     expect(alerts).toContain("return `aa_${hash(`${sourceType}:${sourceId}`)}`");
     expect(alerts).toContain('sourceRefHash: shortHash(`${sourceType}:${sourceId}`)');
-    expect(alerts).not.toContain('subjectUid:');
-    expect(alerts).not.toContain('actorUid:');
+    expect(alerts).not.toContain('sourceActorUid');
+    expect(alerts).not.toContain('sourceSubjectUid');
+    expect(alerts).not.toContain('sourceDriverId');
+    expect(alerts).not.toContain('sourcePassengerId');
     expect(policy).not.toContain('passengerId:');
     expect(policy).not.toContain('acceptedDriverId:');
     expect(policy).not.toContain('phone:');
