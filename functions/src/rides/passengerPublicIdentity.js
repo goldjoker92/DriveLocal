@@ -6,6 +6,7 @@
 const DEFAULT_FIRST_NAME = 'Passageiro';
 const MAX_FIRST_NAME_LENGTH = 40;
 const PUBLIC_PHOTO_VERSION_PATTERN = /^[A-Za-z0-9_-]{12,80}$/;
+const PUBLIC_PHOTO_PATH_PATTERN = /^publicPassengerPhotos\/[A-Za-z0-9_-]{12,80}\.jpg$/;
 
 function normalizeText(value) {
   if (value == null) return '';
@@ -31,6 +32,10 @@ function passengerFirstName(passenger) {
   return fromFullName || DEFAULT_FIRST_NAME;
 }
 
+function isPublicPassengerPhotoPath(path) {
+  return typeof path === 'string' && PUBLIC_PHOTO_PATH_PATTERN.test(path);
+}
+
 // The public object id is opaque and globally unique. It never contains the
 // passenger Firebase uid, email, phone or another account-derived identifier.
 function approvedPassengerPhotoPath(passenger) {
@@ -40,7 +45,7 @@ function approvedPassengerPhotoPath(passenger) {
   if (!verified || !PUBLIC_PHOTO_VERSION_PATTERN.test(version)) return null;
 
   const expected = `publicPassengerPhotos/${version}.jpg`;
-  return path === expected ? expected : null;
+  return path === expected && isPublicPassengerPhotoPath(path) ? expected : null;
 }
 
 function buildAcceptedPassengerPublic(passenger) {
@@ -56,6 +61,7 @@ module.exports = {
   DEFAULT_FIRST_NAME,
   MAX_FIRST_NAME_LENGTH,
   passengerFirstName,
+  isPublicPassengerPhotoPath,
   approvedPassengerPhotoPath,
   buildAcceptedPassengerPublic,
 };
