@@ -73,7 +73,10 @@ async function pseudonymizeMatches(db, collectionName, field, uid, updateFactory
     collectionName,
     field,
     value: uid,
-    mutate: (batch, docSnap) => batch.update(docSnap.ref, runtimeUpdate(updateFactory(docSnap.data() || {}))),
+    mutate: (batch, docSnap) => batch.update(
+      docSnap.ref,
+      runtimeUpdate(updateFactory(docSnap.data() || {}))
+    ),
   });
 }
 
@@ -101,9 +104,10 @@ async function pseudonymizeFinancialRecords(db, uid, anonymousSubjectId) {
       collectionName,
       'driverId',
       uid,
-      () => buildFinancialPseudonymizationUpdate({
+      (record) => buildFinancialPseudonymizationUpdate({
         anonymousSubjectId,
         deleteField: deleteField(),
+        record,
       })
     );
   }
@@ -207,24 +211,28 @@ async function processAccountDeletion({ db, requestRef, requestData, context, cl
 
   const activeRide = await findNonFinalRide(db, role, uid);
   if (activeRide) {
+    const activeStatus = activeRide.data()?.status;
+    const blockReason = activeStatus === 'disputed'
+      ? 'OPEN_DISPUTE_PRESENT'
+      : 'ACTIVE_RIDE_PRESENT';
     await requestRef.set({
       status: 'blocked',
-      failureCode: 'ACTIVE_RIDE_PRESENT',
+      failureCode: blockReason,
       updatedAt: serverTimestamp(),
     }, { merge: true });
     const profileCollection = role === 'driver' ? C.DRIVERS : C.PASSENGERS;
     await db.collection(profileCollection).doc(uid).set({
       accountDeletionStatus: 'blocked',
-      accountDeletionBlockReason: 'ACTIVE_RIDE_PRESENT',
+      accountDeletionBlockReason: blockReason,
       updatedAt: serverTimestamp(),
     }, { merge: true });
     logWarning(context, 'account_deletion.processing_blocked', {
       requestRef: requestRef.id,
       role,
       actorHash,
-      reason: 'ACTIVE_RIDE_PRESENT',
+      reason: blockReason,
     });
-    return { status: 'blocked', reason: 'ACTIVE_RIDE_PRESENT' };
+    return { status: 'blocked', reason: blockReason };
   }
 
   try {
@@ -266,7 +274,11 @@ async function processAccountDeletion({ db, requestRef, requestData, context, cl
       completedAt: serverTimestamp(),
       authStatus,
       counts,
-      retainedRecordClasses: ['ride_transaction_minimized', 'financial_ledger_pseudonymized', 'security_audit_pseudonymized'],
+      retainedRecordClasses: [
+        'ride_transaction_minimized',
+        'financial_ledger_pseudonymized',
+        'security_audit_pseudonymized',
+      ],
     });
 
     // The request document is the only temporary uid -> anonymous-id mapping.
