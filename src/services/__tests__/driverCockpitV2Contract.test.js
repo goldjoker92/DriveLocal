@@ -36,6 +36,15 @@ describe('compact real driver cockpit contract', () => {
     expect(summary).not.toContain('Math.random');
   });
 
+  it('lets the commercial policy override stale wallet presentation state', () => {
+    const dashboard = source('src/components/DriverCockpitDashboardCard.jsx');
+
+    expect(dashboard).toContain("commission?.mode === 'free'");
+    expect(dashboard).toContain("summary.walletState === 'blocked'");
+    expect(dashboard).toContain('nenhuma recarga necessária');
+    expect(dashboard).toContain('recarga necessária');
+  });
+
   it('keeps display name and photo loading free of email and private-path fallbacks', () => {
     const profile = source('src/components/DriverCockpitProfileCard.jsx');
     const summary = source('src/utils/driverCockpitSummary.js');
@@ -61,6 +70,8 @@ describe('compact real driver cockpit contract', () => {
     expect(policy).toContain("COCKPIT_TIME_ZONE = 'America/Fortaleza'");
     expect(policy).toContain('todayRideCount');
     expect(policy).toContain('weekRideCount');
+    expect(policy).toContain('eventKey > priorKey');
+    expect(policy).toContain('An older event must');
   });
 
   it('keeps cockpit aggregates server-owned in Firestore rules', () => {
