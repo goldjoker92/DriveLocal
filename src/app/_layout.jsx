@@ -13,6 +13,7 @@ import { StatusBar } from 'expo-status-bar';
 import AppErrorBoundary from '../components/AppErrorBoundary';
 import DriverDeviceHealthGuard from '../components/DriverDeviceHealthGuard';
 import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
+import RideQuickMessagesGuard from '../components/RideQuickMessagesGuard';
 import AccountPrivacyShortcut from '../components/AccountPrivacyShortcut';
 import { colors } from '../constants/colors';
 import { useRideNotifications } from '../hooks/useRideNotifications';
@@ -45,6 +46,8 @@ export default function RootLayout() {
             <DriverDeviceHealthGuard route={pathname} />
             {/* Visible only after the driver has announced arrival at the pickup. */}
             <DriverPassengerWaitGuard route={pathname} />
+            {/* Server-catalogued messages only; no free text or contact exposure. */}
+            <RideQuickMessagesGuard route={pathname} />
             {/* Temporary compact entry until the full cockpit redesign lands. */}
             <AccountPrivacyShortcut route={pathname} />
             <Stack
