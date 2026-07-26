@@ -24,7 +24,7 @@ const SENSITIVE_KEY_PATTERNS = [
   'cpf', 'cnpj', 'cnh', 'rg', 'identity',
   'phone', 'telefone', 'whatsapp',
   'email', 'pixkey', 'pix_key', 'address', 'endereco',
-  'rawpayload', 'providerpayload',
+  'rawpayload', 'providerpayload', 'internalmessage',
 ];
 
 // Exact identity keys. They cannot use substring matching because safe correlation
@@ -111,8 +111,8 @@ function logInfo(context, eventName, extra) {
 function logWarning(context, eventName, extra) {
   flogger.warn(eventName, buildEntry(context, eventName, 'WARNING', extra));
 }
-// Errors are logged server-side only; a sanitized internal message may be
-// included, but stack traces are never returned to the client.
+// Error logs retain stable code/retryability/trace metadata. internalMessage is
+// always redacted because free text can accidentally contain identifiers or secrets.
 function logError(context, eventName, extra) {
   flogger.error(eventName, buildEntry(context, eventName, 'ERROR', extra));
 }
