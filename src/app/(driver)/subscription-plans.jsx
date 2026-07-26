@@ -64,10 +64,13 @@ export default function SubscriptionPlans() {
   const [paymentStatus, setPaymentStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [clockNowMs, setClockNowMs] = useState(Date.now());
-  const [error, setError] = useState('');
+  const [driverError, setDriverError] = useState('');
+  const [snapshotError, setSnapshotError] = useState('');
+  const [paymentError, setPaymentError] = useState('');
 
   const loadPaymentSnapshot = useCallback(async () => {
     setSnapshotStatus('loading');
+    setSnapshotError('');
     try {
       const snapshot = await loadDriverSubscriptionSnapshot();
       const restored = snapshot?.payment || null;
@@ -77,7 +80,10 @@ export default function SubscriptionPlans() {
       setSnapshotStatus('ready');
     } catch (loadError) {
       setSnapshotStatus('failed');
-      setError(loadError?.message || 'Não foi possível restaurar um pagamento de assinatura em andamento.');
+      setSnapshotError(
+        loadError?.message
+        || 'Não foi possível restaurar um pagamento de assinatura em andamento.'
+      );
     }
   }, []);
 
@@ -85,7 +91,7 @@ export default function SubscriptionPlans() {
     if (!uid) {
       setDriverLoading(false);
       setSnapshotStatus('failed');
-      setError('Entre novamente para consultar sua assinatura.');
+      setDriverError('Entre novamente para consultar sua assinatura.');
       return undefined;
     }
 
@@ -95,12 +101,15 @@ export default function SubscriptionPlans() {
         setDriver(next);
         setServerConfirmed(metadata.confirmed === true);
         setDriverLoading(false);
-        if (next) setError('');
+        if (next) setDriverError('');
       },
       (listenerError) => {
         setDriverLoading(false);
         setServerConfirmed(false);
-        setError(listenerError?.message || 'Não foi possível acompanhar sua assinatura em tempo real.');
+        setDriverError(
+          listenerError?.message
+          || 'Não foi possível acompanhar sua assinatura em tempo real.'
+        );
       }
     );
     loadPaymentSnapshot();
@@ -128,15 +137,24 @@ export default function SubscriptionPlans() {
     payment?.localPaymentId
     && RESTORABLE_PAYMENT_STATUSES.has(paymentStatus || payment.status)
   );
+  const activationPending = paymentStatus === 'paid' && !view.paidSubscriptionActive;
   const paymentContextReady = serverConfirmed && snapshotStatus === 'ready';
-  const paymentDisabled = busy || !paymentContextReady || !view.paymentEnabled;
+  const paymentDisabled = busy
+    || activationPending
+    || !paymentContextReady
+    || !view.paymentEnabled;
+  const visibleErrors = [...new Set([
+    driverError,
+    snapshotError,
+    paymentError,
+  ].filter(Boolean))];
 
   async function onPaySubscription() {
     // A server-confirmed driver snapshot and a successful pending-payment lookup are
     // required before creating a new order. The backend repeats all policy checks.
     if (paymentDisabled || pendingPayment) return;
     setBusy(true);
-    setError('');
+    setPaymentError('');
     console.info('[DRIVER_SUBSCRIPTION] payment.create_started', {
       scope: 'driver_subscription',
       event: 'payment.create_started',
@@ -157,15 +175,18 @@ export default function SubscriptionPlans() {
         hasPaymentId: Boolean(result?.localPaymentId),
         atMs: Date.now(),
       });
-    } catch (paymentError) {
+    } catch (paymentFailure) {
       console.warn('[DRIVER_SUBSCRIPTION] payment.create_failed', {
         scope: 'driver_subscription',
         event: 'payment.create_failed',
         mode: view.mode,
-        reason: paymentError?.code || paymentError?.message || 'unknown',
+        reason: paymentFailure?.code || paymentFailure?.message || 'unknown',
         atMs: Date.now(),
       });
-      setError(paymentError?.message || 'Não foi possível gerar o Pix. Tente novamente.');
+      setPaymentError(
+        paymentFailure?.message
+        || 'Não foi possível gerar o Pix. Tente novamente.'
+      );
     } finally {
       setBusy(false);
     }
@@ -195,15 +216,23 @@ export default function SubscriptionPlans() {
     if (driverLoading) return 'Carregando sua assinatura…';
     if (!serverConfirmed) return 'Confirmando seus dados com o servidor…';
     if (snapshotStatus === 'loading') return 'Verificando pagamentos em andamento…';
-    if (snapshotStatus === 'failed') return 'Verifique pagamentos em andamento antes de gerar um novo Pix.';
-    if (view.paymentReason === 'vehicle_unknown') return 'Informe um tipo de veículo válido para continuar.';
+    if (snapshotStatus === 'failed') {
+      return 'Verifique pagamentos em andamento antes de gerar um novo Pix.';
+    }
+    if (activationPending) {
+      return 'Pagamento confirmado. Atualizando a ativação da assinatura…';
+    }
+    if (view.paymentReason === 'vehicle_unknown') {
+      return 'Informe um tipo de veículo válido para continuar.';
+    }
     if (view.mode === DRIVER_SUBSCRIPTION_MODE.FOUNDER_FREE) {
       return 'Nenhum pagamento é necessário durante sua assinatura gratuita.';
     }
     if (view.mode === DRIVER_SUBSCRIPTION_MODE.RIDE_GRACE) {
       return 'O pagamento será liberado após a quinta corrida ou no fim da janela inicial.';
     }
-    return view.renewalDetail || 'O plano é ativado somente após a confirmação do Mercado Pago.';
+    return view.renewalDetail
+      || 'O plano é ativado somente após a confirmação do Mercado Pago.';
   }
 
   return (
@@ -246,7 +275,9 @@ export default function SubscriptionPlans() {
                   <Text style={styles.metricLabel}>Seu plano mensal</Text>
                   <Text style={styles.metricValue}>{view.currentPlan?.priceLabel || '—'}</Text>
                   <Text style={styles.metricDetail}>
-                    {view.currentPlan ? `${view.currentPlan.periodDays} dias` : 'Veículo não informado'}
+                    {view.currentPlan
+                      ? `${view.currentPlan.periodDays} dias`
+                      : 'Veículo não informado'}
                   </Text>
                 </View>
               </View>
@@ -303,13 +334,17 @@ export default function SubscriptionPlans() {
           </>
         )}
 
-        {error ? (
-          <AppCard style={styles.errorCard}>
-            <Text style={styles.errorText}>{error}</Text>
+        {visibleErrors.map((message) => (
+          <AppCard key={message} style={styles.errorCard}>
+            <Text style={styles.errorText}>{message}</Text>
           </AppCard>
-        ) : null}
+        ))}
 
-        <AppButton title="Voltar ao painel" variant="ghost" onPress={() => router.replace('/driver-home')} />
+        <AppButton
+          title="Voltar ao painel"
+          variant="ghost"
+          onPress={() => router.replace('/driver-home')}
+        />
       </ScrollView>
     </SafeAreaView>
   );
