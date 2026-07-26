@@ -33,7 +33,9 @@ const cancellationNotificationStatusTrigger = onDocumentUpdated(
   {
     document: `${C.NOTIFICATION_EVENTS}/{notificationId}`,
     region: REGION,
-    retry: false,
+    // A transient Firestore failure must not leave the ride permanently marked as
+    // pending. The conditional transaction makes repeated delivery safe.
+    retry: true,
   },
   async (event) => {
     const before = event.data?.before?.data() || {};
