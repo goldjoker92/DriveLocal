@@ -59,7 +59,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.card,
   },
   headerRow: {
     flexDirection: 'row',
