@@ -81,7 +81,7 @@ export default function DriverCockpitDashboardCard({
       </View>
 
       <View style={styles.commercialGrid}>
-        <CommercialMetric label="Comissão" value={`${commission.label}`} />
+        <CommercialMetric label="Comissão" value={commission.label} />
         <CommercialMetric
           label="Saldo DriveLocal"
           value={formatBRL(summary.walletAvailableCentavos)}
@@ -91,6 +91,11 @@ export default function DriverCockpitDashboardCard({
       </View>
 
       <View style={styles.footerRow}>
+        {!summary.statsVersion ? (
+          <Text style={styles.syncNote}>
+            Os totais de hoje e da semana começam a atualizar após a próxima corrida concluída.
+          </Text>
+        ) : null}
         <Text style={styles.totalText}>
           {`${summary.totalCompletedRideCount} corridas concluídas no total`}
         </Text>
@@ -110,9 +115,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.8,
   },
-  metricsRow: { flexDirection: 'row', gap: spacing.sm },
+  metricsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   metric: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: 120,
     borderRadius: radius.md,
     backgroundColor: colors.primaryTint,
     padding: spacing.md,
@@ -121,10 +127,11 @@ const styles = StyleSheet.create({
   metricValue: { fontFamily, color: colors.primary, ...typography.h2 },
   metricLabel: { fontFamily, color: colors.textMuted, ...typography.small },
   divider: { height: 1, backgroundColor: colors.border },
-  commercialGrid: { flexDirection: 'row', gap: spacing.sm },
+  commercialGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   commercialMetric: {
-    flex: 1,
-    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: 92,
+    minWidth: 92,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -135,5 +142,6 @@ const styles = StyleSheet.create({
   commercialValue: { fontFamily, color: colors.text, ...typography.bodyBold },
   commercialDetail: { fontFamily, color: colors.textMuted, fontSize: 10, lineHeight: 14 },
   footerRow: { gap: spacing.xs },
+  syncNote: { fontFamily, color: colors.textMuted, ...typography.caption },
   totalText: { fontFamily, color: colors.textMuted, ...typography.small },
 });
