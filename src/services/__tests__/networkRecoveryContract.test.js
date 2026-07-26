@@ -21,7 +21,7 @@ describe('network recovery integration contracts', () => {
     expect(service).toContain('There is deliberately no automatic action replay');
     expect(service).not.toContain('setInterval(');
     expect(guard).toContain("AppState.addEventListener('change'");
-    expect(guard).toContain("probeConnectivity({ force });");
+    expect(guard).toContain('probeConnectivity({ force });');
     expect(guard).not.toContain('startDriverWorkSession');
     expect(guard).not.toContain('startDriverOnlineTracking');
   });
@@ -36,17 +36,27 @@ describe('network recovery integration contracts', () => {
     expect(rides).toContain('clearRideRecoveryHint({ uid, rideId: ride.rideId })');
   });
 
-  it('uses the passenger recovery router and Firestore cache only as presentation fallback', () => {
+  it('uses role-specific recovery and keeps payment disputes recoverable', () => {
     const policy = source('src/services/networkRecoveryPolicy.js');
+    const searching = source('src/app/(passenger)/searching.jsx');
+    expect(policy).toContain("pathname: '/searching'");
+    expect(policy).toContain("pathname: '/active-ride'");
+    expect(policy).toContain('A dispute stops live GPS but remains recoverable');
+    expect(searching).toContain("['awaiting_payment', 'payment_marked_sent', 'disputed']");
+    expect(searching).toContain("pathname: '/pix-payment'");
+  });
+
+  it('uses Firestore cache only as presentation fallback and preserves driver lease safety', () => {
     const passengerService = source('src/services/passengerService.js');
     const firestoreRecovery = source('src/services/firestoreRecovery.js');
     const driverHome = source('src/app/(driver)/driver-home.jsx');
-    expect(policy).toContain("pathname: '/searching'");
-    expect(policy).toContain("pathname: '/active-ride'");
+    const driverLayout = source('src/app/(driver)/_layout.jsx');
     expect(passengerService).toContain('getDocumentWithCacheFallback');
     expect(firestoreRecovery).toContain('getDocFromCache');
     expect(firestoreRecovery).toContain('Cached documents may restore presentation');
     expect(driverHome).toContain('if (data?.activeRideId)');
     expect(driverHome).toContain("pathname: '/active-ride'");
+    expect(driverLayout).toContain('A temporary network error alone does not immediately end work');
+    expect(driverLayout).toContain('seven-minute server');
   });
 });
