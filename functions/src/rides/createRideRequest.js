@@ -104,7 +104,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
   if (!acq.acquired) {
     if (acq.state === OPERATION_STATES.COMPLETED) return acq.resultReference || null;
     throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT, {
-      internalMessage: `ride creation already in progress for key "${idempotencyKey}"`,
+      internalMessage: 'ride creation already in progress for this idempotency operation',
     });
   }
 
@@ -120,7 +120,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         reasonCode: 'ACCOUNT_DELETION_PENDING',
       });
       throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-        internalMessage: `passenger ${passengerId} requested account deletion`,
+        internalMessage: 'authenticated passenger requested account deletion',
         safeMetadata: { reason: 'ACCOUNT_DELETION_PENDING' },
       });
     }
@@ -133,7 +133,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         reasonCode: eligibility.reasonCode,
       });
       throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-        internalMessage: `passenger ${passengerId} cannot request a ride: ${eligibility.reasonCode}`,
+        internalMessage: `passenger account cannot request a ride: ${eligibility.reasonCode}`,
         safeMetadata: {
           reason: eligibility.reasonCode,
           restrictionUntilMs: eligibility.restrictionUntilMs,
@@ -147,7 +147,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       const activeStatus = activeSnap.exists ? (activeSnap.data() || {}).status : null;
       if (activeStatus && C.NON_FINAL_RIDE_STATUSES.includes(activeStatus)) {
         throw new AppError(ERROR_CODES.RIDE_IN_PROGRESS, {
-          internalMessage: `passenger ${passengerId} already has ride ${activeRideId} (${activeStatus})`,
+          internalMessage: `passenger account already has ride ${activeRideId} (${activeStatus})`,
         });
       }
     }
