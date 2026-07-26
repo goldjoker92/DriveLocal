@@ -5,7 +5,11 @@
 const admin = require('firebase-admin');
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { createLoggerContext, logInfo, logWarning } = require('../logging/logger');
-const { buildAcceptedPassengerPublic, DEFAULT_FIRST_NAME } = require('./passengerPublicIdentity');
+const {
+  buildAcceptedPassengerPublic,
+  DEFAULT_FIRST_NAME,
+  isPublicPassengerPhotoPath,
+} = require('./passengerPublicIdentity');
 const C = require('./constants');
 
 const REGION = 'southamerica-east1';
@@ -16,8 +20,8 @@ function closedProjection(value) {
   const keys = Object.keys(value).sort();
   if (keys.join('|') !== 'firstName|photoStoragePath|photoVerified') return null;
   if (typeof value.firstName !== 'string' || !value.firstName.trim()) return null;
-  if (value.photoStoragePath !== null && typeof value.photoStoragePath !== 'string') return null;
   if (typeof value.photoVerified !== 'boolean') return null;
+  if (value.photoStoragePath !== null && !isPublicPassengerPhotoPath(value.photoStoragePath)) return null;
   if (value.photoVerified !== Boolean(value.photoStoragePath)) return null;
   return {
     firstName: value.firstName,
