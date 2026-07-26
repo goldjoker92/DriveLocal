@@ -36,7 +36,9 @@ describe('block 15 permanent active ride card contract', () => {
     expect(layout).toContain('restore_listener.succeeded');
     expect(layout).toContain('restore_listener.failed');
     expect(layout).toContain('offer.rideId !== restoredRideId');
-    expect(layout).toContain('restoredRideId\n    );');
+    // Formatting is not part of the contract: verify that the listener receives
+    // restoredRideId as its final ride filter regardless of indentation.
+    expect(layout).toMatch(/restoredRideId\s*\n\s*\);/);
     expect(recovery).toContain('A dispute stops live GPS but remains recoverable');
     expect(recovery).not.toContain("'disputed',");
   });
