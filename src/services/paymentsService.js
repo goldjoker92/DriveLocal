@@ -4,7 +4,7 @@
 // derives prices, and never writes money/wallet/subscription fields directly.
 //
 // All amounts are integer centavos. The backend is authoritative for prices,
-// promotions, and application of the payment.
+// promotions, custom wallet bounds, and application of the payment.
 
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
@@ -27,14 +27,15 @@ export async function requestSubscriptionPix() {
   return res.data;
 }
 
-// Requests a real Pix charge to top up the Saldo DriveLocal. `amountCentavos`
-// must be a server-approved pilot amount (1000/2000/3000/5000); the backend
-// rejects anything else.
-export async function requestWalletTopupPix(amountCentavos) {
+// Requests a real Pix charge to top up the Saldo DriveLocal. Presets are checked
+// against the server allowlist; explicit custom values are checked against the
+// authoritative R$ 10..R$ 200 range.
+export async function requestWalletTopupPix(amountCentavos, { customAmount = false } = {}) {
   const call = httpsCallable(functions, 'createDriverPixPayment');
   const res = await call({
     purpose: 'wallet_topup',
     amountCentavos,
+    customAmount: customAmount === true,
     idempotencyKey: makeIdempotencyKey('wallet_topup'),
   });
   return res.data;
