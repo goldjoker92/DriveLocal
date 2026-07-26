@@ -277,7 +277,11 @@ export default function DriverLayout() {
             offer,
             offer.driverRideStatus
           ).visible;
-          setActiveOffer(cardVisible ? offer : null);
+          if (!cardVisible) {
+            setActiveOffer(null);
+            return;
+          }
+          setActiveOffer(offer);
 
           if (restoredRideId) {
             console.log('[DRIVER_ACTIVE_RIDE] restore_listener.succeeded', {
