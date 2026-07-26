@@ -1,5 +1,6 @@
 const appJson = require('./app.json');
 const { loadFirebaseBuildConfig } = require('./scripts/build/firebaseBuildConfig');
+const { loadPublicPolicyConfig } = require('./scripts/build/publicPolicyConfig');
 
 const expoConfig = appJson.expo ?? {};
 const packageName = expoConfig.android?.package || 'com.drivelocal.app';
@@ -18,6 +19,11 @@ const {
   googleServicesFile,
   source: firebaseConfigSource,
 } = firebaseBuild;
+const publicPolicy = loadPublicPolicyConfig({
+  env: process.env,
+  appEnvironment,
+  easBuildActive,
+});
 
 const googleMapsAndroidApiKey = String(process.env.GOOGLE_MAPS_ANDROID_API_KEY || '').trim();
 
@@ -42,11 +48,21 @@ if (!easBuildActive && firebaseProjectId !== expectedProjectId) {
   );
 }
 
-// Safe build trace: project identifiers are public Firebase metadata. Never log
-// API keys, app IDs, file contents or resolved secret-file paths.
+if (!publicPolicy.configured) {
+  // Missing public pages are allowed only outside production EAS. Never print the
+  // supplied URLs themselves; configuration state is enough for build diagnostics.
+  console.warn(
+    `[app.config] Public policy links incomplete missing=${publicPolicy.missing.join('|') || 'none'} `
+    + `invalid=${publicPolicy.invalid.join('|') || 'none'}`
+  );
+}
+
+// Safe build trace: project identifiers and boolean configuration states only.
+// Never log API keys, app IDs, policy URLs, file contents or secret-file paths.
 console.info(
   `[app.config] Firebase project=${firebaseProjectId} environment=${appEnvironment} `
-  + `source=${firebaseConfigSource} easBuild=${easBuildActive}`
+  + `source=${firebaseConfigSource} easBuild=${easBuildActive} `
+  + `publicPolicyConfigured=${publicPolicy.configured}`
 );
 
 const devRideSimulatorEnabled = appEnvironment === 'development'
@@ -142,5 +158,7 @@ module.exports = ({ config }) => ({
     firebaseConfig,
     firebaseProjectId,
     firebaseConfigSource,
+    publicPolicyConfigured: publicPolicy.configured,
+    publicPolicyLinks: publicPolicy.links,
   },
 });
