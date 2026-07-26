@@ -105,7 +105,9 @@ function descriptorForPayment(data = {}) {
     actionCode: 'review_payment',
     targetRoute: '/topups-pending',
     targetId: data.paymentRequestId || null,
-    reasonCode: data.manualReviewReason || data.reviewReasonCode || 'MANUAL_REVIEW',
+    // Only stable machine codes are allowed here. Provider descriptions and raw
+    // webhook text are intentionally excluded from the alert record.
+    reasonCode: data.reviewReasonCode || data.cancellationReason || 'MANUAL_REVIEW',
     amountCentavos: normalizedAmount(data.amountCentavos),
   };
 }
