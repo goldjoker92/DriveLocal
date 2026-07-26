@@ -11,6 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import AppErrorBoundary from '../components/AppErrorBoundary';
+import NetworkRecoveryGuard from '../components/NetworkRecoveryGuard';
 import DriverDeviceHealthGuard from '../components/DriverDeviceHealthGuard';
 import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
 import RideQuickMessagesGuard from '../components/RideQuickMessagesGuard';
@@ -43,6 +44,8 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <StatusBar style="dark" />
           <View style={{ flex: 1, backgroundColor: colors.background }}>
+            {/* Never replays actions automatically; restores only an existing ride. */}
+            <NetworkRecoveryGuard route={pathname} />
             {/* Silent when healthy; visible only on operational driver routes. */}
             <DriverDeviceHealthGuard route={pathname} />
             {/* Visible only after the driver has announced arrival at the pickup. */}
