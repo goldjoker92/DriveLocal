@@ -128,4 +128,65 @@ describe('syncAdminAlert', () => {
       sourceActive: true,
     });
   });
+
+  it('marks an admin-resolved source inactive without replacing the admin resolution', async () => {
+    const store = createDb();
+    const clock = { now: jest.fn()
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(2_000)
+      .mockReturnValueOnce(3_000) };
+    const args = {
+      db: store.db,
+      sourceType: SOURCE_TYPE.RIDE_DISPUTE,
+      sourceId: 'ride-admin-resolved',
+      context: { traceId: 'trace-admin-resolved' },
+      clock,
+    };
+
+    await syncAdminAlert({
+      ...args,
+      sourceData: {
+        rideId: 'ride-admin-resolved',
+        status: 'disputed',
+        paymentAmountCentavos: 2200,
+      },
+    });
+    const alertId = alertDocumentId(SOURCE_TYPE.RIDE_DISPUTE, 'ride-admin-resolved');
+    const path = `adminAlerts/${alertId}`;
+    store.documents.set(path, {
+      ...store.documents.get(path),
+      status: STATUS.RESOLVED,
+      resolutionCode: 'action_completed',
+      resolvedBy: 'admin',
+      sourceActive: true,
+    });
+
+    const sourceClosed = await syncAdminAlert({
+      ...args,
+      sourceData: { rideId: 'ride-admin-resolved', status: 'completed' },
+    });
+    expect(sourceClosed.action).toBe('source_inactive');
+    expect(store.documents.get(path)).toMatchObject({
+      status: STATUS.RESOLVED,
+      resolutionCode: 'action_completed',
+      resolvedBy: 'admin',
+      sourceActive: false,
+    });
+
+    const reopened = await syncAdminAlert({
+      ...args,
+      sourceData: {
+        rideId: 'ride-admin-resolved',
+        status: 'disputed',
+        paymentAmountCentavos: 2200,
+      },
+    });
+    expect(reopened.action).toBe('reopened');
+    expect(store.documents.get(path)).toMatchObject({
+      status: STATUS.OPEN,
+      resolutionCode: null,
+      resolvedBy: null,
+      sourceActive: true,
+    });
+  });
 });
