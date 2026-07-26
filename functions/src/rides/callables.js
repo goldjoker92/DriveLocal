@@ -18,6 +18,7 @@ const { cancelRide } = require('./cancelRide');
 const { normalizedCancellationRequest } = require('./cancellationCompatibility');
 const { sendRideQuickMessage } = require('./sendQuickMessage');
 const lifecycle = require('./lifecycle');
+const { safeDriverLifecycleView } = require('./safeViews');
 const { resolveRideDispute } = require('./disputeResolution');
 const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
 const C = require('./constants');
@@ -75,6 +76,14 @@ async function finishRideWithPixMigration({ db, request, context, clock }) {
   return lifecycle.finishRide({ db, request, context, clock });
 }
 
+// The internal lifecycle returns exact capture values for ledger/audit tests. The
+// public driver callable deliberately strips those values before crossing the
+// trust boundary to the mobile application.
+async function confirmDriverPixReceivedPublic(args) {
+  const result = await lifecycle.confirmDriverPixReceived(args);
+  return safeDriverLifecycleView(result);
+}
+
 const ROUTING_PROVIDER_API_KEY = defineSecret('ROUTING_PROVIDER_API_KEY');
 
 const createRideRequestSecureFn = onCall(
@@ -112,7 +121,7 @@ module.exports = {
   startRideSecure: bindLifecycle('startRideSecure', lifecycle.startRide),
   finishRideSecure: bindLifecycle('finishRideSecure', finishRideWithPixMigration),
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
-  confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
+  confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', confirmDriverPixReceivedPublic),
   cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRideWithCompatibility),
   sendRideQuickMessageSecure: bindLifecycle('sendRideQuickMessageSecure', sendRideQuickMessage),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
@@ -120,4 +129,5 @@ module.exports = {
   getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),
   listAdminDisputedRidesSecure: bindLifecycle('listAdminDisputedRidesSecure', listAdminDisputedRides),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
+  confirmDriverPixReceivedPublic,
 };
