@@ -13,6 +13,7 @@ const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
 const { createRideRequestSecure } = require('./createRideRequest');
 const { acceptDriverOfferSecure } = require('./acceptOffer');
 const { declineDriverOfferSecure } = require('./declineOffer');
+const { cancelRide } = require('./cancelRide');
 const lifecycle = require('./lifecycle');
 const { resolveRideDispute } = require('./disputeResolution');
 const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
@@ -100,7 +101,7 @@ module.exports = {
   finishRideSecure: bindLifecycle('finishRideSecure', finishRideWithPixMigration),
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
   confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
-  cancelRideSecure: bindLifecycle('cancelRideSecure', lifecycle.cancelRide),
+  cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRide),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
   getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),
