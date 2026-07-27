@@ -157,7 +157,7 @@ export default function AdminBusinessPulse() {
       signals.push({
         icon: '🏁',
         title: 'Corridas estão chegando ao fim',
-        detail: `${number(completed)} concluída${completed !== 1 ? 's' : ''} de ${number(requests)} solicitação${requests !== 1 ? 'ões' : ''}.`,
+        detail: `${number(completed)} ${completed === 1 ? 'concluída' : 'concluídas'} de ${number(requests)} ${requests === 1 ? 'solicitação' : 'solicitações'}.`,
       });
     }
     if (expectedCommission > 0 && captureRate >= 0.95) {
