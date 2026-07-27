@@ -1,5 +1,6 @@
 import {
   DRIVER_COCKPIT_STATS_VERSION,
+  DRIVER_PERFORMANCE_STATS_VERSION,
   driverCockpitDisplayName,
   driverCockpitPeriodKeys,
   driverCockpitVehicle,
@@ -62,6 +63,42 @@ describe('compact driver cockpit summary', () => {
     expect(stale.todayReceivedCentavos).toBe(0);
     expect(stale.weekRideCount).toBe(0);
     expect(stale.weekReceivedCentavos).toBe(0);
+  });
+
+  it('derives acceptance and completion rates only from server performance counters', () => {
+    const summary = deriveDriverCockpitSummary({
+      completedRideCount: 42,
+      driverPerformanceStats: {
+        version: DRIVER_PERFORMANCE_STATS_VERSION,
+        offersReceivedCount: 20,
+        offersAcceptedCount: 15,
+        terminalRideCount: 12,
+        completedRideCount: 9,
+        cancelledRideCount: 3,
+        trackingStartedAtMs: 1785100000000,
+      },
+    });
+
+    expect(summary).toMatchObject({
+      totalCompletedRideCount: 42,
+      offersReceivedCount: 20,
+      offersAcceptedCount: 15,
+      terminalRideCount: 12,
+      trackedCompletedRideCount: 9,
+      trackedCancelledRideCount: 3,
+      acceptanceRateBps: 7500,
+      completionRateBps: 7500,
+      performanceStatsReady: true,
+      performanceTrackingStartedAtMs: 1785100000000,
+    });
+  });
+
+  it('does not fabricate rates before Firestore has a real denominator', () => {
+    const summary = deriveDriverCockpitSummary({ completedRideCount: 4 });
+    expect(summary.acceptanceRateBps).toBeNull();
+    expect(summary.completionRateBps).toBeNull();
+    expect(summary.performanceStatsReady).toBe(false);
+    expect(summary.totalCompletedRideCount).toBe(4);
   });
 
   it('derives wallet readiness from commission policy and real balance, never stale walletStatus', () => {
