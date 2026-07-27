@@ -64,6 +64,7 @@ exports.cancelRideSecure = rideCallables.cancelRideSecure;
 exports.sendRideQuickMessageSecure = rideCallables.sendRideQuickMessageSecure;
 exports.reportRidePaymentIssueSecure = rideCallables.reportRidePaymentIssueSecure;
 exports.resolveRideDisputeSecure = rideCallables.resolveRideDisputeSecure;
+exports.getPassengerRideHistorySecure = rideCallables.getPassengerRideHistorySecure;
 exports.getAdminRideSummarySecure = rideCallables.getAdminRideSummarySecure;
 exports.listAdminDisputedRidesSecure = rideCallables.listAdminDisputedRidesSecure;
 
