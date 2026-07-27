@@ -1,8 +1,8 @@
 // Positive business pulse for the solo operator dashboard.
 //
-// This component intentionally uses a rolling 24-hour window. It highlights real
-// captured revenue and operational traction, while keeping estimates clearly
-// separated from accounting profit. No raw ride, driver or payment record is read.
+// The operator can compare rolling 7, 30, 45 and 90-day windows. Real captured
+// revenue and operational traction stay separate from estimated accounting profit.
+// No raw ride, driver or payment record is read by this component.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -12,6 +12,13 @@ import { radius, spacing } from '../../constants/spacing';
 import { fontFamily, typography } from '../../constants/typography';
 import { getAdminBusinessAnalytics } from '../../services/adminService';
 import { formatBRL } from '../../utils/format';
+
+const PULSE_PERIODS = Object.freeze([
+  { days: 7, label: '7 dias' },
+  { days: 30, label: '30 dias' },
+  { days: 45, label: '45 dias' },
+  { days: 90, label: '90 dias' },
+]);
 
 const money = (value) => formatBRL(Number(value || 0));
 const number = (value) => Number(value || 0).toLocaleString('pt-BR');
@@ -25,6 +32,41 @@ function tracePulse(event, details = {}, level = 'log') {
     atMs: Date.now(),
     ...details,
   });
+}
+
+function PeriodSelector({ selectedDays, onSelect, disabled }) {
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+      {PULSE_PERIODS.map((period) => {
+        const selected = period.days === selectedDays;
+        return (
+          <Pressable
+            key={period.days}
+            accessibilityRole="button"
+            accessibilityState={{ selected, disabled }}
+            disabled={disabled}
+            onPress={() => onSelect(period.days)}
+            style={({ pressed }) => ({
+              borderRadius: radius.full,
+              borderWidth: 1,
+              borderColor: selected ? colors.success : colors.border,
+              backgroundColor: selected ? colors.successBg : colors.card,
+              paddingHorizontal: spacing.md,
+              paddingVertical: spacing.sm,
+              opacity: disabled ? 0.55 : pressed ? 0.68 : 1,
+            })}
+          >
+            <Text style={[
+              { fontFamily, color: selected ? colors.success : colors.textMuted },
+              typography.small,
+            ]}>
+              {period.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
 }
 
 function PulseMetric({ icon, label, value, hint, emphasized = false }) {
@@ -84,6 +126,7 @@ function SignalRow({ icon, title, detail }) {
 }
 
 export default function AdminBusinessPulse() {
+  const [selectedDays, setSelectedDays] = useState(7);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -91,25 +134,29 @@ export default function AdminBusinessPulse() {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    tracePulse('load.started');
+    setData(null);
+    tracePulse('load.started', { rangeDays: selectedDays });
     try {
-      const result = await getAdminBusinessAnalytics(1);
+      const result = await getAdminBusinessAnalytics(selectedDays);
       setData(result);
       tracePulse('load.succeeded', {
+        rangeDays: selectedDays,
         generatedAtMs: result?.generatedAtMs,
         confirmedRevenueCentavos: result?.revenue?.confirmedRevenueCentavos,
         commissionRevenueCentavos: result?.revenue?.commissionRevenueCentavos,
         completedRides: result?.rides?.total?.completed,
+        truncated: result?.truncated,
       });
     } catch (loadError) {
       tracePulse('load.failed', {
+        rangeDays: selectedDays,
         reason: loadError?.code || loadError?.name || 'unknown',
       }, 'warn');
       setError('Não foi possível atualizar o pulso positivo agora.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedDays]);
 
   useEffect(() => {
     load();
@@ -126,23 +173,31 @@ export default function AdminBusinessPulse() {
   const commissionRevenue = Number(revenue.commissionRevenueCentavos || 0);
   const subscriptionRevenue = Number(revenue.subscriptionRevenueCentavos || 0);
   const averageCommission = completed > 0 ? Math.round(commissionRevenue / completed) : 0;
-  const monthlyGrossProjection = confirmedRevenue > 0 ? confirmedRevenue * 30 : null;
+  const averageDailyRevenue = confirmedRevenue > 0
+    ? Math.round(confirmedRevenue / selectedDays)
+    : 0;
+  const monthlyGrossProjection = confirmedRevenue > 0
+    ? Math.round((confirmedRevenue / selectedDays) * 30)
+    : null;
   const activeSubscriptions = Number(drivers.activeSubscriptions?.total || 0);
   const theoreticalMrr = Number(drivers.theoreticalMrrCentavos?.total || 0);
   const onlineDrivers = Number(drivers.online || 0);
   const captureRate = Number(revenue.captureRate || 0);
   const expectedCommission = Number(revenue.commissionExpectedCentavos || 0);
   const amountAtRisk = Number(alerts.amountAtRiskCentavos || revenue.amountAtRiskCentavos || 0);
+  const truncated = Boolean(data?.truncated && Object.values(data.truncated).some(Boolean));
+  const periodText = `últimos ${selectedDays} dias`;
 
   useEffect(() => {
     if (!data || monthlyGrossProjection == null) return;
     tracePulse('projection.calculated', {
-      basisWindowHours: 24,
+      basisWindowDays: selectedDays,
+      averageDailyRevenueCentavos: averageDailyRevenue,
       confirmedRevenueCentavos: confirmedRevenue,
       projectedGross30DaysCentavos: monthlyGrossProjection,
       accountingProfit: false,
     });
-  }, [confirmedRevenue, data, monthlyGrossProjection]);
+  }, [averageDailyRevenue, confirmedRevenue, data, monthlyGrossProjection, selectedDays]);
 
   const positiveSignals = useMemo(() => {
     const signals = [];
@@ -150,7 +205,7 @@ export default function AdminBusinessPulse() {
       signals.push({
         icon: '💚',
         title: 'Receita real entrou na DriveLocal',
-        detail: `${money(confirmedRevenue)} confirmados nas últimas 24 horas.`,
+        detail: `${money(confirmedRevenue)} confirmados nos ${periodText}.`,
       });
     }
     if (completed > 0) {
@@ -185,7 +240,7 @@ export default function AdminBusinessPulse() {
       signals.push({
         icon: '✅',
         title: 'Receita sem valor financeiro sinalizado em risco',
-        detail: 'Nenhum montante em risco foi agregado nesta janela.',
+        detail: 'Nenhum montante em risco foi agregado nesta leitura.',
       });
     }
     return signals.slice(0, 4);
@@ -197,12 +252,13 @@ export default function AdminBusinessPulse() {
     confirmedRevenue,
     expectedCommission,
     onlineDrivers,
+    periodText,
     requests,
     theoreticalMrr,
   ]);
 
   const headline = confirmedRevenue > 0
-    ? `A DriveLocal gerou ${money(confirmedRevenue)} nas últimas 24h`
+    ? `A DriveLocal gerou ${money(confirmedRevenue)} nos ${periodText}`
     : completed > 0
       ? 'A operação está rodando, ainda sem receita confirmada'
       : requests > 0
@@ -214,6 +270,12 @@ export default function AdminBusinessPulse() {
     : completed > 0
       ? 'Isso pode ser normal durante a promoção de comissão zero. As corridas concluídas continuam sendo um sinal real de validação.'
       : 'Assim que houver solicitações, corridas, comissão ou assinaturas, os sinais positivos aparecerão aqui automaticamente.';
+
+  function changePeriod(days) {
+    if (days === selectedDays || loading) return;
+    tracePulse('period.changed', { fromDays: selectedDays, toDays: days });
+    setSelectedDays(days);
+  }
 
   return (
     <View
@@ -228,7 +290,9 @@ export default function AdminBusinessPulse() {
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md }}>
         <View style={{ flex: 1, gap: spacing.xs }}>
-          <Text style={[{ fontFamily, color: colors.success }, typography.caption]}>O QUE ESTÁ FUNCIONANDO · 24H</Text>
+          <Text style={[{ fontFamily, color: colors.success }, typography.caption]}>
+            O QUE ESTÁ FUNCIONANDO · {selectedDays} DIAS
+          </Text>
           <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>{headline}</Text>
           <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{message}</Text>
         </View>
@@ -251,23 +315,33 @@ export default function AdminBusinessPulse() {
         </Pressable>
       </View>
 
+      <PeriodSelector selectedDays={selectedDays} onSelect={changePeriod} disabled={loading} />
+
       {error ? (
         <View style={{ padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.warningBg }}>
           <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>{error}</Text>
         </View>
       ) : null}
 
+      {truncated ? (
+        <View style={{ padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.warningBg }}>
+          <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>
+            A consulta atingiu o limite de segurança. Os números desta janela podem ser parciais.
+          </Text>
+        </View>
+      ) : null}
+
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: spacing.md }}>
         <PulseMetric
           icon="💰"
-          label="Receita confirmada · 24h"
+          label={`Receita confirmada · ${selectedDays}d`}
           value={data ? money(confirmedRevenue) : loading ? '…' : '—'}
           hint="Comissão + assinaturas pagas"
           emphasized={confirmedRevenue > 0}
         />
         <PulseMetric
           icon="🪙"
-          label="Comissão capturada · 24h"
+          label={`Comissão capturada · ${selectedDays}d`}
           value={data ? money(commissionRevenue) : loading ? '…' : '—'}
           hint="Valor efetivamente capturado"
           emphasized={commissionRevenue > 0}
@@ -282,7 +356,9 @@ export default function AdminBusinessPulse() {
           icon="🚀"
           label="Projeção bruta · 30 dias"
           value={data && monthlyGrossProjection != null ? money(monthlyGrossProjection) : loading ? '…' : '—'}
-          hint="Se o ritmo das últimas 24h se repetir"
+          hint={data && confirmedRevenue > 0
+            ? `Média diária ${money(averageDailyRevenue)} × 30`
+            : `Baseada na média dos ${selectedDays} dias`}
           emphasized={monthlyGrossProjection != null}
         />
       </View>
@@ -300,7 +376,7 @@ export default function AdminBusinessPulse() {
       ) : null}
 
       <Text style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>
-        Janela móvel de 24 horas. A projeção é receita bruta estimada, não lucro líquido: custos, impostos, marketing e retiradas não estão descontados.
+        Janela móvel de {selectedDays} dias. A projeção usa a média diária da janela e representa receita bruta estimada, não lucro líquido: custos, impostos, marketing e retiradas não estão descontados.
       </Text>
     </View>
   );
