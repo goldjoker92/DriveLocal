@@ -10,9 +10,11 @@ import {
   SUBSCRIPTION_PERIOD_DAYS,
   getVehiclePricing,
 } from '../constants/pricingConfig';
+import { WALLET_FALLBACK_LOW_THRESHOLD_CENTS } from '../constants/walletRules';
 import {
   DAY_MS,
   SUBSCRIPTION_COVERAGE_SOURCE,
+  approvalTimeMs,
   founderSubscriptionUntilMs,
   resolveCommercialPolicy,
   toMillis as policyToMillis,
@@ -76,7 +78,8 @@ export function computeRenewedExpirationMs(driver, now = Date.now()) {
 //   - founders #1..#100: subscription-free for 60 days from approval;
 //   - drivers #101+: up to five completed rides without subscription, only inside
 //     that same 60-day window;
-//   - after day 60: paid subscription required for everyone;
+//   - consuming the five rides never ends the 0% commission window;
+//   - after day 60: paid subscription, standard commission and wallet apply to all;
 //   - after ride five but before day 60: subscription required, commission still 0%.
 export function getSubscriptionEligibility(driver, now = Date.now()) {
   const policy = resolveCommercialPolicy(driver, now);
@@ -133,7 +136,7 @@ export function getSubscriptionEligibility(driver, now = Date.now()) {
   };
 }
 
-export const DRIVER_SUBSCRIPTION_VIEW_VERSION = 'driver-subscription-view-v1';
+export const DRIVER_SUBSCRIPTION_VIEW_VERSION = 'driver-subscription-view-v2';
 
 export const DRIVER_SUBSCRIPTION_MODE = Object.freeze({
   FOUNDER_FREE: 'founder_free',
@@ -163,6 +166,174 @@ function firstFutureTimestamp(values, nowMs) {
 
 function dateLabel(timestampMs) {
   return timestampMs ? formatDateBR(timestampMs) : null;
+}
+
+function safePositiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function rule(key, label, value, detail) {
+  return Object.freeze({ key, label, value, detail });
+}
+
+function section(key, title, items) {
+  return Object.freeze({ key, title, items: Object.freeze(items) });
+}
+
+function recurringPlanLabel(currentPlan) {
+  return currentPlan
+    ? `${currentPlan.priceLabel} a cada ${currentPlan.periodDays} dias`
+    : 'Plano indisponível';
+}
+
+function standardCommissionLabel(currentPlan) {
+  return currentPlan ? `${currentPlan.commissionLabel} por corrida` : 'Taxa indisponível';
+}
+
+function buildRuleSections({
+  policy,
+  currentPlan,
+  used,
+  freePeriodDate,
+  founderDate,
+  subscriptionDate,
+}) {
+  const recurringPlan = recurringPlanLabel(currentPlan);
+  const standardCommission = standardCommissionLabel(currentPlan);
+  const walletThreshold = formatBRL(WALLET_FALLBACK_LOW_THRESHOLD_CENTS);
+  const commissionFreeDetail = freePeriodDate
+    ? `Garantida até ${freePeriodDate}, mesmo quando a assinatura já for paga.`
+    : 'Válida durante o período promocional confirmado no cadastro.';
+  const noWalletDetail = freePeriodDate
+    ? `Nenhuma recarga é necessária até ${freePeriodDate}, enquanto a comissão for 0%.`
+    : 'Nenhuma recarga é necessária enquanto a comissão for 0%.';
+  const walletRequiredDetail = `Mantenha o saldo disponível acima de ${walletThreshold} para receber novas corridas.`;
+  const monthlyRequiredDetail = currentPlan
+    ? `${recurringPlan}. O plano precisa estar ativo para receber novas corridas.`
+    : 'Complete o tipo de veículo para consultar e ativar o plano.';
+  const afterLaunchTitle = freePeriodDate
+    ? `A partir de ${freePeriodDate}`
+    : 'Depois do período promocional';
+
+  if (policy.founderFreeActive) {
+    return Object.freeze([
+      section('now', 'Agora — benefício de fundador', [
+        rule(
+          'subscription',
+          'Assinatura',
+          'Grátis',
+          founderDate ? `Sem pagamento até ${founderDate}.` : 'Gratuita durante o período fundador.'
+        ),
+        rule('commission', 'Comissão', '0%', commissionFreeDetail),
+        rule('wallet', 'Saldo DriveLocal', 'Sem recarga', noWalletDetail),
+      ]),
+      section('after_launch', 'Depois dos 60 dias', [
+        rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
+        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
+      ]),
+    ]);
+  }
+
+  if (policy.nonFounderGraceActive) {
+    const remaining = Math.max(0, NON_FOUNDER_FREE_RIDES - used);
+    const rideWord = remaining === 1 ? 'corrida promocional restante' : 'corridas promocionais restantes';
+    return Object.freeze([
+      section('now', `Agora — ${used} de ${NON_FOUNDER_FREE_RIDES} corridas usadas`, [
+        rule(
+          'subscription',
+          'Assinatura',
+          'Sem pagamento',
+          `${remaining} ${rideWord}. O plano passa a ser obrigatório depois da 5ª corrida ou no fim dos 60 dias, o que ocorrer primeiro.`
+        ),
+        rule('commission', 'Comissão', '0%', commissionFreeDetail),
+        rule('wallet', 'Saldo DriveLocal', 'Sem recarga', noWalletDetail),
+      ]),
+      section('after_fifth_ride', 'Depois da 5ª corrida', [
+        rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
+        rule(
+          'commission',
+          'Comissão',
+          'Continua 0%',
+          freePeriodDate ? `Permanece em 0% até ${freePeriodDate}.` : commissionFreeDetail
+        ),
+        rule('wallet', 'Saldo DriveLocal', 'Ainda sem recarga', noWalletDetail),
+      ]),
+      section('after_launch', afterLaunchTitle, [
+        rule('subscription', 'Assinatura', 'Continua mensal', monthlyRequiredDetail),
+        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
+      ]),
+    ]);
+  }
+
+  if (policy.paidSubscriptionActive) {
+    const nowItems = [
+      rule(
+        'subscription',
+        'Assinatura',
+        'Ativa',
+        subscriptionDate
+          ? `Ativa até ${subscriptionDate}. A renovação acrescenta 30 dias à expiração atual.`
+          : 'Ativa. Cada renovação acrescenta 30 dias à expiração atual.'
+      ),
+      rule(
+        'commission',
+        'Comissão',
+        policy.freePeriodActive ? '0%' : standardCommission,
+        policy.freePeriodActive ? commissionFreeDetail : 'Aplicada em cada corrida concluída.'
+      ),
+      rule(
+        'wallet',
+        'Saldo DriveLocal',
+        policy.freePeriodActive ? 'Sem recarga' : 'Obrigatório',
+        policy.freePeriodActive ? noWalletDetail : walletRequiredDetail
+      ),
+    ];
+
+    const sections = [section('now', 'Agora', nowItems)];
+    if (policy.freePeriodActive) {
+      sections.push(section('after_launch', afterLaunchTitle, [
+        rule('subscription', 'Assinatura', 'Continua mensal', monthlyRequiredDetail),
+        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
+      ]));
+    } else if (subscriptionDate) {
+      sections.push(section('renewal', `Antes de ${subscriptionDate}`, [
+        rule(
+          'renewal',
+          'Renovação',
+          recurringPlan,
+          'Renove para continuar recebendo corridas. Os dias restantes são preservados.'
+        ),
+      ]));
+    }
+    return Object.freeze(sections);
+  }
+
+  if (policy.freePeriodActive) {
+    return Object.freeze([
+      section('now', 'Agora — 5 corridas promocionais concluídas', [
+        rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
+        rule('commission', 'Comissão', '0%', commissionFreeDetail),
+        rule('wallet', 'Saldo DriveLocal', 'Sem recarga', noWalletDetail),
+      ]),
+      section('after_launch', afterLaunchTitle, [
+        rule('subscription', 'Assinatura', 'Continua mensal', monthlyRequiredDetail),
+        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
+      ]),
+    ]);
+  }
+
+  return Object.freeze([
+    section('now', 'Agora — período promocional encerrado', [
+      rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
+      rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+      rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
+    ]),
+  ]);
 }
 
 export function driverSubscriptionPlan(vehicleType, serviceAreaId) {
@@ -203,6 +374,7 @@ export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
   const policy = resolveCommercialPolicy(d, nowMs);
   const currentPlan = driverSubscriptionPlan(policy.vehicleType, d.serviceAreaId);
   const catalog = driverSubscriptionCatalog(d.serviceAreaId);
+  const approvalDate = dateLabel(approvalTimeMs(d));
   const freePeriodDate = dateLabel(policy.freePeriodUntilMs);
   const founderDate = dateLabel(policy.founderSubscriptionUntilMs);
   const subscriptionDate = dateLabel(policy.subscriptionExpiresAtMs);
@@ -275,6 +447,25 @@ export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
     : currentPlan
       ? `Comissão ${currentPlan.commissionLabel}`
       : 'Comissão indisponível';
+  const approvalNumber = safePositiveInteger(d.approvalNumber || d.founderNumber);
+  const profileTitle = policy.founder
+    ? 'Motorista Fundador nº 1–100'
+    : 'Motorista nº 101+';
+  const profileDetail = [
+    approvalNumber ? `Aprovação #${String(approvalNumber).padStart(3, '0')}` : null,
+    approvalDate ? `em ${approvalDate}` : null,
+  ].filter(Boolean).join(' ') || 'Condição calculada pelo cadastro aprovado.';
+  const noSurpriseText = policy.founder
+    ? 'Durante 60 dias, assinatura e comissão são gratuitas. Depois, assinatura mensal, comissão normal e saldo DriveLocal passam a ser obrigatórios.'
+    : 'As 5 corridas definem quando a assinatura começa. Os 60 dias definem quando a comissão normal e o saldo DriveLocal começam. São contadores independentes.';
+  const ruleSections = buildRuleSections({
+    policy,
+    currentPlan,
+    used,
+    freePeriodDate,
+    founderDate,
+    subscriptionDate,
+  });
 
   return Object.freeze({
     version: DRIVER_SUBSCRIPTION_VIEW_VERSION,
@@ -288,12 +479,17 @@ export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
     paymentButtonTitle,
     paymentReason,
     renewalDetail,
+    profileTitle,
+    profileDetail,
+    noSurpriseText,
+    ruleSections,
     founder: policy.founder,
     freeRideCountUsed: used,
     freeRideLimit: NON_FOUNDER_FREE_RIDES,
     freeRidesRemaining: policy.freeRidesRemaining,
     commissionLabel,
     commissionDetail,
+    approvalDate,
     freePeriodUntilMs: policy.freePeriodUntilMs || null,
     subscriptionExpiresAtMs: policy.subscriptionExpiresAtMs || null,
     transitionAtMs: firstFutureTimestamp([
