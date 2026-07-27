@@ -1,18 +1,10 @@
-// Wallet commission service (DriveLocal V1).
+// Legacy client-side wallet settlement helper.
 //
-// Handles ride-completion billing INSIDE a Firestore transaction so it is safe
-// against retries and concurrent writes. Two things happen at completion:
-//   1. the non-founder free-ride counter is incremented (once per ride);
-//   2. the DriveLocal commission is debited from the driver prepaid wallet
-//      (once per ride), but only when commission applies to that ride.
-//
-// Idempotency: a single flag on the ride document (commissionSettled) guards BOTH
-// the counter increment and the wallet debit, so a retried completion can never
-// double-increment or double-charge.
-//
-// Convention note: the codebase uses the Firebase Web SDK (firebase/firestore),
-// so we accept driverId/rideId strings and build the doc refs here (rather than
-// passing raw DocumentReferences). Follows the existing driverService style.
+// The secure production flow freezes the commercial policy and commission hold
+// in Cloud Functions at offer acceptance. This helper remains for older screens,
+// but must never recompute a lower fee or turn a standard ride into free work.
+// It therefore prefers the acceptance snapshot and falls back to the same shared
+// V1.2 minimum-commission calculator only for legacy ride documents.
 
 import {
   doc,
@@ -20,32 +12,33 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { getVehiclePricing } from '../constants/pricingConfig';
 import {
   calculateCommissionBps,
-  calculatePlatformFeeCentavos,
+  calculateConfiguredCommissionCentavos,
 } from '../utils/ridePricing';
 
-// True when the driver holds founder status (tolerates both field names).
 function isFounderDriver(driver) {
-  const d = driver || {};
-  return d.isFounder === true || d.founderEligible === true;
+  const profile = driver || {};
+  return profile.isFounder === true || profile.founderEligible === true;
 }
 
-// Settles commission for a completed ride and increments the non-founder
-// free-ride counter, atomically and idempotently.
-//
-// The ride document is expected to carry the pricing snapshot written by the
-// ride-completion flow: ridePriceCentavos, vehicleType and distanceKm. Until the
-// ride flow is wired to persist them, callers may pass them via `override`.
-//
-// TODO(ride-flow): when ride completion is implemented, write ridePriceCentavos,
-// vehicleType and distanceKm onto the ride doc (from utils/ridePricing.js) and
-// call this function once, at completion.
-//
-// Returns one of:
-//   { skipped: 'already_settled' }
-//   { skipped: 'missing_ride' | 'missing_price' }
-//   { settled: true, commissionBps, platformFeeCentavos, walletBalanceCentavos }
+function finiteNonNegative(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : null;
+}
+
+function frozenCommissionForRide(ride) {
+  const snapshotAmount = finiteNonNegative(
+    ride?.commissionPolicySnapshot?.holdAmountCentavos
+  );
+  if (snapshotAmount != null) return snapshotAmount;
+
+  const rideHold = finiteNonNegative(ride?.commissionHoldCentavos);
+  if (rideHold != null) return rideHold;
+  return null;
+}
+
 export async function debitCommissionFromWallet(driverId, rideId, override = {}) {
   const rideCollection = override.rideCollection || 'rideRequests';
   const now = Date.now();
@@ -54,7 +47,6 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
     const driverRef = doc(db, 'drivers', driverId);
     const rideRef = doc(db, rideCollection, rideId);
 
-    // All reads must happen before any write in a Firestore transaction.
     const driverSnap = await tx.get(driverRef);
     const rideSnap = await tx.get(rideRef);
 
@@ -66,7 +58,6 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
     const ride = rideSnap.data() || {};
     const driver = driverSnap.exists() ? driverSnap.data() : {};
 
-    // Idempotency guard: never settle the same ride twice.
     if (ride.commissionSettled === true) {
       console.log('[WalletCommission] already settled rideId=', rideId);
       return { skipped: 'already_settled' };
@@ -74,24 +65,45 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
 
     const vehicleType = override.vehicleType || ride.vehicleType || driver.vehicleType;
     const distanceKm = override.distanceKm != null ? override.distanceKm : ride.distanceKm;
-    const ridePriceCentavos =
-      override.ridePriceCentavos != null ? override.ridePriceCentavos : ride.ridePriceCentavos;
+    const ridePriceCentavos = override.ridePriceCentavos != null
+      ? override.ridePriceCentavos
+      : (ride.ridePriceCentavos ?? ride.estimatedFareCentavos);
 
     if (ridePriceCentavos == null) {
-      console.log('[WalletCommission] missing ridePriceCentavos rideId=', rideId);
+      console.log('[WalletCommission] missing ride price rideId=', rideId);
       return { skipped: 'missing_price' };
     }
 
-    // Commission for this ride (0 during the launch/founder free window).
-    const commissionBps = calculateCommissionBps(vehicleType, distanceKm, driver, now);
-    const platformFeeCentavos = calculatePlatformFeeCentavos(ridePriceCentavos, commissionBps);
+    // Freeze semantics at acceptance. A driver who accepted during the 60-day
+    // benefit remains at R$0 for this ride even if completion happens later.
+    const frozenBps = finiteNonNegative(
+      ride?.commercialPolicySnapshot?.commissionBpsAtAcceptance
+    );
+    const commissionBps = frozenBps != null
+      ? frozenBps
+      : calculateCommissionBps(vehicleType, distanceKm, driver, now);
+
+    let platformFeeCentavos = frozenCommissionForRide(ride);
+    if (platformFeeCentavos == null) {
+      const vehiclePricing = getVehiclePricing(
+        ride.serviceAreaId,
+        vehicleType
+      );
+      const configured = calculateConfiguredCommissionCentavos({
+        passengerFareCentavos: ridePriceCentavos,
+        commissionBaseCentavos: ridePriceCentavos,
+        commissionBps,
+        vehiclePricing,
+      });
+      if (!configured.ok) {
+        const error = new Error('INVALID_COMMISSION_CONFIGURATION');
+        error.code = 'INVALID_COMMISSION_CONFIGURATION';
+        throw error;
+      }
+      platformFeeCentavos = configured.commissionCentavos;
+    }
 
     const currentBalance = Number(driver.walletBalanceCentavos) || 0;
-
-    // Reject settlement when commission applies but the wallet cannot cover it.
-    // The ride is NOT marked settled here, so it can be retried after a recharge
-    // (no counter increment, no debit). Business rule: only commissionable rides
-    // are ever blocked by the wallet — a 0% ride always settles.
     if (platformFeeCentavos > 0 && currentBalance < platformFeeCentavos) {
       console.log(
         '[WalletCommission] rejected WALLET_BALANCE_TOO_LOW rideId=', rideId,
@@ -105,24 +117,21 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
       };
     }
 
-    // Non-founder free-ride counter increments once per completed ride.
     const driverWrite = { updatedAt: serverTimestamp() };
     if (!isFounderDriver(driver)) {
       const used = Number(driver.freeRideCountUsed) || 0;
       driverWrite.freeRideCountUsed = used + 1;
     }
 
-    // Debit the wallet only when commission actually applies.
     let newBalance = currentBalance;
     if (platformFeeCentavos > 0) {
       newBalance = currentBalance - platformFeeCentavos;
       driverWrite.walletBalanceCentavos = newBalance;
       console.log('[WalletCommission] debit success', platformFeeCentavos, 'centavos -> balance', newBalance);
     } else {
-      console.log('[WalletCommission] skipped debit — 0% commission (free window or 0% tier) rideId=', rideId);
+      console.log('[WalletCommission] skipped debit — 60-day commission benefit rideId=', rideId);
     }
 
-    // Persist driver + ride idempotency fields in the same transaction.
     tx.update(driverRef, driverWrite);
     tx.update(rideRef, {
       commissionBps,
@@ -131,7 +140,7 @@ export async function debitCommissionFromWallet(driverId, rideId, override = {})
       commissionChargedAt: serverTimestamp(),
       commissionSettledAt: serverTimestamp(),
       commissionTransactionId: `commission_${rideId}`,
-      commissionSettled: true, //  the idempotency guard
+      commissionSettled: true,
       updatedAt: serverTimestamp(),
     });
 
