@@ -27,7 +27,7 @@ describe('passenger ride history presentation', () => {
       rideId: 'ride_001',
       driverFirstName: 'João',
       vehicleLabel: 'Moto • Honda • CG 160 • Preta • ABC1D23',
-      amountLabel: 'R$ 12,50',
+      amountLabel: 'R$ 12,50',
       amountDetail: 'valor final',
       rideStatusLabel: 'Concluída',
       pixStatusLabel: 'Pix confirmado',
