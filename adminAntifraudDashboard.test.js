@@ -21,16 +21,16 @@ describe('admin launch command center contracts', () => {
     expect(service).not.toContain("collection(db, 'rideRequests')");
   });
 
-  test('dashboard separates revenue, commission, subscriptions and driver supply', () => {
+  test('dashboard separates revenue, subscriptions, vehicle mix and driver supply', () => {
     const dashboard = read('src/app/(admin)/dashboard.jsx');
     expect(dashboard).toContain('Receita DriveLocal');
     expect(dashboard).toContain('Comissões capturadas');
-    expect(dashboard).toContain('Assinaturas em curso');
+    expect(dashboard).toContain('title="Assinaturas"');
     expect(dashboard).toContain('Moto — pagas ativas');
     expect(dashboard).toContain('Carro — pagas ativas');
-    expect(dashboard).toContain('Picos de corridas');
-    expect(dashboard).toContain('Demanda x oferta de motoristas');
-    expect(dashboard).toContain("router.push('/antifraud')");
+    expect(dashboard).toContain('title="Picos e dias mais ativos"');
+    expect(dashboard).toContain('title="Oferta x demanda"');
+    expect(dashboard).toContain("openRoute('/antifraud'");
   });
 
   test('risk queue keeps permanent fraud confirmation behind an admin decision', () => {
