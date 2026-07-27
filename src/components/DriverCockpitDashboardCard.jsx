@@ -76,7 +76,12 @@ export default function DriverCockpitDashboardCard({
   const walletDetail = `${heldPrefix}${walletCopy(summary, commission)}`;
   const walletBlocked = summary.walletNeedsTopup === true;
   const thresholdLabel = formatBRL(summary.walletMinimumCentavos || 300);
-  const openWallet = onWalletPress || (() => router.push('/wallet'));
+  const openWallet = walletBlocked
+    ? () => router.push({
+      pathname: '/wallet',
+      params: { reason: 'wallet_required', returnTo: '/driver-home' },
+    })
+    : onWalletPress || (() => router.push('/wallet'));
   const openSubscription = onSubscriptionPress || (() => router.push('/subscription-plans'));
 
   return (
