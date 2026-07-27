@@ -27,6 +27,9 @@ const PIX_STATUS = Object.freeze({
 });
 
 function nonNegativeInteger(value) {
+  // JavaScript converts null and empty strings to 0. For server projections, those
+  // values mean “not available”; only an explicit numeric zero is a real zero.
+  if (value == null || value === '' || typeof value === 'boolean') return null;
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) return null;
   return Math.floor(number);
