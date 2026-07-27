@@ -3,6 +3,7 @@
 // Device readiness is validated before the server session is opened so the
 // cockpit can never turn green without GPS and notifications actually working.
 
+import { router as appRouter } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
 import { prepareDriverDeviceForAvailability } from './driverDeviceDiagnostics';
@@ -49,6 +50,25 @@ function deviceNotReadyError(diagnostic) {
   return error;
 }
 
+export function isWalletRequiredAvailabilityError(error) {
+  const safeCode = error?.details?.code || error?.code || null;
+  const reason = error?.details?.metadata?.reason || error?.details?.reason || null;
+  return safeCode === 'WALLET_INSUFFICIENT' || reason === 'wallet_low';
+}
+
+function redirectToRequiredWalletTopup(error) {
+  if (!isWalletRequiredAvailabilityError(error)) return false;
+  traceAvailability('work_session.wallet_recovery_redirected', {
+    reason: 'wallet_low',
+    result: 'wallet_topup_screen',
+  }, 'warn');
+  appRouter.push({
+    pathname: '/wallet',
+    params: { reason: 'wallet_required', returnTo: '/driver-home' },
+  });
+  return true;
+}
+
 export async function startDriverWorkSession() {
   const startedAt = Date.now();
   traceAvailability('work_session.start_requested', { desiredStatus: 'online' });
@@ -84,9 +104,11 @@ export async function startDriverWorkSession() {
     });
     return result;
   } catch (error) {
+    const walletRedirected = redirectToRequiredWalletTopup(error);
     traceAvailability('work_session.start_failed', {
-      reason: error?.code || error?.message || 'unknown',
+      reason: error?.details?.code || error?.code || error?.message || 'unknown',
       issueCode: error?.details?.issueCode || null,
+      walletRedirected,
       durationMs: Date.now() - startedAt,
       result: 'offline',
     }, 'warn');
