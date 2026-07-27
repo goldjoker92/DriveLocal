@@ -11,25 +11,30 @@
 const BPS_DENOMINATOR = 10000;
 
 // Bump when fares/commission change so historical rides keep their snapshot.
-const PRICING_CONFIG_VERSION = 'horizonte-1.1.0';
+const PRICING_CONFIG_VERSION = 'horizonte-1.2.0';
 
 // Per-vehicle fare + commission model (Horizonte-CE, governance D3).
+// Outside the 60-day commission-free launch benefit, acceptance freezes at least
+// the configured platform commission for every ride. The acceptance transaction
+// converts the estimate to R$0 only while that driver's benefit is active.
 const CITY_PRICING = Object.freeze({
   HORIZONTE_CE_BR: {
     moto: {
       baseFareCentavos: 250,
       perKmCentavos: 95,
       perMinuteCentavos: 12,
-      minimumPassengerFareCentavos: 500,
+      minimumPassengerFareCentavos: 600,
       normalCommissionBps: 1200,
+      minimumPlatformCommissionCentavos: 100,
       minimumDriverNetCentavos: 500,
     },
     car: {
       baseFareCentavos: 350,
       perKmCentavos: 135,
       perMinuteCentavos: 20,
-      minimumPassengerFareCentavos: 800,
+      minimumPassengerFareCentavos: 950,
       normalCommissionBps: 1500,
+      minimumPlatformCommissionCentavos: 143,
       minimumDriverNetCentavos: 800,
     },
   },
@@ -50,12 +55,12 @@ function getVehiclePricing(serviceAreaId, vehicleType) {
 }
 
 /**
- * Prices a ride from provider-measured distance/duration. Commission is the
- * NORMAL (standard) rate for the vehicle — the passenger-facing estimate — capped
- * to preserve the minimum driver net and never negative. The per-driver 0%
- * commission-free adjustment is applied at acceptance, not here.
+ * Prices a ride from provider-measured distance/duration. The standard estimate
+ * is max(vehicle percentage, minimum platform commission), capped only after a
+ * fail-closed configuration check proving that the minimum driver net can still
+ * be preserved. The per-driver 0% launch adjustment is applied at acceptance.
  * @param {{serviceAreaId?:string, vehicleType:string, distanceKm:number, durationMin:number}} input
- * @returns {{ok:false, reason:string}|{ok:true, pricingConfigVersion:string, passengerFareCentavos:number, commissionCentavos:number, driverNetCentavos:number, commissionBps:number}}
+ * @returns {{ok:false, reason:string}|{ok:true, pricingConfigVersion:string, passengerFareCentavos:number, commissionCentavos:number, minimumPlatformCommissionCentavos:number, driverNetCentavos:number, commissionBps:number}}
  */
 function priceRide(input = {}) {
   const serviceAreaId = input.serviceAreaId || DEFAULT_SERVICE_AREA_ID;
@@ -70,22 +75,52 @@ function priceRide(input = {}) {
 
   const rawFare = vp.baseFareCentavos + vp.perKmCentavos * distanceKm + vp.perMinuteCentavos * durationMin;
   const baseFare = roundCentavos(rawFare);
-  const passengerFareCentavos = baseFare < vp.minimumPassengerFareCentavos ? vp.minimumPassengerFareCentavos : baseFare;
+  const passengerFareCentavos = baseFare < vp.minimumPassengerFareCentavos
+    ? vp.minimumPassengerFareCentavos
+    : baseFare;
 
-  let commissionCentavos = roundCentavos((passengerFareCentavos * vp.normalCommissionBps) / BPS_DENOMINATOR);
-  // Cap so the driver keeps at least the minimum net; never negative.
-  const cap = Math.max(0, passengerFareCentavos - vp.minimumDriverNetCentavos);
-  if (commissionCentavos > cap) commissionCentavos = cap;
-  if (commissionCentavos < 0) commissionCentavos = 0;
+  const minimumPlatformCommissionCentavos = Math.max(
+    0,
+    roundCentavos(vp.minimumPlatformCommissionCentavos)
+  );
+  const commissionCapCentavos = Math.max(
+    0,
+    passengerFareCentavos - vp.minimumDriverNetCentavos
+  );
+
+  // Never silently create a standard ride that cannot fund both the configured
+  // DriveLocal minimum and the guaranteed driver net. A bad future table blocks
+  // quoting instead of degrading to a zero/partial commission.
+  if (commissionCapCentavos < minimumPlatformCommissionCentavos) {
+    return { ok: false, reason: 'INVALID_COMMISSION_CONFIGURATION' };
+  }
+
+  const percentageCommissionCentavos = roundCentavos(
+    (passengerFareCentavos * vp.normalCommissionBps) / BPS_DENOMINATOR
+  );
+  let commissionCentavos = Math.max(
+    percentageCommissionCentavos,
+    minimumPlatformCommissionCentavos
+  );
+  if (commissionCentavos > commissionCapCentavos) {
+    commissionCentavos = commissionCapCentavos;
+  }
 
   return {
     ok: true,
     pricingConfigVersion: PRICING_CONFIG_VERSION,
     passengerFareCentavos,
     commissionCentavos,
-    driverNetCentavos: Math.max(0, passengerFareCentavos - commissionCentavos),
+    minimumPlatformCommissionCentavos,
+    driverNetCentavos: passengerFareCentavos - commissionCentavos,
     commissionBps: vp.normalCommissionBps,
   };
 }
 
-module.exports = { priceRide, getVehiclePricing, PRICING_CONFIG_VERSION, BPS_DENOMINATOR, roundCentavos };
+module.exports = {
+  priceRide,
+  getVehiclePricing,
+  PRICING_CONFIG_VERSION,
+  BPS_DENOMINATOR,
+  roundCentavos,
+};
