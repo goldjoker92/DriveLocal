@@ -19,11 +19,15 @@ function shortHash(value) {
 // Keys whose values must NEVER be logged (case-insensitive substring match).
 // Keep operational status/version/count fields visible, but fail closed for
 // identity, exact route/location and provider payload fields.
+//
+// Very short document identifiers such as `rg` must NOT live in this list:
+// substring matching would also redact unrelated safe fields such as
+// `targetUserIdHash`. Those identifiers belong in SENSITIVE_IDENTITY_KEYS below.
 const SENSITIVE_KEY_PATTERNS = [
   'accesstoken', 'access_token', 'authorization', 'token', 'fcmtoken',
   'webhooksecret', 'webhook_secret', 'secret', 'password', 'passwd',
   'verificationcode', 'verification_code', 'otp',
-  'cpf', 'cnpj', 'cnh', 'rg', 'identity',
+  'cpf', 'cnpj', 'cnh', 'identity',
   'fullname', 'passengername', 'drivername',
   'phone', 'telefone', 'whatsapp',
   'email', 'pixkey', 'pix_key', 'pixpayload', 'pix_payload', 'copiaecola',
@@ -45,6 +49,8 @@ const SENSITIVE_IDENTITY_KEYS = new Set([
   'userid',
   'driverid',
   'passengerid',
+  'rg',
+  'registrogeral',
   'lat',
   'lng',
   'latitude',
