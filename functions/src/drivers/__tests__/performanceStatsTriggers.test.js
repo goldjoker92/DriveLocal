@@ -9,6 +9,7 @@ const {
   RIDE_TERMINAL_MARKER,
   offerAcceptedTransition,
   terminalRideTransition,
+  ridePerformanceOutcome,
   applyOfferReceivedStats,
   applyOfferAcceptedStats,
   applyTerminalRideStats,
@@ -42,6 +43,24 @@ describe('driver performance statistics triggers', () => {
       { status: C.RIDE_STATUS.COMPLETED },
       { status: C.RIDE_STATUS.COMPLETED, acceptedDriverId: DRIVER_ID }
     )).toBe(false);
+  });
+
+  it('classifies only driver-responsible cancellations against completion', () => {
+    expect(ridePerformanceOutcome({ status: C.RIDE_STATUS.COMPLETED })).toBe('completed');
+    expect(ridePerformanceOutcome({
+      status: C.RIDE_STATUS.CANCELLED,
+      cancelledBy: 'driver',
+      cancelReasonCode: 'vehicle_issue',
+    })).toBe('driver_cancelled');
+    expect(ridePerformanceOutcome({
+      status: C.RIDE_STATUS.CANCELLED,
+      cancelledBy: 'passenger',
+    })).toBe('excluded_cancelled');
+    expect(ridePerformanceOutcome({
+      status: C.RIDE_STATUS.CANCELLED,
+      cancelledBy: 'driver',
+      cancelReasonCode: 'passenger_no_show',
+    })).toBe('excluded_cancelled');
   });
 
   it('counts an offer received once and ignores retries', async () => {
@@ -88,7 +107,7 @@ describe('driver performance statistics triggers', () => {
     expect(offer[OFFER_ACCEPTED_MARKER]).toBe(DRIVER_PERFORMANCE_STATS_VERSION);
   });
 
-  it('counts completed and cancelled accepted rides exactly once', async () => {
+  it('counts completed and driver-cancelled accepted rides exactly once', async () => {
     const db = makeFakeFirestore();
     await seedDriver(db);
     await db.collection(C.RIDE_REQUESTS).doc(RIDE_ID).set({
@@ -104,6 +123,8 @@ describe('driver performance statistics triggers', () => {
     await db.collection(C.RIDE_REQUESTS).doc('ride_performance_002').set({
       acceptedDriverId: DRIVER_ID,
       status: C.RIDE_STATUS.CANCELLED,
+      cancelledBy: 'driver',
+      cancelReasonCode: 'vehicle_issue',
     });
     await applyTerminalRideStats({
       db,
@@ -118,7 +139,40 @@ describe('driver performance statistics triggers', () => {
       terminalRideCount: 2,
       completedRideCount: 1,
       cancelledRideCount: 1,
+      excludedCancellationCount: 0,
     });
     expect(ride[RIDE_TERMINAL_MARKER]).toBe(DRIVER_PERFORMANCE_STATS_VERSION);
+  });
+
+  it('tracks passenger cancellation for audit without lowering driver completion', async () => {
+    const db = makeFakeFirestore();
+    await seedDriver(db);
+    await db.collection(C.RIDE_REQUESTS).doc(RIDE_ID).set({
+      acceptedDriverId: DRIVER_ID,
+      status: C.RIDE_STATUS.COMPLETED,
+    });
+    await applyTerminalRideStats({ db, rideId: RIDE_ID, context: CONTEXT, clock: CLOCK });
+
+    await db.collection(C.RIDE_REQUESTS).doc('ride_performance_passenger_cancel').set({
+      acceptedDriverId: DRIVER_ID,
+      status: C.RIDE_STATUS.CANCELLED,
+      cancelledBy: 'passenger',
+      cancelReasonCode: 'changed_mind',
+    });
+    const excluded = await applyTerminalRideStats({
+      db,
+      rideId: 'ride_performance_passenger_cancel',
+      context: CONTEXT,
+      clock: { now: () => CLOCK.now() + 1 },
+    });
+
+    const driver = db._store.get(`${C.DRIVERS}/${DRIVER_ID}`);
+    expect(excluded.performanceOutcome).toBe('excluded_cancelled');
+    expect(driver.driverPerformanceStats).toMatchObject({
+      terminalRideCount: 1,
+      completedRideCount: 1,
+      cancelledRideCount: 0,
+      excludedCancellationCount: 1,
+    });
   });
 });
