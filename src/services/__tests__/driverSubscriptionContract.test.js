@@ -50,7 +50,22 @@ describe('block 19 real Pix subscription contract', () => {
     expect(model).toContain("paymentReason = 'ride_grace_active'");
     expect(screen).toContain("title={busy ? 'GERANDO PIX…' : view.paymentButtonTitle}");
     expect(screen).toContain('disabled={paymentDisabled}');
-    expect(screen).toContain('O pagamento será liberado após a quinta corrida');
+    expect(screen).toContain('O pagamento de 30 dias será liberado após a quinta corrida');
+  });
+
+  it('states unmistakably that paid subscriptions last 30 days, not 60 days', () => {
+    const pricing = source('src/constants/pricingConfig.js');
+    const screen = source('src/app/(driver)/subscription-plans.jsx');
+
+    expect(pricing).toContain('SUBSCRIPTION_PERIOD_DAYS = 30');
+    expect(screen).toContain('Cada pagamento de assinatura vale 30 dias');
+    expect(screen).toContain('Os 60 dias não são a duração da assinatura');
+    expect(screen).toContain('Seu plano de 30 dias');
+    expect(screen).toContain('Planos de 30 dias');
+    expect(screen).toContain('Assinatura de 30 dias via Pix');
+    expect(screen).toContain('30 dias de assinatura ativados');
+    expect(screen).not.toContain('plano de 60 dias');
+    expect(screen).not.toContain('assinatura de 60 dias');
   });
 
   it('shows the real plans, periods and standard commissions', () => {
@@ -65,7 +80,7 @@ describe('block 19 real Pix subscription contract', () => {
     expect(pricing).toContain('SUBSCRIPTION_PERIOD_DAYS = 30');
     expect(model).toContain('priceLabel: formatBRL(priceCentavos)');
     expect(model).toContain('commissionLabel: `${commissionBps / 100}%`');
-    expect(screen).toContain('Planos mensais');
+    expect(screen).toContain('Planos de 30 dias');
     expect(screen).toContain('Comissão padrão: ${plan.commissionLabel}');
     expect(screen).toContain('plan.priceLabel');
   });
@@ -102,9 +117,9 @@ describe('block 19 real Pix subscription contract', () => {
     expect(walletStart).toBeGreaterThan(subscriptionStart);
     expect(subscriptionClientBlock).toContain("purpose: 'driver_subscription'");
     expect(subscriptionClientBlock).not.toContain('amountCentavos');
-    expect(screen).toContain('title="Assinatura via Pix"');
+    expect(screen).toContain('title="Assinatura de 30 dias via Pix"');
     expect(screen).toContain('Aguardando pagamento…');
-    expect(screen).toContain('Pagamento confirmado — assinatura ativada!');
+    expect(screen).toContain('Pagamento confirmado — 30 dias de assinatura ativados!');
     expect(paymentSheet).toContain('getPaymentStatus(localPaymentId)');
     expect(paymentSheet).toContain('POLL_INTERVAL_MS = 5000');
     expect(creation).toContain('computeSubscriptionExtension(driver, nowMs)');
