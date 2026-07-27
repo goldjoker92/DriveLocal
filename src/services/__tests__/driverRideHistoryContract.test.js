@@ -30,9 +30,10 @@ describe('real driver history and performance contract', () => {
     expect(indexes).toContain('"fieldPath": "__name__", "order": "DESCENDING"');
   });
 
-  it('keeps performance statistics server-owned and idempotent', () => {
+  it('keeps performance statistics server-owned, idempotent and fair', () => {
     const index = source('functions/src/index.js');
     const triggers = source('functions/src/drivers/performanceStatsTriggers.js');
+    const policy = source('functions/src/drivers/performanceStats.js');
 
     expect(index).toContain('exports.driverOfferReceivedStatsTrigger');
     expect(index).toContain('exports.driverOfferAcceptedStatsTrigger');
@@ -42,6 +43,10 @@ describe('real driver history and performance contract', () => {
     expect(triggers).toContain('driverRideTerminalStatsAppliedVersion');
     expect(triggers).toContain('receivedRecovered');
     expect(triggers).toContain('driverPerformanceStats: stats');
+    expect(triggers).toContain("ride.cancelledBy === 'passenger'");
+    expect(triggers).toContain("ride.cancelReasonCode === 'passenger_no_show'");
+    expect(triggers).toContain("return 'excluded_cancelled'");
+    expect(policy).toContain('excludedCancellationCount');
   });
 
   it('loads three recent rides in the cockpit and all pages through the secure service', () => {
@@ -53,6 +58,7 @@ describe('real driver history and performance contract', () => {
     expect(dashboard).toContain('ÚLTIMAS 3 CORRIDAS');
     expect(dashboard).toContain('VER TODAS');
     expect(dashboard).toContain("router.push('/ride-history')");
+    expect(dashboard).toContain('summary.excludedCancellationCount');
     expect(screen).toContain('loadDriverRideHistoryPage({ limit: 20 })');
     expect(screen).toContain('CARREGAR MAIS CORRIDAS');
     expect(screen).toContain('PARTIDA');
