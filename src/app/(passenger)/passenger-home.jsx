@@ -1,8 +1,8 @@
 // Passenger dashboard (route "/passenger-home"). The server-owned activeRideId is
 // listened to in real time. An active ride always has visual priority; otherwise the
-// passenger gets a compact request launcher and recent secure history.
+// passenger gets a compact secure request form and recent history.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,11 +21,15 @@ import {
   VEHICLE_MOTO,
 } from '../../constants/vehicleTypes';
 import { auth } from '../../config/firebase';
+import { resolveAddressToCoords } from '../../services/locationService';
 import { listenToPassenger } from '../../services/passengerService';
 import { loadPassengerRideHistoryPage } from '../../services/passengerRideHistoryService';
-import { listenToRide, listenToRideLocation } from '../../services/ridesService';
+import { listenToRide, listenToRideLocation, requestRide } from '../../services/ridesService';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { normalizePassengerHistoryPage } from '../../utils/passengerRideHistory';
+
+const OUT_OF_AREA_MSG =
+  'No momento, a DriveLocal atende apenas corridas com embarque e destino dentro de Horizonte.';
 
 function passengerFirstName(passenger) {
   const value = typeof passenger?.fullName === 'string'
@@ -33,6 +37,21 @@ function passengerFirstName(passenger) {
     : '';
   if (!value || value.includes('@')) return 'Passageiro';
   return value.split(/\s+/)[0] || 'Passageiro';
+}
+
+function geocoderQuery(text) {
+  const clean = String(text || '').trim();
+  if (/horizonte/i.test(clean)) return `${clean}, Ceará, Brasil`;
+  return `${clean}, Horizonte, Ceará, Brasil`;
+}
+
+function requestErrorMessage(error) {
+  const details = error?.details && typeof error.details === 'object' ? error.details : null;
+  const code = details?.code || error?.code || '';
+  if (String(code).includes('OUT_OF_SERVICE_AREA')) return OUT_OF_AREA_MSG;
+  if (String(code).includes('RIDE_IN_PROGRESS')) return 'Você já tem uma corrida em andamento.';
+  if (details?.message) return String(details.message);
+  return error?.message || 'Não foi possível pedir a corrida. Tente novamente.';
 }
 
 function activeRideRoute(ride) {
@@ -79,6 +98,7 @@ function VehiclePicker({ value, onChange }) {
 
 export default function PassengerHome() {
   const router = useRouter();
+  const idempotencyKeyRef = useRef(null);
   const [passenger, setPassenger] = useState(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [activeRide, setActiveRide] = useState(null);
@@ -86,6 +106,7 @@ export default function PassengerHome() {
   const [originText, setOriginText] = useState('');
   const [destinationText, setDestinationText] = useState('');
   const [vehicleType, setVehicleType] = useState(VEHICLE_MOTO);
+  const [submitting, setSubmitting] = useState(false);
   const [recentHistory, setRecentHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState('');
@@ -179,7 +200,12 @@ export default function PassengerHome() {
     return () => { active = false; };
   }, [activeRideId]);
 
-  function continueRequest() {
+  function resetRequestAttempt() {
+    idempotencyKeyRef.current = null;
+  }
+
+  async function submitCompactRequest() {
+    if (submitting || activeRideId) return;
     setError('');
     if (!originText.trim()) {
       setError('Informe o local de partida.');
@@ -189,14 +215,73 @@ export default function PassengerHome() {
       setError('Informe para onde você vai.');
       return;
     }
-    router.push({
-      pathname: '/request-ride',
-      params: {
-        originText: originText.trim(),
-        destinationText: destinationText.trim(),
-        vehicleType,
-      },
+
+    setSubmitting(true);
+    const startedAt = Date.now();
+    logRideClientEvent('ride.passenger_dashboard.request_started', {
+      action: 'requestRide',
+      vehicleType,
+      originTextLength: originText.trim().length,
+      destinationTextLength: destinationText.trim().length,
     });
+
+    try {
+      const [pickupResult, destinationResult] = await Promise.all([
+        resolveAddressToCoords(geocoderQuery(originText)),
+        resolveAddressToCoords(geocoderQuery(destinationText)),
+      ]);
+      if (pickupResult.status !== 'ok') {
+        throw new Error('Não encontramos o local de partida. Informe rua, número e bairro.');
+      }
+      if (destinationResult.status !== 'ok') {
+        throw new Error('Não encontramos o destino. Informe rua, número, bairro ou um ponto conhecido.');
+      }
+
+      const ride = await requestRide({
+        vehicleType,
+        pickup: {
+          lat: pickupResult.lat,
+          lng: pickupResult.lng,
+          label: originText.trim(),
+        },
+        destination: {
+          lat: destinationResult.lat,
+          lng: destinationResult.lng,
+          label: destinationText.trim(),
+        },
+        idempotencyKeyRef,
+      });
+      if (!ride?.rideId) throw new Error('A solicitação não retornou uma corrida válida.');
+
+      logRideClientEvent('ride.passenger_dashboard.request_succeeded', {
+        action: 'requestRide',
+        rideId: ride.rideId,
+        resultStatus: ride.status,
+        vehicleType,
+        durationMs: Date.now() - startedAt,
+      });
+      router.replace({
+        pathname: '/searching',
+        params: {
+          rideId: ride.rideId,
+          status: ride.status || 'searching',
+          vehicleType: ride.vehicleType || vehicleType,
+          estimatedFareCentavos: String(ride.estimatedFareCentavos ?? ''),
+          routeDistanceMeters: String(ride.routeDistanceMeters ?? ''),
+          routeDurationSeconds: String(ride.routeDurationSeconds ?? ''),
+        },
+      });
+    } catch (submitError) {
+      setError(requestErrorMessage(submitError));
+      logRideClientEvent('ride.passenger_dashboard.request_failed', {
+        action: 'requestRide',
+        vehicleType,
+        durationMs: Date.now() - startedAt,
+        error: submitError,
+      }, 'error');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function openActiveRide() {
@@ -234,26 +319,42 @@ export default function PassengerHome() {
               <Text style={styles.greeting}>Olá 👋</Text>
               <Text style={styles.heroTitle}>Para onde vamos?</Text>
               <Text style={styles.mutedText}>
-                Informe o trajeto agora. O preço será calculado pelo servidor antes da busca.
+                Informe o trajeto. O preço e a área de atendimento serão validados pelo servidor.
               </Text>
             </View>
 
             <AppInput
               label="📍 Local de partida"
               value={originText}
-              onChangeText={setOriginText}
+              onChangeText={(text) => {
+                setOriginText(text);
+                resetRequestAttempt();
+              }}
               placeholder="Rua, número, bairro ou ponto conhecido"
               autoCapitalize="words"
             />
             <AppInput
               label="🏁 Para onde?"
               value={destinationText}
-              onChangeText={setDestinationText}
+              onChangeText={(text) => {
+                setDestinationText(text);
+                resetRequestAttempt();
+              }}
               placeholder="Destino dentro de Horizonte"
               autoCapitalize="words"
             />
-            <VehiclePicker value={vehicleType} onChange={setVehicleType} />
-            <AppButton title="CONTINUAR E VER PREÇO" onPress={continueRequest} />
+            <VehiclePicker
+              value={vehicleType}
+              onChange={(type) => {
+                setVehicleType(type);
+                resetRequestAttempt();
+              }}
+            />
+            <AppButton
+              title={submitting ? 'CALCULANDO E BUSCANDO…' : 'PEDIR CORRIDA'}
+              onPress={submitCompactRequest}
+              disabled={submitting || profileLoading || !passenger}
+            />
             <Text style={styles.secureNote}>
               Pagamento direto por Pix ao motorista. Embarque e destino devem ficar em Horizonte.
             </Text>
