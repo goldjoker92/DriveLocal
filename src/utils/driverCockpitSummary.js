@@ -5,12 +5,20 @@ import { MIN_WALLET_BALANCE_CENTAVOS } from '../constants/pricingConfig';
 import { resolveCommercialPolicy } from './commercialPolicy';
 
 export const DRIVER_COCKPIT_STATS_VERSION = 'driver-cockpit-stats-v1';
+export const DRIVER_PERFORMANCE_STATS_VERSION = 'driver-performance-stats-v1';
 export const DRIVER_COCKPIT_TIME_ZONE = 'America/Fortaleza';
 
 function nonNegativeInteger(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return 0;
   return Math.floor(number);
+}
+
+function ratioBps(numerator, denominator) {
+  const safeNumerator = nonNegativeInteger(numerator);
+  const safeDenominator = nonNegativeInteger(denominator);
+  if (safeDenominator <= 0) return null;
+  return Math.max(0, Math.min(10000, Math.round((safeNumerator * 10000) / safeDenominator)));
 }
 
 function localDateParts(nowMs, timeZone = DRIVER_COCKPIT_TIME_ZONE) {
@@ -128,6 +136,10 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
   const stats = driver?.cockpitStats && typeof driver.cockpitStats === 'object'
     ? driver.cockpitStats
     : {};
+  const performance = driver?.driverPerformanceStats
+    && typeof driver.driverPerformanceStats === 'object'
+    ? driver.driverPerformanceStats
+    : {};
   const keys = driverCockpitPeriodKeys(nowMs);
   const dayCurrent = stats.dayKey === keys.dayKey;
   const weekCurrent = stats.weekKey === keys.weekKey;
@@ -137,16 +149,34 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
   const held = nonNegativeInteger(driver?.walletHeldCentavos);
   const total = nonNegativeInteger(driver?.walletBalanceCentavos ?? available + held);
   const wallet = walletStatusPresentation(driver, available, nowMs);
+  const offersReceivedCount = nonNegativeInteger(performance.offersReceivedCount);
+  const offersAcceptedCount = nonNegativeInteger(performance.offersAcceptedCount);
+  const terminalRideCount = nonNegativeInteger(performance.terminalRideCount);
+  const trackedCompletedRideCount = nonNegativeInteger(performance.completedRideCount);
+  const trackedCancelledRideCount = nonNegativeInteger(performance.cancelledRideCount);
+  const totalCompletedRideCount = Math.max(
+    nonNegativeInteger(driver?.completedRideCount),
+    trackedCompletedRideCount
+  );
 
   return Object.freeze({
     statsVersion: stats.version || null,
+    performanceStatsVersion: performance.version || null,
     dayKey: keys.dayKey,
     weekKey: keys.weekKey,
     todayRideCount: dayCurrent ? nonNegativeInteger(stats.todayRideCount) : 0,
     todayReceivedCentavos: dayCurrent ? nonNegativeInteger(stats.todayReceivedCentavos) : 0,
     weekRideCount: weekCurrent ? nonNegativeInteger(stats.weekRideCount) : 0,
     weekReceivedCentavos: weekCurrent ? nonNegativeInteger(stats.weekReceivedCentavos) : 0,
-    totalCompletedRideCount: nonNegativeInteger(driver?.completedRideCount),
+    totalCompletedRideCount,
+    offersReceivedCount,
+    offersAcceptedCount,
+    terminalRideCount,
+    trackedCompletedRideCount,
+    trackedCancelledRideCount,
+    acceptanceRateBps: ratioBps(offersAcceptedCount, offersReceivedCount),
+    completionRateBps: ratioBps(trackedCompletedRideCount, terminalRideCount),
+    performanceTrackingStartedAtMs: nonNegativeInteger(performance.trackingStartedAtMs) || null,
     walletAvailableCentavos: available,
     walletHeldCentavos: held,
     walletBalanceCentavos: total,
@@ -158,5 +188,6 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
     commissionFree: wallet.commissionFree,
     commissionFreeUntilMs: wallet.commissionFreeUntilMs,
     statsCurrent: dayCurrent && weekCurrent,
+    performanceStatsReady: performance.version === DRIVER_PERFORMANCE_STATS_VERSION,
   });
 }
