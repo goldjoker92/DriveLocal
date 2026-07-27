@@ -51,6 +51,9 @@ describe('compact driver cockpit summary', () => {
       walletBalanceCentavos: 3250,
       walletState: 'ready',
       walletStatusLabel: 'disponível para comissões',
+      walletNeedsTopup: false,
+      walletMinimumCentavos: 300,
+      walletMinimumEligibleCentavos: 301,
       statsCurrent: true,
     });
 
@@ -61,15 +64,43 @@ describe('compact driver cockpit summary', () => {
     expect(stale.weekReceivedCentavos).toBe(0);
   });
 
-  it('maps wallet status without inferring it from the balance', () => {
-    expect(deriveDriverCockpitSummary({
-      walletStatus: 'not_required_during_commission_free_period',
-      walletAvailableCentavos: 0,
-    }).walletState).toBe('not_required');
-    expect(deriveDriverCockpitSummary({
+  it('derives wallet readiness from commission policy and real balance, never stale walletStatus', () => {
+    const now = utc('2026-07-21T15:00:00.000Z');
+
+    const commissionFree = deriveDriverCockpitSummary({
       walletStatus: 'blocked',
-      walletAvailableCentavos: 5000,
-    }).walletStatusLabel).toBe('recarga necessária');
+      walletAvailableCentavos: 0,
+      commissionFreeUntil: now + 10 * 24 * 60 * 60 * 1000,
+    }, now);
+    expect(commissionFree).toMatchObject({
+      walletState: 'not_required',
+      walletStatusLabel: 'nenhuma recarga necessária',
+      walletNeedsTopup: false,
+      commissionFree: true,
+    });
+
+    const thresholdBlocked = deriveDriverCockpitSummary({
+      walletStatus: 'ready',
+      walletAvailableCentavos: 300,
+      commissionFreeUntil: now - 1,
+    }, now);
+    expect(thresholdBlocked).toMatchObject({
+      walletState: 'blocked',
+      walletStatusLabel: 'recarga necessária',
+      walletNeedsTopup: true,
+      walletMinimumCentavos: 300,
+    });
+
+    const aboveThreshold = deriveDriverCockpitSummary({
+      walletStatus: 'blocked',
+      walletAvailableCentavos: 301,
+      commissionFreeUntil: now - 1,
+    }, now);
+    expect(aboveThreshold).toMatchObject({
+      walletState: 'ready',
+      walletStatusLabel: 'disponível para comissões',
+      walletNeedsTopup: false,
+    });
   });
 
   it('preserves a chosen display name but never uses email as identity', () => {
