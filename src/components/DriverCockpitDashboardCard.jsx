@@ -156,7 +156,11 @@ export default function DriverCockpitDashboardCard({
         if (active) setHistoryLoading(false);
       });
     return () => { active = false; };
-  }, []);
+  }, [
+    summary.totalCompletedRideCount,
+    summary.trackedCancelledRideCount,
+    summary.excludedCancellationCount,
+  ]);
 
   const performanceDetail = summary.performanceStatsReady
     ? summary.performanceTrackingStartedAtMs
