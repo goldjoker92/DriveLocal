@@ -1,5 +1,6 @@
 const {
   REDACTED,
+  deriveOperationalPhase,
   redactSensitiveData,
 } = require('../logger');
 
@@ -71,5 +72,16 @@ describe('production structured log redaction', () => {
       targetUserId: REDACTED,
       targetUserIdHash: 'hash-target',
     });
+  });
+
+  it('maps legacy event names into the shared production phase vocabulary', () => {
+    expect(deriveOperationalPhase('wallet.topup.requested')).toBe('requested');
+    expect(deriveOperationalPhase('ride.accept.started')).toBe('started');
+    expect(deriveOperationalPhase('ride.accept.won')).toBe('succeeded');
+    expect(deriveOperationalPhase('notification.failed')).toBe('failed');
+    expect(deriveOperationalPhase('ride.arrived_replayed')).toBe('restored');
+    expect(deriveOperationalPhase('notification.duplicate_ignored')).toBe('duplicate_ignored');
+    expect(deriveOperationalPhase('custom.event', 'succeeded')).toBe('succeeded');
+    expect(deriveOperationalPhase('custom.event', 'unsupported')).toBeNull();
   });
 });
