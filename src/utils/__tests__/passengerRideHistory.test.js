@@ -48,11 +48,39 @@ describe('passenger ride history presentation', () => {
       pickupLabel: 'Local de partida',
       destinationLabel: 'Destino',
       vehicleLabel: 'Carro',
+      amountCentavos: null,
       amountLabel: 'Valor indisponível',
       amountDetail: null,
       rideStatusLabel: 'Nenhum motorista disponível',
       pixStatusLabel: 'Pix ainda não iniciado',
     });
+  });
+
+  it('keeps an explicit zero fare distinct from a missing fare', () => {
+    expect(normalizePassengerHistoryItem({
+      rideId: 'ride_zero',
+      createdAtMs: 1000,
+      amountCentavos: 0,
+      amountKind: 'final',
+      rideStatus: 'completed',
+      pixStatus: 'received',
+    })).toMatchObject({
+      amountCentavos: 0,
+      amountLabel: 'R$ 0,00',
+      amountDetail: 'valor final',
+    });
+
+    for (const missingAmount of [null, undefined, '']) {
+      expect(normalizePassengerHistoryItem({
+        rideId: `ride_missing_${String(missingAmount)}`,
+        createdAtMs: 1000,
+        amountCentavos: missingAmount,
+        amountKind: 'unavailable',
+      })).toMatchObject({
+        amountCentavos: null,
+        amountLabel: 'Valor indisponível',
+      });
+    }
   });
 
   it('rejects items without a stable ride id and deduplicates pages', () => {
