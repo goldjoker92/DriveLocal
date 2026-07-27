@@ -33,9 +33,10 @@ describe('admin command center contracts', () => {
 
   it('generates dynamic operational commentary and traceable interactions', () => {
     const dashboard = source('src/app/(admin)/dashboard.jsx');
+    const primitives = source('src/components/admin/AdminDashboardPrimitives.jsx');
 
     expect(dashboard).toContain('buildAutomaticComment');
-    expect(dashboard).toContain('LEITURA AUTOMÁTICA');
+    expect(primitives).toContain('LEITURA AUTOMÁTICA');
     expect(dashboard).toContain("traceDashboard('comment.generated'");
     expect(dashboard).toContain("traceDashboard('action.opened'");
     expect(dashboard).toContain("traceDashboard('period.changed'");
