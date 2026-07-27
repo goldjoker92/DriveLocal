@@ -16,7 +16,9 @@ describe('driver arrival privacy boundary', () => {
   it('copies waiting timestamps but no passenger identity or destination to the offer', () => {
     const handler = source('src/rides/markDriverArrived.js');
     const helperStart = handler.indexOf('function setSafeWaitProjectionTx');
-    const helperEnd = handler.indexOf('async function markDriverArrived', helperStart);
+    // Stop at the next top-level helper. The notification builder legitimately needs
+    // the passenger recipient id, but that value is never written to driverOffers.
+    const helperEnd = handler.indexOf('function buildArrivalNotification', helperStart);
     const offerProjection = handler.slice(helperStart, helperEnd);
 
     expect(helperStart).toBeGreaterThan(-1);
