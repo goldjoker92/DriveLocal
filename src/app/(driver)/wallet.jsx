@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
@@ -13,6 +13,7 @@ import AppInput from '../../components/AppInput';
 import WalletCard from '../../components/WalletCard';
 import DriverPixPaymentSheet from '../../components/DriverPixPaymentSheet';
 import { colors } from '../../constants/colors';
+import { MIN_WALLET_BALANCE_CENTAVOS } from '../../constants/pricingConfig';
 import { radius, spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
@@ -27,8 +28,13 @@ import {
   parseWalletTopupInput,
 } from '../../utils/driverWallet';
 import { formatDateBR } from '../../utils/driverCockpit';
+import { formatBRL } from '../../utils/format';
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
+
+function firstParam(value) {
+  return Array.isArray(value) ? value[0] : value;
+}
 
 function HistoryRow({ item }) {
   const amountTone = item.direction === 'credit'
@@ -52,7 +58,9 @@ function HistoryRow({ item }) {
 
 export default function Wallet() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const uid = auth.currentUser?.uid || null;
+  const walletRequiredContext = firstParam(params.reason) === 'wallet_required';
   const [liveDriver, setLiveDriver] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
@@ -120,6 +128,9 @@ export default function Wallet() {
 
   const unlockDate = formatDateBR(wallet.topupUnlockAtMs);
   const anyGenerating = generatingKey != null;
+  const walletReadyForWork = !balanceLoading
+    && !wallet.topupLocked
+    && wallet.availableCentavos > MIN_WALLET_BALANCE_CENTAVOS;
   const topupControlsDisabled = balanceLoading
     || !liveDriver
     || wallet.topupLocked
@@ -174,9 +185,51 @@ export default function Wallet() {
           topupLocked={wallet.topupLocked}
         />
 
+        {walletRequiredContext ? (
+          <AppCard style={[
+            styles.workContextCard,
+            wallet.topupLocked
+              ? styles.workContextInfo
+              : walletReadyForWork
+                ? styles.workContextSuccess
+                : styles.workContextWarning,
+          ]}>
+            <Text style={styles.workContextEyebrow}>POR QUE VOCÊ VEIO PARA A CARTEIRA</Text>
+            <Text style={styles.workContextTitle}>
+              {wallet.topupLocked
+                ? 'Nenhuma recarga é necessária agora'
+                : walletReadyForWork
+                  ? 'Saldo liberado para voltar a trabalhar'
+                  : 'Recarga necessária para voltar a trabalhar'}
+            </Text>
+            <Text style={styles.workContextText}>
+              {wallet.topupLocked
+                ? `Sua comissão ainda está em 0%. Enquanto esse benefício estiver ativo, o wallet não bloqueia suas corridas${unlockDate ? ` e as recargas ficam liberadas em ${unlockDate}` : ''}.`
+                : walletReadyForWork
+                  ? `Seu saldo disponível é ${formatBRL(wallet.availableCentavos)}, acima do limite de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)}. O servidor fará uma nova verificação quando você voltar ao painel.`
+                  : `Seu saldo disponível é ${formatBRL(wallet.availableCentavos)}. Para ficar disponível, ele deve estar acima de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)} e também cobrir a comissão reservada da próxima corrida. A recarga Pix mínima é R$ 10,00.`}
+            </Text>
+            {wallet.topupLocked || walletReadyForWork ? (
+              <AppButton
+                title="VOLTAR AO PAINEL DO MOTORISTA"
+                onPress={() => router.replace('/driver-home')}
+              />
+            ) : (
+              <Text style={styles.workContextInstruction}>
+                Escolha um valor abaixo. O saldo só será liberado após a confirmação do Mercado Pago.
+              </Text>
+            )}
+          </AppCard>
+        ) : null}
+
         {payment ? (
           <DriverPixPaymentSheet
             payment={payment}
+            title="Recarga do saldo DriveLocal"
+            statusLabels={{
+              paid: 'Pagamento confirmado — saldo sendo atualizado!',
+              pending: 'Aguardando pagamento da recarga…',
+            }}
             onStatusChange={onPaymentStatusChange}
             onClose={() => {
               setPayment(null);
@@ -191,6 +244,11 @@ export default function Wallet() {
                 <Text style={styles.sectionCopy}>
                   O saldo é creditado somente após a confirmação do Mercado Pago.
                 </Text>
+                {!wallet.topupLocked ? (
+                  <Text style={styles.thresholdCopy}>
+                    {`Para receber corridas com comissão, mantenha o saldo disponível acima de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)}. A recarga mínima é R$ 10,00.`}
+                  </Text>
+                ) : null}
               </View>
             </View>
 
@@ -301,6 +359,25 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     flexGrow: 1,
   },
+  workContextCard: { gap: spacing.sm, borderWidth: 1 },
+  workContextWarning: { backgroundColor: colors.warningBg, borderColor: colors.warning },
+  workContextSuccess: { backgroundColor: colors.successBg, borderColor: colors.success },
+  workContextInfo: { backgroundColor: colors.primaryTint, borderColor: colors.primary },
+  workContextEyebrow: {
+    fontFamily,
+    color: colors.textMuted,
+    ...typography.caption,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  workContextTitle: { fontFamily, color: colors.text, ...typography.h3 },
+  workContextText: { fontFamily, color: colors.text, ...typography.small, lineHeight: 19 },
+  workContextInstruction: {
+    fontFamily,
+    color: colors.warning,
+    ...typography.bodyBold,
+    lineHeight: 20,
+  },
   topupCard: { gap: spacing.lg },
   historyCard: { gap: spacing.md },
   sectionHeader: {
@@ -318,6 +395,12 @@ const styles = StyleSheet.create({
   sectionCopy: {
     fontFamily,
     color: colors.textMuted,
+    ...typography.small,
+    lineHeight: 19,
+  },
+  thresholdCopy: {
+    fontFamily,
+    color: colors.warning,
     ...typography.small,
     lineHeight: 19,
   },
