@@ -10,6 +10,14 @@ import { APP_ENVIRONMENT } from '../config/runtimeEnvironment';
 const DEV_RUNTIME = typeof __DEV__ !== 'undefined' && __DEV__ === true;
 const CLIENT_RIDE_LOGS_ENABLED = APP_ENVIRONMENT === 'development' || DEV_RUNTIME;
 const SAFE_COMMISSION_DISPLAY_BPS = new Set([0, 1200, 1500]);
+const OPERATIONAL_PHASES = new Set([
+  'requested',
+  'started',
+  'succeeded',
+  'failed',
+  'restored',
+  'duplicate_ignored',
+]);
 
 function safeString(value, max = 120) {
   if (value == null) return null;
@@ -32,6 +40,22 @@ function compact(object) {
   return Object.fromEntries(
     Object.entries(object).filter(([, value]) => value !== null && value !== undefined)
   );
+}
+
+export function deriveOperationalPhase(eventName, explicitPhase = null) {
+  const explicit = safeString(explicitPhase, 32)?.toLowerCase();
+  if (explicit && OPERATIONAL_PHASES.has(explicit)) return explicit;
+
+  const event = safeString(eventName, 160)?.toLowerCase() || '';
+  if (event.includes('duplicate_ignored')) return 'duplicate_ignored';
+  if (/(restored|recovered|replayed|resume)/.test(event)) return 'restored';
+  if (/(requested|request_started)/.test(event)) return 'requested';
+  if (/(started|starting|attempted)/.test(event)) return 'started';
+  if (/(failed|failure|rejected|denied|error|expired)/.test(event)) return 'failed';
+  if (/(succeeded|success|sent|completed|confirmed|captured|created|accepted|arrived|won|cancelled)/.test(event)) {
+    return 'succeeded';
+  }
+  return null;
 }
 
 /**
@@ -99,9 +123,11 @@ export function logRideClientEvent(eventName, fields = {}, level = 'info') {
     scope: 'ride_client',
     severity,
     eventName: safeString(eventName, 96),
+    phase: deriveOperationalPhase(eventName, fields.phase),
     at: new Date().toISOString(),
     action: safeString(fields.action, 64),
     step: safeString(fields.step, 64),
+    provider: safeString(fields.provider, 32),
     rideId: safeString(fields.rideId, 128),
     status: safeString(fields.status, 48),
     resultStatus: safeString(fields.resultStatus, 48),
