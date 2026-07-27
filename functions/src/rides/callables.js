@@ -18,6 +18,7 @@ const { markDriverArrived } = require('./markDriverArrived');
 const { cancelRide } = require('./cancelRide');
 const { normalizedCancellationRequest } = require('./cancellationCompatibility');
 const { sendRideQuickMessage } = require('./sendQuickMessage');
+const { getPassengerRideHistory } = require('./passengerHistory');
 const lifecycle = require('./lifecycle');
 const {
   safeDriverAcceptanceView,
@@ -152,6 +153,7 @@ module.exports = {
   sendRideQuickMessageSecure: bindLifecycle('sendRideQuickMessageSecure', sendRideQuickMessage),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
+  getPassengerRideHistorySecure: bindLifecycle('getPassengerRideHistorySecure', getPassengerRideHistory),
   getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),
   listAdminDisputedRidesSecure: bindLifecycle('listAdminDisputedRidesSecure', listAdminDisputedRides),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
