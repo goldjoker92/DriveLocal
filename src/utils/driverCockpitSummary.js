@@ -1,6 +1,9 @@
 // Pure presentation helpers for the compact driver cockpit. No Firestore access,
 // no mock values and no exact per-ride platform commission amounts.
 
+import { MIN_WALLET_BALANCE_CENTAVOS } from '../constants/pricingConfig';
+import { resolveCommercialPolicy } from './commercialPolicy';
+
 export const DRIVER_COCKPIT_STATS_VERSION = 'driver-cockpit-stats-v1';
 export const DRIVER_COCKPIT_TIME_ZONE = 'America/Fortaleza';
 
@@ -96,14 +99,29 @@ export function driverCockpitVehicle(driver) {
   };
 }
 
-function walletStatusPresentation(status) {
-  if (status === 'required' || status === 'blocked') {
-    return { walletState: 'blocked', walletStatusLabel: 'recarga necessária' };
+// Wallet readiness is derived from the same commercial policy and real available
+// balance used by the backend. `walletStatus` may still exist on legacy records, but
+// it never decides whether the cockpit asks the driver to recharge.
+function walletStatusPresentation(driver, availableCentavos, nowMs) {
+  const commercial = resolveCommercialPolicy(driver || {}, nowMs);
+  if (commercial.freePeriodActive) {
+    return {
+      walletState: 'not_required',
+      walletStatusLabel: 'nenhuma recarga necessária',
+      walletNeedsTopup: false,
+      commissionFree: true,
+      commissionFreeUntilMs: commercial.freePeriodUntilMs || null,
+    };
   }
-  if (status === 'not_required_during_commission_free_period') {
-    return { walletState: 'not_required', walletStatusLabel: 'nenhuma recarga necessária' };
-  }
-  return { walletState: 'ready', walletStatusLabel: 'disponível para comissões' };
+
+  const blocked = !(availableCentavos > MIN_WALLET_BALANCE_CENTAVOS);
+  return {
+    walletState: blocked ? 'blocked' : 'ready',
+    walletStatusLabel: blocked ? 'recarga necessária' : 'disponível para comissões',
+    walletNeedsTopup: blocked,
+    commissionFree: false,
+    commissionFreeUntilMs: null,
+  };
 }
 
 export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
@@ -118,7 +136,7 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
   );
   const held = nonNegativeInteger(driver?.walletHeldCentavos);
   const total = nonNegativeInteger(driver?.walletBalanceCentavos ?? available + held);
-  const wallet = walletStatusPresentation(driver?.walletStatus);
+  const wallet = walletStatusPresentation(driver, available, nowMs);
 
   return Object.freeze({
     statsVersion: stats.version || null,
@@ -134,6 +152,11 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
     walletBalanceCentavos: total,
     walletState: wallet.walletState,
     walletStatusLabel: wallet.walletStatusLabel,
+    walletNeedsTopup: wallet.walletNeedsTopup,
+    walletMinimumCentavos: MIN_WALLET_BALANCE_CENTAVOS,
+    walletMinimumEligibleCentavos: MIN_WALLET_BALANCE_CENTAVOS + 1,
+    commissionFree: wallet.commissionFree,
+    commissionFreeUntilMs: wallet.commissionFreeUntilMs,
     statsCurrent: dayCurrent && weekCurrent,
   });
 }
