@@ -22,6 +22,7 @@ function normalizedStats(previous = {}, nowMs = Date.now()) {
     terminalRideCount: nonNegativeInteger(prior.terminalRideCount),
     completedRideCount: nonNegativeInteger(prior.completedRideCount),
     cancelledRideCount: nonNegativeInteger(prior.cancelledRideCount),
+    excludedCancellationCount: nonNegativeInteger(prior.excludedCancellationCount),
     trackingStartedAtMs: nonNegativeInteger(prior.trackingStartedAtMs) || nonNegativeInteger(nowMs),
     updatedAtMs: nonNegativeInteger(nowMs),
   };
@@ -42,11 +43,19 @@ function nextOfferAcceptedStats(previous, nowMs) {
   return Object.freeze(next);
 }
 
-function nextTerminalRideStats(previous, terminalStatus, nowMs) {
+function nextTerminalRideStats(previous, performanceOutcome, nowMs) {
   const next = normalizedStats(previous, nowMs);
-  next.terminalRideCount += 1;
-  if (terminalStatus === 'completed') next.completedRideCount += 1;
-  else if (terminalStatus === 'cancelled') next.cancelledRideCount += 1;
+  if (performanceOutcome === 'completed') {
+    next.terminalRideCount += 1;
+    next.completedRideCount += 1;
+  } else if (performanceOutcome === 'driver_cancelled') {
+    next.terminalRideCount += 1;
+    next.cancelledRideCount += 1;
+  } else if (performanceOutcome === 'excluded_cancelled') {
+    // Passenger cancellations and a valid passenger no-show remain visible in
+    // history, but do not punish the driver's completion indicator.
+    next.excludedCancellationCount += 1;
+  }
   return Object.freeze(next);
 }
 
