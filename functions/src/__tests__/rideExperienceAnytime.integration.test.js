@@ -114,13 +114,16 @@ describe('any-hour moto customer experience', () => {
       status: C.RIDE_STATUS.SEARCHING,
       vehicleType: 'moto',
       estimatedFareCentavos: 774,
-      estimatedCommissionCentavos: 100,
       routeDistanceMeters: 4000,
       routeDurationSeconds: 720,
     });
     expect(routeCalls).toEqual([{ origin: PICKUP, destination: DESTINATION, vehicleType: 'moto' }]);
 
     const rideId = created.rideId;
+    const persistedQuotedRide = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
+    expect(persistedQuotedRide.estimatedCommissionCentavos).toBe(100);
+    expect(persistedQuotedRide.minimumPlatformCommissionCentavos).toBe(100);
+
     const offerId = `${rideId}_${DRIVER}`;
     const offered = db._store.get(`${C.DRIVER_OFFERS}/${offerId}`);
     expect(offered.pickupPreview.label).toBe('Região do embarque');
