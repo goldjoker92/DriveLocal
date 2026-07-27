@@ -23,9 +23,18 @@ function approvedDriver(overrides = {}) {
   };
 }
 
+function sectionBy(view, key) {
+  return view.ruleSections.find((section) => section.key === key);
+}
+
+function ruleBy(view, sectionKey, ruleKey) {
+  return sectionBy(view, sectionKey)?.items.find((item) => item.key === ruleKey);
+}
+
 describe('real driver Pix subscription view', () => {
-  it('keeps founder payment visible and locked during the 60-day free window', () => {
+  it('explains every founder obligation during and after the 60-day window', () => {
     const view = deriveDriverSubscriptionView(approvedDriver({
+      approvalNumber: 12,
       founderEligible: true,
       founderNumber: 12,
       subscriptionFreeUntil: NOW + 50 * DAY_MS,
@@ -38,11 +47,24 @@ describe('real driver Pix subscription view', () => {
       paymentButtonTitle: '🔒 Pagar assinatura',
       paymentReason: 'founder_free_window',
       commissionLabel: '0%',
+      profileTitle: 'Motorista Fundador nº 1–100',
     });
     expect(view.statusDetail).toContain('Assinatura grátis até');
+    expect(view.noSurpriseText).toContain('Depois, assinatura mensal, comissão normal');
+    expect(ruleBy(view, 'now', 'subscription')).toMatchObject({ value: 'Grátis' });
+    expect(ruleBy(view, 'now', 'commission')).toMatchObject({ value: '0%' });
+    expect(ruleBy(view, 'now', 'wallet')).toMatchObject({ value: 'Sem recarga' });
+    expect(ruleBy(view, 'after_launch', 'subscription')).toMatchObject({
+      value: 'Mensal obrigatória',
+    });
+    expect(ruleBy(view, 'after_launch', 'commission')).toMatchObject({
+      value: '12% por corrida',
+    });
+    expect(ruleBy(view, 'after_launch', 'wallet')).toMatchObject({ value: 'Obrigatório' });
+    expect(ruleBy(view, 'after_launch', 'wallet').detail).toContain('acima de R$ 3,00');
   });
 
-  it('shows the exact #101+ ride-grace progress and blocks premature payment', () => {
+  it('explains #101+ independent five-ride and 60-day counters', () => {
     const view = deriveDriverSubscriptionView(approvedDriver({
       approvalNumber: 101,
       freeRideCountUsed: 3,
@@ -55,10 +77,25 @@ describe('real driver Pix subscription view', () => {
       paymentButtonTitle: '🔒 Pagar assinatura',
       paymentReason: 'ride_grace_active',
       freeRidesRemaining: 2,
+      profileTitle: 'Motorista nº 101+',
+    });
+    expect(view.noSurpriseText).toContain('São contadores independentes');
+    expect(ruleBy(view, 'now', 'subscription')).toMatchObject({
+      value: 'Sem pagamento',
+    });
+    expect(ruleBy(view, 'now', 'subscription').detail).toContain('2 corridas promocionais restantes');
+    expect(ruleBy(view, 'after_fifth_ride', 'subscription')).toMatchObject({
+      value: 'Mensal obrigatória',
+    });
+    expect(ruleBy(view, 'after_fifth_ride', 'commission')).toMatchObject({
+      value: 'Continua 0%',
+    });
+    expect(ruleBy(view, 'after_launch', 'commission')).toMatchObject({
+      value: '12% por corrida',
     });
   });
 
-  it('requires subscription after ride five while preserving zero commission until day 60', () => {
+  it('requires subscription after ride five while preserving commission and wallet grace until day 60', () => {
     const view = deriveDriverSubscriptionView(approvedDriver({
       approvalNumber: 101,
       freeRideCountUsed: 5,
@@ -73,21 +110,36 @@ describe('real driver Pix subscription view', () => {
       freeRidesRemaining: 0,
     });
     expect(view.statusDetail).toContain('Comissão 0% até');
+    expect(sectionBy(view, 'now').title).toContain('5 corridas promocionais concluídas');
+    expect(ruleBy(view, 'now', 'subscription')).toMatchObject({
+      value: 'Mensal obrigatória',
+    });
+    expect(ruleBy(view, 'now', 'commission')).toMatchObject({ value: '0%' });
+    expect(ruleBy(view, 'now', 'wallet')).toMatchObject({ value: 'Sem recarga' });
+    expect(ruleBy(view, 'after_launch', 'commission')).toMatchObject({
+      value: '12% por corrida',
+    });
+    expect(ruleBy(view, 'after_launch', 'wallet')).toMatchObject({ value: 'Obrigatório' });
   });
 
-  it('shows authoritative vehicle prices and standard commissions after day 60', () => {
-    const moto = deriveDriverSubscriptionView(approvedDriver({
+  it('applies the same post-day-60 structure to founders and #101+ drivers', () => {
+    const founderMoto = deriveDriverSubscriptionView(approvedDriver({
+      approvalNumber: 12,
+      founderEligible: true,
+      founderNumber: 12,
+      subscriptionFreeUntil: NOW - 1,
       commissionFreeUntil: NOW - 1,
-      freeRideCountUsed: 5,
+      freeRideCountUsed: 0,
       vehicleType: 'moto',
     }), NOW);
-    const car = deriveDriverSubscriptionView(approvedDriver({
+    const nonFounderCar = deriveDriverSubscriptionView(approvedDriver({
+      approvalNumber: 101,
       commissionFreeUntil: NOW - 1,
-      freeRideCountUsed: 5,
+      freeRideCountUsed: 2,
       vehicleType: 'car',
     }), NOW);
 
-    expect(moto).toMatchObject({
+    expect(founderMoto).toMatchObject({
       mode: DRIVER_SUBSCRIPTION_MODE.REQUIRED_STANDARD,
       paymentEnabled: true,
       commissionLabel: '12%',
@@ -99,7 +151,7 @@ describe('real driver Pix subscription view', () => {
         commissionLabel: '12%',
       },
     });
-    expect(car).toMatchObject({
+    expect(nonFounderCar).toMatchObject({
       mode: DRIVER_SUBSCRIPTION_MODE.REQUIRED_STANDARD,
       paymentEnabled: true,
       commissionLabel: '15%',
@@ -111,11 +163,21 @@ describe('real driver Pix subscription view', () => {
         commissionLabel: '15%',
       },
     });
+
+    for (const view of [founderMoto, nonFounderCar]) {
+      expect(sectionBy(view, 'now').title).toBe('Agora — período promocional encerrado');
+      expect(ruleBy(view, 'now', 'subscription')).toMatchObject({
+        value: 'Mensal obrigatória',
+      });
+      expect(ruleBy(view, 'now', 'wallet')).toMatchObject({ value: 'Obrigatório' });
+      expect(ruleBy(view, 'now', 'wallet').detail).toContain('acima de R$ 3,00');
+    }
   });
 
-  it('allows early renewal and preserves all remaining paid days', () => {
+  it('explains active subscription separately from the 60-day commission benefit', () => {
     const currentExpiry = NOW + 12 * DAY_MS;
     const view = deriveDriverSubscriptionView(approvedDriver({
+      approvalNumber: 101,
       freeRideCountUsed: 5,
       subscriptionActive: true,
       subscriptionStatus: 'active',
@@ -129,6 +191,12 @@ describe('real driver Pix subscription view', () => {
       paidSubscriptionActive: true,
     });
     expect(view.renewalDetail).toContain('Seus dias restantes são preservados');
+    expect(ruleBy(view, 'now', 'subscription')).toMatchObject({ value: 'Ativa' });
+    expect(ruleBy(view, 'now', 'commission')).toMatchObject({ value: '0%' });
+    expect(ruleBy(view, 'now', 'wallet')).toMatchObject({ value: 'Sem recarga' });
+    expect(ruleBy(view, 'after_launch', 'commission')).toMatchObject({
+      value: '12% por corrida',
+    });
     expect(computeRenewedExpirationMs({ subscriptionExpiresAt: currentExpiry }, NOW))
       .toBe(currentExpiry + 30 * DAY_MS);
   });
@@ -147,6 +215,10 @@ describe('real driver Pix subscription view', () => {
       paymentReason: 'vehicle_unknown',
       commissionLabel: null,
     });
+    expect(ruleBy(view, 'now', 'subscription')).toMatchObject({
+      value: 'Mensal obrigatória',
+    });
+    expect(ruleBy(view, 'now', 'commission')).toMatchObject({ value: 'Taxa indisponível' });
     expect(driverSubscriptionPlan('other', 'HORIZONTE_CE_BR')).toBeNull();
   });
 
