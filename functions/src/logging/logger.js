@@ -51,6 +51,14 @@ const SENSITIVE_IDENTITY_KEYS = new Set([
   'longitude',
 ]);
 
+const OPERATIONAL_PHASES = new Set([
+  'requested',
+  'started',
+  'succeeded',
+  'failed',
+  'restored',
+  'duplicate_ignored',
+]);
 const REDACTED = '[REDACTED]';
 const MAX_DEPTH = 8;
 
@@ -62,6 +70,22 @@ function isSensitiveKey(key) {
   const k = String(key).toLowerCase();
   return SENSITIVE_IDENTITY_KEYS.has(normalizedKey(key))
     || SENSITIVE_KEY_PATTERNS.some((p) => k.includes(p));
+}
+
+function deriveOperationalPhase(eventName, explicitPhase = null) {
+  const explicit = String(explicitPhase || '').trim().toLowerCase();
+  if (OPERATIONAL_PHASES.has(explicit)) return explicit;
+
+  const event = String(eventName || '').trim().toLowerCase();
+  if (event.includes('duplicate_ignored')) return 'duplicate_ignored';
+  if (/(restored|recovered|replayed|resume)/.test(event)) return 'restored';
+  if (/(requested|request_started)/.test(event)) return 'requested';
+  if (/(started|starting|attempted)/.test(event)) return 'started';
+  if (/(failed|failure|rejected|denied|error|expired)/.test(event)) return 'failed';
+  if (/(succeeded|success|sent|completed|confirmed|captured|created|accepted|arrived|won|cancelled)/.test(event)) {
+    return 'succeeded';
+  }
+  return null;
 }
 
 /**
@@ -111,7 +135,14 @@ function createLoggerContext(fields = {}) {
 }
 
 function buildEntry(context, eventName, severity, extra) {
-  const merged = { ...(context || {}), eventName, severity, ...(extra || {}) };
+  const phase = deriveOperationalPhase(eventName, extra?.phase);
+  const merged = {
+    ...(context || {}),
+    eventName,
+    severity,
+    ...(extra || {}),
+    ...(phase ? { phase } : {}),
+  };
   return redactSensitiveData(merged);
 }
 
@@ -141,6 +172,7 @@ async function measureDuration(clock, fn) {
 module.exports = {
   createTraceId,
   createLoggerContext,
+  deriveOperationalPhase,
   redactSensitiveData,
   logInfo,
   logWarning,
@@ -149,5 +181,6 @@ module.exports = {
   shortHash,
   SENSITIVE_KEY_PATTERNS,
   SENSITIVE_IDENTITY_KEYS,
+  OPERATIONAL_PHASES,
   REDACTED,
 };
