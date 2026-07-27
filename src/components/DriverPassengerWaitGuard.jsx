@@ -13,6 +13,7 @@ import {
   listenToMyOffer,
   reportPassengerNotFound,
 } from '../services/ridesService';
+import { driverArrivalConfirmationCopy } from '../utils/driverArrivalNotification';
 import AppButton from './AppButton';
 
 function isActiveRideRoute(route) {
@@ -96,6 +97,7 @@ export default function DriverPassengerWaitGuard({ route }) {
     : noShowRemainingMs(driverArrivedAtMs, nowMs);
   const noShowAvailable = remainingMs === 0;
   const elapsedMs = Math.max(0, nowMs - driverArrivedAtMs);
+  const arrivalCopy = driverArrivalConfirmationCopy(offer);
 
   async function handlePassengerNotFound() {
     if (!activeRideId || busy || !noShowAvailable) return;
@@ -131,12 +133,18 @@ export default function DriverPassengerWaitGuard({ route }) {
 
   return (
     <View accessibilityRole="alert" style={styles.container}>
+      <View style={styles.confirmationBox}>
+        <Text style={styles.confirmationEyebrow}>PASSAGEIRO AVISADO</Text>
+        <Text style={styles.confirmationTitle}>{arrivalCopy.title}</Text>
+        <Text style={styles.confirmationMessage}>{arrivalCopy.message}</Text>
+        <Text style={styles.confirmationNote}>{arrivalCopy.deliveryNote}</Text>
+        <Text style={styles.confirmationNote}>{arrivalCopy.offlineNote}</Text>
+      </View>
+
       <View style={styles.copy}>
-        <Text style={styles.title}>Aguardando passageiro</Text>
+        <Text style={styles.title}>Aguardando no local de embarque</Text>
         <Text style={styles.timer}>{formatWaitDuration(elapsedMs)}</Text>
-        <Text style={styles.message}>
-          O passageiro foi avisado da sua chegada. Permaneça no ponto indicado.
-        </Text>
+        <Text style={styles.message}>Permaneça no ponto indicado até o passageiro embarcar.</Text>
         {!noShowAvailable ? (
           <Text style={styles.waiting}>
             “Passageiro não apareceu” em {formatWaitDuration(remainingMs)}
@@ -163,7 +171,38 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.warning,
     backgroundColor: colors.warningBg,
-    gap: spacing.sm,
+    gap: spacing.md,
+  },
+  confirmationBox: {
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.success,
+    backgroundColor: colors.successBg,
+    gap: spacing.xs,
+  },
+  confirmationEyebrow: {
+    ...typography.caption,
+    fontFamily,
+    color: colors.success,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  confirmationTitle: {
+    ...typography.bodyBold,
+    fontFamily,
+    color: colors.text,
+  },
+  confirmationMessage: {
+    ...typography.small,
+    fontFamily,
+    color: colors.text,
+  },
+  confirmationNote: {
+    ...typography.caption,
+    fontFamily,
+    color: colors.textMuted,
+    lineHeight: 17,
   },
   copy: {
     gap: spacing.xs,
