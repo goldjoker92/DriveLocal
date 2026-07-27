@@ -17,18 +17,24 @@ function shortHash(value) {
 }
 
 // Keys whose values must NEVER be logged (case-insensitive substring match).
+// Keep operational status/version/count fields visible, but fail closed for
+// identity, exact route/location and provider payload fields.
 const SENSITIVE_KEY_PATTERNS = [
   'accesstoken', 'access_token', 'authorization', 'token', 'fcmtoken',
   'webhooksecret', 'webhook_secret', 'secret', 'password', 'passwd',
   'verificationcode', 'verification_code', 'otp',
   'cpf', 'cnpj', 'cnh', 'rg', 'identity',
+  'fullname', 'passengername', 'drivername',
   'phone', 'telefone', 'whatsapp',
-  'email', 'pixkey', 'pix_key', 'address', 'endereco',
-  'rawpayload', 'providerpayload', 'internalmessage',
+  'email', 'pixkey', 'pix_key', 'pixpayload', 'pix_payload', 'copiaecola',
+  'address', 'endereco', 'logradouro', 'street',
+  'pickup', 'destination', 'origin', 'coordinates', 'location',
+  'rawpayload', 'providerpayload', 'provider_payload', 'requestpayload',
+  'internalmessage',
 ];
 
-// Exact identity keys. They cannot use substring matching because safe correlation
-// fields such as actorUidHash and driverIdHash must remain visible.
+// Exact identity/location keys. They cannot all use substring matching because
+// safe correlation fields such as actorUidHash and driverIdHash must remain visible.
 const SENSITIVE_IDENTITY_KEYS = new Set([
   'uid',
   'actoruid',
@@ -39,6 +45,10 @@ const SENSITIVE_IDENTITY_KEYS = new Set([
   'userid',
   'driverid',
   'passengerid',
+  'lat',
+  'lng',
+  'latitude',
+  'longitude',
 ]);
 
 const REDACTED = '[REDACTED]';
