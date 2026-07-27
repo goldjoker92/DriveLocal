@@ -1,18 +1,25 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import AppButton from './AppButton';
 import AppCard from './AppCard';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
+import { loadDriverRideHistoryPage } from '../services/driverRideHistoryService';
 import { formatBRL } from '../utils/format';
 import { formatDateBR } from '../utils/driverCockpit';
+import {
+  formatDriverRateBps,
+  normalizeDriverHistoryPage,
+} from '../utils/driverRideHistory';
 
-function Metric({ value, label }) {
+function Metric({ value, label, detail }) {
   return (
     <View style={styles.metric}>
       <Text style={styles.metricValue}>{value}</Text>
       <Text style={styles.metricLabel}>{label}</Text>
+      {detail ? <Text style={styles.metricDetail}>{detail}</Text> : null}
     </View>
   );
 }
@@ -61,6 +68,49 @@ function walletCopy(summary, commission) {
   return `pronto para comissões • mínimo acima de ${threshold}`;
 }
 
+function statusColor(tone) {
+  if (tone === 'success') return colors.success;
+  if (tone === 'warning') return colors.warning;
+  if (tone === 'danger') return colors.danger;
+  if (tone === 'info') return colors.primary;
+  return colors.textMuted;
+}
+
+function RecentRideRow({ item }) {
+  return (
+    <View style={styles.historyRow}>
+      <View style={styles.historyHeader}>
+        <View style={styles.historyHeaderCopy}>
+          <Text style={styles.historyPassenger}>{item.passengerFirstName}</Text>
+          <Text style={styles.historyDate}>{item.dateLabel}</Text>
+        </View>
+        <View style={styles.historyAmountCopy}>
+          <Text style={styles.historyAmount}>{item.fareLabel}</Text>
+          {item.fareDetail ? <Text style={styles.historyFareDetail}>{item.fareDetail}</Text> : null}
+        </View>
+      </View>
+
+      <View style={styles.routeBox}>
+        <Text style={styles.routeLine}>{`📍 ${item.pickupLabel}`}</Text>
+        <Text style={styles.routeLine}>{`🏁 ${item.destinationLabel}`}</Text>
+      </View>
+
+      <View style={styles.historyMetaRow}>
+        <Text style={styles.historyMeta}>{item.vehicleLabel}</Text>
+        <Text style={styles.historyMeta}>{item.commissionLabel}</Text>
+      </View>
+      <View style={styles.historyMetaRow}>
+        <Text style={[styles.historyStatus, { color: statusColor(item.rideStatusTone) }]}>
+          {item.rideStatusLabel}
+        </Text>
+        <Text style={[styles.historyStatus, { color: statusColor(item.pixStatusTone) }]}>
+          {item.pixStatusLabel}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export default function DriverCockpitDashboardCard({
   summary,
   commission,
@@ -69,6 +119,9 @@ export default function DriverCockpitDashboardCard({
   onSubscriptionPress,
 }) {
   const router = useRouter();
+  const [recentHistory, setRecentHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState('');
   const plan = subscriptionCopy(subscription);
   const heldPrefix = summary.walletHeldCentavos > 0
     ? `${formatBRL(summary.walletHeldCentavos)} reservado • `
@@ -83,6 +136,33 @@ export default function DriverCockpitDashboardCard({
     })
     : onWalletPress || (() => router.push('/wallet'));
   const openSubscription = onSubscriptionPress || (() => router.push('/subscription-plans'));
+  const openAllHistory = () => router.push('/ride-history');
+
+  useEffect(() => {
+    let active = true;
+    setHistoryLoading(true);
+    loadDriverRideHistoryPage({ limit: 3 })
+      .then((snapshot) => {
+        if (!active) return;
+        const page = normalizeDriverHistoryPage(snapshot);
+        setRecentHistory(page.items.slice(0, 3));
+        setHistoryError('');
+      })
+      .catch(() => {
+        if (!active) return;
+        setHistoryError('Não foi possível carregar as últimas corridas.');
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const performanceDetail = summary.performanceStatsReady
+    ? summary.performanceTrackingStartedAtMs
+      ? `taxas acompanhadas desde ${formatDateBR(summary.performanceTrackingStartedAtMs)}`
+      : 'taxas calculadas com eventos reais do servidor'
+    : 'as taxas aparecerão após novas ofertas e corridas finalizadas';
 
   return (
     <AppCard style={styles.card}>
@@ -102,6 +182,30 @@ export default function DriverCockpitDashboardCard({
           <Metric value={summary.weekRideCount} label="corridas" />
           <Metric value={formatBRL(summary.weekReceivedCentavos)} label="recebidos" />
         </View>
+      </View>
+
+      <View style={styles.divider} />
+
+      <View style={styles.section}>
+        <Text style={styles.eyebrow}>SEU DESEMPENHO</Text>
+        <View style={styles.performanceGrid}>
+          <Metric value={summary.totalCompletedRideCount} label="corridas concluídas" />
+          <Metric
+            value={formatDriverRateBps(summary.completionRateBps)}
+            label="taxa de conclusão"
+            detail={summary.terminalRideCount > 0
+              ? `${summary.trackedCompletedRideCount} de ${summary.terminalRideCount} finalizadas`
+              : null}
+          />
+          <Metric
+            value={formatDriverRateBps(summary.acceptanceRateBps)}
+            label="taxa de aceitação"
+            detail={summary.offersReceivedCount > 0
+              ? `${summary.offersAcceptedCount} de ${summary.offersReceivedCount} ofertas`
+              : null}
+          />
+        </View>
+        <Text style={styles.performanceNote}>{performanceDetail}</Text>
       </View>
 
       <View style={styles.commercialGrid}>
@@ -124,15 +228,42 @@ export default function DriverCockpitDashboardCard({
         </View>
       ) : null}
 
+      <View style={styles.divider} />
+
+      <View style={styles.historySection}>
+        <View style={styles.historySectionHeader}>
+          <View style={styles.historySectionCopy}>
+            <Text style={styles.eyebrow}>ÚLTIMAS 3 CORRIDAS</Text>
+            <Text style={styles.historyIntro}>Valores, comissão, status da corrida e confirmação Pix.</Text>
+          </View>
+          <AppButton title="VER TODAS" variant="ghost" onPress={openAllHistory} />
+        </View>
+
+        {historyLoading ? (
+          <View style={styles.historyLoading}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={styles.historyEmpty}>Carregando histórico real…</Text>
+          </View>
+        ) : historyError ? (
+          <View style={styles.historyErrorBox}>
+            <Text style={styles.historyError}>{historyError}</Text>
+            <AppButton title="ABRIR HISTÓRICO" variant="ghost" onPress={openAllHistory} />
+          </View>
+        ) : recentHistory.length > 0 ? (
+          <View style={styles.historyList}>
+            {recentHistory.map((item) => <RecentRideRow key={item.rideId} item={item} />)}
+          </View>
+        ) : (
+          <Text style={styles.historyEmpty}>Suas corridas aceitas aparecerão aqui.</Text>
+        )}
+      </View>
+
       <View style={styles.footerRow}>
         {!summary.statsVersion ? (
           <Text style={styles.syncNote}>
             Os totais de hoje e da semana começam a atualizar após a próxima corrida concluída.
           </Text>
         ) : null}
-        <Text style={styles.totalText}>
-          {`${summary.totalCompletedRideCount} corridas concluídas no total`}
-        </Text>
         <View style={styles.actionRow}>
           <AppButton
             title={walletBlocked ? 'Recarregar saldo' : 'Ver carteira'}
@@ -157,6 +288,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   metricsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  performanceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   metric: {
     flexGrow: 1,
     flexBasis: 120,
@@ -167,6 +299,8 @@ const styles = StyleSheet.create({
   },
   metricValue: { fontFamily, color: colors.primary, ...typography.h2 },
   metricLabel: { fontFamily, color: colors.textMuted, ...typography.small },
+  metricDetail: { fontFamily, color: colors.textMuted, ...typography.caption, lineHeight: 15 },
+  performanceNote: { fontFamily, color: colors.textMuted, ...typography.caption },
   divider: { height: 1, backgroundColor: colors.border },
   commercialGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   commercialMetric: {
@@ -192,8 +326,34 @@ const styles = StyleSheet.create({
   },
   walletAlertTitle: { fontFamily, color: colors.warning, ...typography.bodyBold },
   walletAlertText: { fontFamily, color: colors.text, ...typography.small, lineHeight: 19 },
+  historySection: { gap: spacing.md },
+  historySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  historySectionCopy: { flex: 1, gap: 3 },
+  historyIntro: { fontFamily, color: colors.textMuted, ...typography.caption, lineHeight: 16 },
+  historyLoading: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
+  historyList: { gap: 0 },
+  historyRow: { gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  historyHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },
+  historyHeaderCopy: { flex: 1, gap: 2 },
+  historyPassenger: { fontFamily, color: colors.text, ...typography.bodyBold },
+  historyDate: { fontFamily, color: colors.textMuted, ...typography.caption },
+  historyAmountCopy: { alignItems: 'flex-end', gap: 2 },
+  historyAmount: { fontFamily, color: colors.primary, ...typography.bodyBold },
+  historyFareDetail: { fontFamily, color: colors.textMuted, ...typography.caption },
+  routeBox: { gap: 3 },
+  routeLine: { fontFamily, color: colors.text, ...typography.small, lineHeight: 18 },
+  historyMetaRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: spacing.sm },
+  historyMeta: { fontFamily, color: colors.textMuted, ...typography.caption },
+  historyStatus: { flexShrink: 1, fontFamily, ...typography.caption, fontWeight: '700' },
+  historyErrorBox: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.dangerBg },
+  historyError: { fontFamily, color: colors.danger, ...typography.small },
+  historyEmpty: { fontFamily, color: colors.textMuted, ...typography.small },
   footerRow: { gap: spacing.xs },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   syncNote: { fontFamily, color: colors.textMuted, ...typography.caption },
-  totalText: { fontFamily, color: colors.textMuted, ...typography.small },
 });
