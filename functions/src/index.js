@@ -32,6 +32,7 @@ exports.reactivateDriverSecure = driverCallables.reactivateDriverSecure;
 exports.approveDriverPhotoSecure = driverCallables.approveDriverPhotoSecure;
 exports.rejectDriverPhotoSecure = driverCallables.rejectDriverPhotoSecure;
 exports.setDriverAvailabilitySecure = driverCallables.setDriverAvailabilitySecure;
+exports.getDriverRideHistorySecure = driverCallables.getDriverRideHistorySecure;
 const { driverCockpitStatsTrigger } = require('./drivers/cockpitStatsTrigger');
 exports.driverCockpitStatsTrigger = driverCockpitStatsTrigger;
 const {
