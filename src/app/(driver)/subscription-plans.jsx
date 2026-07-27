@@ -52,6 +52,20 @@ function SubscriptionPlanCard({ plan, selected }) {
   );
 }
 
+function SubscriptionDurationNotice() {
+  return (
+    <AppCard style={styles.durationCard}>
+      <Text style={styles.eyebrow}>DURAÇÃO DO PLANO</Text>
+      <Text style={styles.durationTitle}>Cada pagamento de assinatura vale 30 dias</Text>
+      <Text style={styles.durationText}>
+        Os 60 dias não são a duração da assinatura. Eles são somente os benefícios de lançamento:
+        comissão 0% para todos e assinatura gratuita, durante esse período, apenas para os motoristas
+        fundadores nº 1–100.
+      </Text>
+    </AppCard>
+  );
+}
+
 function RuleRow({ item }) {
   return (
     <View style={styles.ruleRow}>
@@ -86,7 +100,9 @@ function CommercialRulesCard({ view }) {
             {index > 0 ? <View style={styles.ruleDivider} /> : null}
             <Text style={styles.ruleSectionTitle}>{section.title}</Text>
             <View style={styles.ruleList}>
-              {section.items.map((item) => <RuleRow key={`${section.key}-${item.key}`} item={item} />)}
+              {section.items.map((item) => (
+                <RuleRow key={`${section.key}-${item.key}`} item={item} />
+              ))}
             </View>
           </View>
         ))}
@@ -204,6 +220,7 @@ export default function SubscriptionPlans() {
       mode: view.mode,
       vehicleType: view.currentPlan?.vehicleType || null,
       renewal: view.mode === DRIVER_SUBSCRIPTION_MODE.ACTIVE,
+      subscriptionPeriodDays: 30,
       atMs: Date.now(),
     });
     try {
@@ -216,6 +233,7 @@ export default function SubscriptionPlans() {
         event: 'payment.create_succeeded',
         status: result?.status || null,
         hasPaymentId: Boolean(result?.localPaymentId),
+        subscriptionPeriodDays: 30,
         atMs: Date.now(),
       });
     } catch (paymentFailure) {
@@ -263,25 +281,25 @@ export default function SubscriptionPlans() {
       return 'Verifique pagamentos em andamento antes de gerar um novo Pix.';
     }
     if (activationPending) {
-      return 'Pagamento confirmado. Atualizando a ativação da assinatura…';
+      return 'Pagamento confirmado. Atualizando a ativação da assinatura de 30 dias…';
     }
     if (view.paymentReason === 'vehicle_unknown') {
       return 'Informe um tipo de veículo válido para continuar.';
     }
     if (view.mode === DRIVER_SUBSCRIPTION_MODE.FOUNDER_FREE) {
-      return 'Nenhum pagamento é necessário durante sua assinatura gratuita.';
+      return 'Nenhum pagamento é necessário durante o benefício fundador. Quando começar a pagar, cada assinatura valerá 30 dias.';
     }
     if (view.mode === DRIVER_SUBSCRIPTION_MODE.RIDE_GRACE) {
-      return 'O pagamento será liberado após a quinta corrida ou no fim dos 60 dias.';
+      return 'O pagamento de 30 dias será liberado após a quinta corrida ou no fim dos benefícios de lançamento.';
     }
     return view.renewalDetail
-      || 'O plano é ativado somente após a confirmação do Mercado Pago.';
+      || 'O pagamento ativa uma assinatura de 30 dias somente após a confirmação do Mercado Pago.';
   }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Header title="Assinatura" subtitle="Plano e regras do motorista" onBack={() => router.back()} />
+        <Header title="Assinatura" subtitle="Plano de 30 dias e regras do motorista" onBack={() => router.back()} />
 
         {driverLoading ? (
           <AppCard style={styles.loadingCard}>
@@ -315,23 +333,23 @@ export default function SubscriptionPlans() {
                   <Text style={styles.metricDetail}>{view.commissionDetail}</Text>
                 </View>
                 <View style={styles.commercialMetric}>
-                  <Text style={styles.metricLabel}>Seu plano mensal</Text>
+                  <Text style={styles.metricLabel}>Seu plano de 30 dias</Text>
                   <Text style={styles.metricValue}>{view.currentPlan?.priceLabel || '—'}</Text>
                   <Text style={styles.metricDetail}>
-                    {view.currentPlan
-                      ? `${view.currentPlan.periodDays} dias`
-                      : 'Veículo não informado'}
+                    {view.currentPlan ? 'Cada pagamento cobre 30 dias' : 'Veículo não informado'}
                   </Text>
                 </View>
               </View>
             </AppCard>
 
+            <SubscriptionDurationNotice />
             <CommercialRulesCard view={view} />
 
             <AppCard style={styles.catalogCard}>
-              <Text style={styles.sectionTitle}>Planos mensais</Text>
+              <Text style={styles.sectionTitle}>Planos de 30 dias</Text>
               <Text style={styles.muted}>
-                O valor é definido pelo veículo aprovado no cadastro. Não é possível escolher outro plano no pagamento.
+                O valor é definido pelo veículo aprovado no cadastro. Cada pagamento ou renovação
+                acrescenta 30 dias; não é possível escolher outro plano no pagamento.
               </Text>
               <View style={styles.planList}>
                 {view.catalog.map((plan) => (
@@ -347,9 +365,9 @@ export default function SubscriptionPlans() {
             {paymentVisible && payment ? (
               <DriverPixPaymentSheet
                 payment={payment}
-                title="Assinatura via Pix"
+                title="Assinatura de 30 dias via Pix"
                 statusLabels={{
-                  paid: 'Pagamento confirmado — assinatura ativada!',
+                  paid: 'Pagamento confirmado — 30 dias de assinatura ativados!',
                   pending: 'Aguardando pagamento…',
                 }}
                 onStatusChange={onPaymentStatusChange}
@@ -444,6 +462,13 @@ const styles = StyleSheet.create({
   metricLabel: { fontFamily, color: colors.textMuted, ...typography.caption },
   metricValue: { fontFamily, color: colors.primary, ...typography.h3 },
   metricDetail: { fontFamily, color: colors.textMuted, ...typography.caption },
+  durationCard: {
+    gap: spacing.sm,
+    backgroundColor: colors.primaryTint,
+    borderColor: colors.primary,
+  },
+  durationTitle: { fontFamily, color: colors.primary, ...typography.h3 },
+  durationText: { fontFamily, color: colors.text, ...typography.body, lineHeight: 22 },
   rulesCard: { gap: spacing.md },
   rulesHeader: {
     flexDirection: 'row',
