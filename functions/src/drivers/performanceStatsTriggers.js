@@ -40,6 +40,15 @@ function terminalRideTransition(before = {}, after = {}) {
   return terminal && before.status !== after.status && Boolean(after.acceptedDriverId);
 }
 
+function ridePerformanceOutcome(ride = {}) {
+  if (ride.status === C.RIDE_STATUS.COMPLETED) return 'completed';
+  if (ride.status !== C.RIDE_STATUS.CANCELLED) return null;
+  if (ride.cancelledBy === 'passenger' || ride.cancelReasonCode === 'passenger_no_show') {
+    return 'excluded_cancelled';
+  }
+  return 'driver_cancelled';
+}
+
 async function applyOfferReceivedStats({ db, offerId, context, clock = { now: Date.now } }) {
   const offerRef = db.collection(C.DRIVER_OFFERS).doc(offerId);
   const result = await db.runTransaction(async (tx) => {
@@ -154,7 +163,12 @@ async function applyTerminalRideStats({ db, rideId, context, clock = { now: Date
     if (!driverSnap.exists) return { action: 'driver_profile_missing' };
     const driver = driverSnap.data() || {};
     const nowMs = Number(clock.now());
-    const stats = nextTerminalRideStats(driver.driverPerformanceStats, ride.status, nowMs);
+    const performanceOutcome = ridePerformanceOutcome(ride);
+    const stats = nextTerminalRideStats(
+      driver.driverPerformanceStats,
+      performanceOutcome,
+      nowMs
+    );
 
     tx.set(driverRef, {
       driverPerformanceStats: stats,
@@ -162,11 +176,17 @@ async function applyTerminalRideStats({ db, rideId, context, clock = { now: Date
     }, { merge: true });
     tx.set(rideRef, {
       [RIDE_TERMINAL_MARKER]: DRIVER_PERFORMANCE_STATS_VERSION,
+      driverRideTerminalStatsOutcome: performanceOutcome,
       driverRideTerminalStatsAppliedAtMs: nowMs,
       driverRideTerminalStatsAppliedAt: ts(),
       updatedAt: ts(),
     }, { merge: true });
-    return { action: 'succeeded', stats, terminalStatus: ride.status };
+    return {
+      action: 'succeeded',
+      stats,
+      terminalStatus: ride.status,
+      performanceOutcome,
+    };
   });
 
   logInfo(context, 'driver.performance.ride_terminal', {
@@ -175,6 +195,7 @@ async function applyTerminalRideStats({ db, rideId, context, clock = { now: Date
     statsVersion: DRIVER_PERFORMANCE_STATS_VERSION,
     result: result.action,
     terminalStatus: result.terminalStatus,
+    performanceOutcome: result.performanceOutcome,
     terminalRideCount: result.stats?.terminalRideCount,
   });
   return result;
@@ -280,6 +301,7 @@ module.exports = {
   RIDE_TERMINAL_MARKER,
   offerAcceptedTransition,
   terminalRideTransition,
+  ridePerformanceOutcome,
   applyOfferReceivedStats,
   applyOfferAcceptedStats,
   applyTerminalRideStats,
