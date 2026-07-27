@@ -46,6 +46,7 @@ describe('client ride debug logs', () => {
     expect(snapshot).not.toHaveProperty('commissionHoldCentavos');
     expect(snapshot).not.toHaveProperty('commissionCapturedCentavos');
     expect(snapshot).not.toHaveProperty('holdReleasedCentavos');
+    expect(snapshot).not.toHaveProperty('availableFields');
 
     const serialized = JSON.stringify(snapshot);
     expect(serialized).not.toContain('Rua privada');
@@ -64,21 +65,26 @@ describe('client ride debug logs', () => {
     expect(sanitizeRideForClientLog({ commissionDisplayBps: 1500 }).commissionDisplayBps).toBe(1500);
   });
 
-  it('normalizes Firebase callable error details without stacks or causes', () => {
-    const error = new Error('fallback message');
+  it('keeps only stable error codes and retryability, never free text', () => {
+    const error = new Error('Rua privada, 123 — João — 85999999999');
     error.code = 'functions/failed-precondition';
     error.details = {
       code: 'OUT_OF_SERVICE_AREA',
-      message: 'Ainda não atendemos esta área.',
+      message: 'Destino privado com payload PIX-SECRET-PAYLOAD.',
       retryable: false,
     };
     error.stack = 'private stack';
 
     expect(sanitizeRideErrorForClientLog(error)).toEqual({
       errorCode: 'OUT_OF_SERVICE_AREA',
-      errorMessage: 'Ainda não atendemos esta área.',
       retryable: false,
     });
-    expect(JSON.stringify(sanitizeRideErrorForClientLog(error))).not.toContain('private stack');
+    const serialized = JSON.stringify(sanitizeRideErrorForClientLog(error));
+    expect(serialized).not.toContain('Rua privada');
+    expect(serialized).not.toContain('Destino privado');
+    expect(serialized).not.toContain('João');
+    expect(serialized).not.toContain('85999999999');
+    expect(serialized).not.toContain('PIX-SECRET-PAYLOAD');
+    expect(serialized).not.toContain('private stack');
   });
 });
