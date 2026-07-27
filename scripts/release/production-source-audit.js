@@ -50,6 +50,10 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
   const requiredFiles = [
     'src/utils/clientRideLog.js',
     'functions/src/logging/logger.js',
+    'src/constants/pricingConfig.js',
+    'src/utils/ridePricing.js',
+    'functions/src/pricing/pricing.js',
+    'functions/src/rides/createRideRequest.js',
     'src/services/networkRecoveryService.js',
     'src/services/driverAvailabilityService.js',
     'src/services/driverLocationTracking.js',
@@ -85,6 +89,45 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     "'lat'",
     "'lng'",
   ]), 'Logger Functions: couverture de redaction PII/localisation/Pix incomplète.');
+
+  // Commercial invariant: outside the 60-day commission benefit, every ride
+  // must fund both the DriveLocal minimum and the guaranteed driver net.
+  const pricingConfig = read(root, 'src/constants/pricingConfig.js');
+  const clientPricing = read(root, 'src/utils/ridePricing.js');
+  const backendPricing = read(root, 'functions/src/pricing/pricing.js');
+  const rideCreation = read(root, 'functions/src/rides/createRideRequest.js');
+
+  check(containsEvery(pricingConfig, [
+    "'horizonte-1.2.0'",
+    'minimumPassengerFareCentavos: 600',
+    'minimumPlatformCommissionCentavos: 100',
+    'minimumDriverNetCentavos: 500',
+    'minimumPassengerFareCentavos: 950',
+    'minimumPlatformCommissionCentavos: 143',
+    'minimumDriverNetCentavos: 800',
+  ]), 'Pricing mobile: minimums rentables Horizonte V1.2 absents ou modifiés.');
+
+  check(containsEvery(backendPricing, [
+    "'horizonte-1.2.0'",
+    'minimumPassengerFareCentavos: 600',
+    'minimumPlatformCommissionCentavos: 100',
+    'minimumPassengerFareCentavos: 950',
+    'minimumPlatformCommissionCentavos: 143',
+    'INVALID_COMMISSION_CONFIGURATION',
+  ]), 'Pricing Functions: minimums rentables ou garde-fou fail-closed incomplets.');
+
+  check(containsEvery(clientPricing, [
+    'calculateConfiguredCommissionCentavos',
+    'INVALID_COMMISSION_CONFIGURATION',
+    'minimumPlatformCommissionCentavos',
+    'commissionBps === 0',
+  ]), 'Pricing mobile: calcul partagé de commission minimale ou exception 60 jours absente.');
+
+  check(containsEvery(rideCreation, [
+    'estimatedCommissionCentavos',
+    'minimumPlatformCommissionCentavos',
+    'pricingConfigVersion',
+  ]), 'Création de course: snapshot financier V1.2 incomplet.');
 
   const applicationSources = collectSourceFiles(path.join(root, 'src'));
   const functionSources = collectSourceFiles(path.join(root, 'functions/src'));
