@@ -154,6 +154,7 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
   const terminalRideCount = nonNegativeInteger(performance.terminalRideCount);
   const trackedCompletedRideCount = nonNegativeInteger(performance.completedRideCount);
   const trackedCancelledRideCount = nonNegativeInteger(performance.cancelledRideCount);
+  const excludedCancellationCount = nonNegativeInteger(performance.excludedCancellationCount);
   const totalCompletedRideCount = Math.max(
     nonNegativeInteger(driver?.completedRideCount),
     trackedCompletedRideCount
@@ -174,9 +175,11 @@ export function deriveDriverCockpitSummary(driver, nowMs = Date.now()) {
     terminalRideCount,
     trackedCompletedRideCount,
     trackedCancelledRideCount,
+    excludedCancellationCount,
     acceptanceRateBps: ratioBps(offersAcceptedCount, offersReceivedCount),
     completionRateBps: ratioBps(trackedCompletedRideCount, terminalRideCount),
     performanceTrackingStartedAtMs: nonNegativeInteger(performance.trackingStartedAtMs) || null,
+    performanceUpdatedAtMs: nonNegativeInteger(performance.updatedAtMs) || null,
     walletAvailableCentavos: available,
     walletHeldCentavos: held,
     walletBalanceCentavos: total,
