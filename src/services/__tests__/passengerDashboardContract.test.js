@@ -26,6 +26,18 @@ describe('real passenger dashboard and history contract', () => {
     expect(activeCard).toContain('vehiclePlate');
   });
 
+  it('renders stale terminal recovery states without unsafe navigation actions', () => {
+    const activeCard = source('src/components/PassengerActiveRideDashboardCard.jsx');
+    const home = source('src/app/(passenger)/passenger-home.jsx');
+
+    expect(activeCard).toContain('CORRIDA CONCLUÍDA');
+    expect(activeCard).toContain('VER COMPROVANTE');
+    expect(activeCard).toContain('CORRIDA CANCELADA');
+    expect(activeCard).toContain('action: null');
+    expect(activeCard).toContain('copy.action ?');
+    expect(home).toContain("pathname: '/ride-completed'");
+  });
+
   it('submits the compact request with the chosen vehicle through the secure callable service', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
 
