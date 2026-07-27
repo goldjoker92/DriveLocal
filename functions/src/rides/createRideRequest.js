@@ -201,6 +201,8 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       routeDurationSeconds: quote.routeDurationSeconds,
       estimatedFareCentavos: quote.estimatedFareCentavos,
       estimatedCommissionCentavos: quote.estimatedCommissionCentavos,
+      minimumPlatformCommissionCentavos:
+        quote.minimumPlatformCommissionCentavos,
       pricingConfigVersion: quote.pricingConfigVersion,
       status: C.RIDE_STATUS.SEARCHING,
       acceptedDriverId: null,
@@ -224,6 +226,8 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       serviceAreaId,
       vehicleType,
       amountCentavos: quote.estimatedFareCentavos,
+      minimumPlatformCommissionCentavos:
+        quote.minimumPlatformCommissionCentavos,
     });
 
     const dispatch = await dispatchRide({
