@@ -60,17 +60,19 @@ describe('production structured log redaction', () => {
     expect(serialized).not.toContain('-38.5');
   });
 
-  it('keeps non-reversible correlation hashes visible', () => {
+  it('keeps non-reversible correlation hashes visible while redacting an exact RG field', () => {
     expect(redactSensitiveData({
       actorUid: 'raw-actor',
       actorUidHash: 'hash-actor',
       targetUserId: 'raw-target',
       targetUserIdHash: 'hash-target',
+      rg: '2000000000',
     })).toEqual({
       actorUid: REDACTED,
       actorUidHash: 'hash-actor',
       targetUserId: REDACTED,
       targetUserIdHash: 'hash-target',
+      rg: REDACTED,
     });
   });
 
