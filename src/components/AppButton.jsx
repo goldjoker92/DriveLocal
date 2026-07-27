@@ -27,15 +27,19 @@ export default function AppButton({
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [
         {
+          minHeight: 48,
           backgroundColor,
           paddingVertical: spacing.md,
           paddingHorizontal: spacing.lg,
           borderRadius: radius.md,
           alignItems: 'center',
+          justifyContent: 'center',
           borderWidth: variant === 'ghost' ? 1 : 0,
           borderColor: colors.border,
           opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
@@ -43,7 +47,17 @@ export default function AppButton({
         style,
       ]}
     >
-      <Text style={[{ fontFamily, color: textColor }, typography.bodyBold]}>
+      <Text
+        style={[
+          {
+            fontFamily,
+            color: textColor,
+            textAlign: 'center',
+            flexShrink: 1,
+          },
+          typography.bodyBold,
+        ]}
+      >
         {title}
       </Text>
     </Pressable>
