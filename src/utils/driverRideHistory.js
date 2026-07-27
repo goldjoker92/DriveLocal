@@ -23,7 +23,8 @@ const PIX_STATUS = Object.freeze({
   not_applicable: { label: 'Pix não aplicável', tone: 'muted' },
 });
 
-function nonNegativeInteger(value) {
+function optionalNonNegativeInteger(value) {
+  if (value == null || value === '') return null;
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) return null;
   return Math.floor(number);
@@ -57,12 +58,14 @@ export function formatDriverHistoryDateTime(timestampMs) {
 }
 
 export function formatDriverCommissionBps(value) {
+  if (value == null || value === '') return 'Comissão indisponível';
   const bps = Number(value);
   if (![0, 1200, 1500].includes(bps)) return 'Comissão indisponível';
   return `Comissão ${String(bps / 100).replace('.', ',')}%`;
 }
 
 export function formatDriverRateBps(value) {
+  if (value == null || value === '') return '—';
   const bps = Number(value);
   if (!Number.isFinite(bps) || bps < 0) return '—';
   const percent = Math.max(0, Math.min(100, bps / 100));
@@ -75,17 +78,21 @@ export function normalizeDriverHistoryItem(raw = {}) {
   if (!rideId) return null;
   const ride = RIDE_STATUS[raw.rideStatus] || { label: 'Status indisponível', tone: 'muted' };
   const pix = PIX_STATUS[raw.pixStatus] || PIX_STATUS.not_started;
-  const fareCentavos = nonNegativeInteger(raw.fareCentavos);
+  const fareCentavos = optionalNonNegativeInteger(raw.fareCentavos);
   const fareKind = raw.fareKind === 'final'
     ? 'final'
     : raw.fareKind === 'estimated'
       ? 'estimated'
       : 'unavailable';
-  const commissionBps = [0, 1200, 1500].includes(Number(raw.commissionBps))
-    ? Number(raw.commissionBps)
+  const rawCommission = raw.commissionBps;
+  const commissionBps = rawCommission != null
+    && rawCommission !== ''
+    && [0, 1200, 1500].includes(Number(rawCommission))
+    ? Number(rawCommission)
     : null;
   const vehicleType = raw.vehicleType === 'moto' ? 'moto' : raw.vehicleType === 'car' ? 'car' : null;
-  const historyAtMs = nonNegativeInteger(raw.historyAtMs) || nonNegativeInteger(raw.acceptedAtMs);
+  const historyAtMs = optionalNonNegativeInteger(raw.historyAtMs)
+    || optionalNonNegativeInteger(raw.acceptedAtMs);
 
   return Object.freeze({
     rideId,
