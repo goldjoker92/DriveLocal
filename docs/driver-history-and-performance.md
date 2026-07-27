@@ -32,7 +32,7 @@ Mise à jour par trois projections idempotentes :
 
 1. création de `driverOffers/{offerId}` → `offersReceivedCount` ;
 2. passage de l’offre à `accepted` → `offersAcceptedCount` ;
-3. passage d’une course acceptée à `completed` ou `cancelled` → résultat terminal.
+3. passage d’une course acceptée à `completed` ou `cancelled` → classification du résultat.
 
 Chaque document source reçoit un marqueur de version. Une relivraison Firestore ne peut donc pas compter deux fois le même événement.
 
@@ -49,15 +49,21 @@ Une offre expirée ou refusée reste dans le dénominateur puisqu’elle a réel
 ### Taux de complétion
 
 ```text
-courses conclues / courses acceptées arrivées à un état final
+courses conclues / (courses conclues + annulations imputables au chauffeur)
 ```
 
-Les états finaux suivis sont :
+Entrent dans le taux :
 
-- `completed` ;
-- `cancelled`.
+- une course `completed` ;
+- une course `cancelled` par le chauffeur pour une raison qui lui est imputable.
 
-Une course encore active n’entre pas encore dans le dénominateur. Elle ne fait donc pas chuter artificiellement le taux.
+N’entrent pas dans le dénominateur :
+
+- une annulation faite par le passager ;
+- une annulation chauffeur avec le motif valide `passenger_no_show` ;
+- une course encore active.
+
+Ces annulations exclues restent comptabilisées séparément dans `excludedCancellationCount` pour l’audit, mais elles ne pénalisent jamais le chauffeur.
 
 ### Absence de données
 
