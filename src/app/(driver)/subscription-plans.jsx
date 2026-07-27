@@ -52,6 +52,49 @@ function SubscriptionPlanCard({ plan, selected }) {
   );
 }
 
+function RuleRow({ item }) {
+  return (
+    <View style={styles.ruleRow}>
+      <View style={styles.ruleTopRow}>
+        <Text style={styles.ruleLabel}>{item.label}</Text>
+        <Text style={styles.ruleValue}>{item.value}</Text>
+      </View>
+      <Text style={styles.ruleDetail}>{item.detail}</Text>
+    </View>
+  );
+}
+
+function CommercialRulesCard({ view }) {
+  return (
+    <AppCard style={styles.rulesCard}>
+      <View style={styles.rulesHeader}>
+        <View style={styles.rulesHeaderCopy}>
+          <Text style={styles.eyebrow}>SUAS REGRAS — SEM SURPRESAS</Text>
+          <Text style={styles.profileTitle}>{view.profileTitle}</Text>
+          <Text style={styles.profileDetail}>{view.profileDetail}</Text>
+        </View>
+        <AppBadge label={view.founder ? 'FUNDADOR' : 'Nº 101+'} tone="success" />
+      </View>
+
+      <View style={styles.disclosureBox}>
+        <Text style={styles.disclosureText}>{view.noSurpriseText}</Text>
+      </View>
+
+      <View style={styles.ruleSections}>
+        {view.ruleSections.map((section, index) => (
+          <View key={section.key} style={styles.ruleSection}>
+            {index > 0 ? <View style={styles.ruleDivider} /> : null}
+            <Text style={styles.ruleSectionTitle}>{section.title}</Text>
+            <View style={styles.ruleList}>
+              {section.items.map((item) => <RuleRow key={`${section.key}-${item.key}`} item={item} />)}
+            </View>
+          </View>
+        ))}
+      </View>
+    </AppCard>
+  );
+}
+
 export default function SubscriptionPlans() {
   const router = useRouter();
   const uid = auth.currentUser?.uid || null;
@@ -229,7 +272,7 @@ export default function SubscriptionPlans() {
       return 'Nenhum pagamento é necessário durante sua assinatura gratuita.';
     }
     if (view.mode === DRIVER_SUBSCRIPTION_MODE.RIDE_GRACE) {
-      return 'O pagamento será liberado após a quinta corrida ou no fim da janela inicial.';
+      return 'O pagamento será liberado após a quinta corrida ou no fim dos 60 dias.';
     }
     return view.renewalDetail
       || 'O plano é ativado somente após a confirmação do Mercado Pago.';
@@ -238,7 +281,7 @@ export default function SubscriptionPlans() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Header title="Assinatura" subtitle="Plano mensal do motorista" onBack={() => router.back()} />
+        <Header title="Assinatura" subtitle="Plano e regras do motorista" onBack={() => router.back()} />
 
         {driverLoading ? (
           <AppCard style={styles.loadingCard}>
@@ -282,6 +325,8 @@ export default function SubscriptionPlans() {
                 </View>
               </View>
             </AppCard>
+
+            <CommercialRulesCard view={view} />
 
             <AppCard style={styles.catalogCard}>
               <Text style={styles.sectionTitle}>Planos mensais</Text>
@@ -399,6 +444,57 @@ const styles = StyleSheet.create({
   metricLabel: { fontFamily, color: colors.textMuted, ...typography.caption },
   metricValue: { fontFamily, color: colors.primary, ...typography.h3 },
   metricDetail: { fontFamily, color: colors.textMuted, ...typography.caption },
+  rulesCard: { gap: spacing.md },
+  rulesHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  rulesHeaderCopy: { flex: 1, gap: 3 },
+  profileTitle: { fontFamily, color: colors.text, ...typography.h3 },
+  profileDetail: { fontFamily, color: colors.textMuted, ...typography.small },
+  disclosureBox: {
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryTint,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  disclosureText: {
+    fontFamily,
+    color: colors.text,
+    ...typography.small,
+    lineHeight: 19,
+  },
+  ruleSections: { gap: spacing.md },
+  ruleSection: { gap: spacing.sm },
+  ruleDivider: { height: 1, backgroundColor: colors.border, marginBottom: spacing.sm },
+  ruleSectionTitle: { fontFamily, color: colors.text, ...typography.bodyBold },
+  ruleList: { gap: spacing.sm },
+  ruleRow: {
+    gap: spacing.xs,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  ruleTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  ruleLabel: { flex: 1, fontFamily, color: colors.textMuted, ...typography.small },
+  ruleValue: {
+    flexShrink: 1,
+    fontFamily,
+    color: colors.primary,
+    ...typography.bodyBold,
+    textAlign: 'right',
+  },
+  ruleDetail: { fontFamily, color: colors.textMuted, ...typography.caption, lineHeight: 17 },
   catalogCard: { gap: spacing.md },
   sectionTitle: { fontFamily, color: colors.text, ...typography.bodyBold },
   muted: { fontFamily, color: colors.textMuted, ...typography.small },
