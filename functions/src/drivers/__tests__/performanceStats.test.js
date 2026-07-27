@@ -34,16 +34,33 @@ describe('driver performance statistics policy', () => {
     expect(rateBps(1, 2)).toBe(5000);
   });
 
-  it('counts completed and cancelled accepted rides as terminal outcomes', () => {
+  it('counts completed rides and driver-caused cancellations as rated terminal outcomes', () => {
     const completed = nextTerminalRideStats({}, 'completed', 1000);
-    const cancelled = nextTerminalRideStats(completed, 'cancelled', 2000);
+    const driverCancelled = nextTerminalRideStats(completed, 'driver_cancelled', 2000);
 
-    expect(cancelled).toMatchObject({
+    expect(driverCancelled).toMatchObject({
       terminalRideCount: 2,
       completedRideCount: 1,
       cancelledRideCount: 1,
+      excludedCancellationCount: 0,
     });
-    expect(rateBps(cancelled.completedRideCount, cancelled.terminalRideCount)).toBe(5000);
+    expect(rateBps(
+      driverCancelled.completedRideCount,
+      driverCancelled.terminalRideCount
+    )).toBe(5000);
+  });
+
+  it('records passenger-caused cancellations without lowering the driver rate', () => {
+    const completed = nextTerminalRideStats({}, 'completed', 1000);
+    const excluded = nextTerminalRideStats(completed, 'excluded_cancelled', 2000);
+
+    expect(excluded).toMatchObject({
+      terminalRideCount: 1,
+      completedRideCount: 1,
+      cancelledRideCount: 0,
+      excludedCancellationCount: 1,
+    });
+    expect(rateBps(excluded.completedRideCount, excluded.terminalRideCount)).toBe(10000);
   });
 
   it('returns no rate without a denominator and clamps malformed values', () => {
