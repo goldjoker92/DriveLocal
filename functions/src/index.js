@@ -34,6 +34,14 @@ exports.rejectDriverPhotoSecure = driverCallables.rejectDriverPhotoSecure;
 exports.setDriverAvailabilitySecure = driverCallables.setDriverAvailabilitySecure;
 const { driverCockpitStatsTrigger } = require('./drivers/cockpitStatsTrigger');
 exports.driverCockpitStatsTrigger = driverCockpitStatsTrigger;
+const {
+  driverOfferReceivedStatsTrigger,
+  driverOfferAcceptedStatsTrigger,
+  driverTerminalRideStatsTrigger,
+} = require('./drivers/performanceStatsTriggers');
+exports.driverOfferReceivedStatsTrigger = driverOfferReceivedStatsTrigger;
+exports.driverOfferAcceptedStatsTrigger = driverOfferAcceptedStatsTrigger;
+exports.driverTerminalRideStatsTrigger = driverTerminalRideStatsTrigger;
 
 const paymentCallables = require('./payments/callables');
 exports.createDriverPixPayment = paymentCallables.createDriverPixPayment;
