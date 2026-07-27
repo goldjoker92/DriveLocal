@@ -1,19 +1,27 @@
 // @ts-check
-// calculateServerRideQuote — the authoritative server quote. It measures the
-// route with the real routing provider (fail-closed) and prices it with the
-// backend BLOCK 01 pricing model. Client distance/duration/fare are never used.
+// calculateServerRideQuote — authoritative server quote. The routing provider
+// supplies distance/duration and the backend pricing module supplies all money.
+// Client-provided distance, duration, fare or commission are never authoritative.
 
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { priceRide } = require('../pricing/pricing');
 
 /**
  * @param {{routingAdapter:object, serviceAreaId:string, vehicleType:string, pickup:object, destination:object}} args
- * @returns {Promise<{routeDistanceMeters:number, routeDurationSeconds:number, estimatedFareCentavos:number, estimatedCommissionCentavos:number, pricingConfigVersion:string}>}
+ * @returns {Promise<{routeDistanceMeters:number, routeDurationSeconds:number, estimatedFareCentavos:number, estimatedCommissionCentavos:number, minimumPlatformCommissionCentavos:number, pricingConfigVersion:string}>}
  */
-async function calculateServerRideQuote({ routingAdapter, serviceAreaId, vehicleType, pickup, destination }) {
-  // Routing failure propagates (retryable provider error) so the caller aborts
-  // ride creation WITHOUT writing an incomplete ride.
-  const route = await routingAdapter.computeRoute({ origin: pickup, destination, vehicleType });
+async function calculateServerRideQuote({
+  routingAdapter,
+  serviceAreaId,
+  vehicleType,
+  pickup,
+  destination,
+}) {
+  const route = await routingAdapter.computeRoute({
+    origin: pickup,
+    destination,
+    vehicleType,
+  });
 
   const priced = priceRide({
     serviceAreaId,
@@ -24,7 +32,7 @@ async function calculateServerRideQuote({ routingAdapter, serviceAreaId, vehicle
   if (!priced.ok) {
     throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
       internalMessage: `pricing failed: ${priced.reason}`,
-      safeMetadata: { field: 'vehicleType' },
+      safeMetadata: { field: 'vehicleType', reason: priced.reason },
     });
   }
 
@@ -32,9 +40,11 @@ async function calculateServerRideQuote({ routingAdapter, serviceAreaId, vehicle
     routeDistanceMeters: route.distanceMeters,
     routeDurationSeconds: route.durationSeconds,
     estimatedFareCentavos: priced.passengerFareCentavos,
-    // Standard commission estimate (passenger-facing). The per-driver 0%
-    // commission-free adjustment is applied at acceptance, not here.
+    // Standard post-promotion estimate. Acceptance changes it to R$0 only when
+    // the authenticated driver still owns the 60-day commission benefit.
     estimatedCommissionCentavos: priced.commissionCentavos,
+    minimumPlatformCommissionCentavos:
+      priced.minimumPlatformCommissionCentavos,
     pricingConfigVersion: priced.pricingConfigVersion,
   };
 }
