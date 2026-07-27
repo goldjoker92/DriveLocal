@@ -12,6 +12,10 @@ const {
   REQUIRED_SECRET_NAMES,
   validateStaticConfiguration,
 } = require('../../scripts/release/release-check');
+const {
+  OPERATIONAL_PHASES,
+  validateProductionSourceAudit,
+} = require('../../scripts/release/production-source-audit');
 
 describe('production release gate', () => {
   it('exposes one non-mutating command with Android versionCode 1', () => {
@@ -36,9 +40,11 @@ describe('production release gate', () => {
     expect(envExample).not.toMatch(/TWO_PHONE|TWO_DEVICE|DEUX_TELEPHONE/i);
   });
 
-  it('runs tests and config validation without lint, preview, deploy, build or submit', () => {
+  it('runs source audit, tests and config validation without deploy, build or submit', () => {
     const releaseCheck = source('scripts/release/release-check.js');
 
+    expect(releaseCheck).toContain("require('./production-source-audit')");
+    expect(releaseCheck).toContain('validateProductionSourceAudit({ root: ROOT })');
     expect(releaseCheck).toContain("runCommand('Tests application', ['test'])");
     expect(releaseCheck).toContain("runCommand('Tests Firebase Functions', ['--prefix', 'functions', 'test'])");
     expect(releaseCheck).toContain("runCommand('Configuration Firebase PROD', ['run', 'validate:env:prod'])");
@@ -47,6 +53,18 @@ describe('production release gate', () => {
     expect(releaseCheck).not.toContain('eas submit');
     expect(releaseCheck).not.toContain("runCommand('Lint'");
     expect(releaseCheck).not.toContain("runCommand('Preview'");
+  });
+
+  it('keeps the production source audit green on the committed codebase', () => {
+    expect(OPERATIONAL_PHASES).toEqual([
+      'requested',
+      'started',
+      'succeeded',
+      'failed',
+      'restored',
+      'duplicate_ignored',
+    ]);
+    expect(validateProductionSourceAudit({ root: ROOT })).toEqual([]);
   });
 
   it('declares the three required backend secret names without reading their values', () => {
