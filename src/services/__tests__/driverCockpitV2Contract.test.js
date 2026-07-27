@@ -38,9 +38,12 @@ describe('compact real driver cockpit contract', () => {
 
   it('lets the commercial policy override stale wallet presentation state', () => {
     const dashboard = source('src/components/DriverCockpitDashboardCard.jsx');
+    const summary = source('src/utils/driverCockpitSummary.js');
 
     expect(dashboard).toContain("commission?.mode === 'free'");
-    expect(dashboard).toContain("summary.walletState === 'blocked'");
+    expect(dashboard).toContain('summary.walletNeedsTopup === true');
+    expect(summary).toContain('resolveCommercialPolicy(driver || {}, nowMs)');
+    expect(summary).not.toContain('driver?.walletStatus');
     expect(dashboard).toContain('nenhuma recarga necessária');
     expect(dashboard).toContain('recarga necessária');
   });
