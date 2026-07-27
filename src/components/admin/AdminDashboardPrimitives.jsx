@@ -9,6 +9,7 @@ import { Pressable, Text, View } from 'react-native';
 import { colors } from '../../constants/colors';
 import { radius, spacing } from '../../constants/spacing';
 import { fontFamily, typography } from '../../constants/typography';
+import AdminBusinessPulse from './AdminBusinessPulse';
 
 const TONES = Object.freeze({
   neutral: {
@@ -146,30 +147,33 @@ export function StatusBanner({ icon, tone = 'primary', eyebrow, title, message, 
 export function InsightCard({ icon = '✨', tone = 'primary', title, message, footer }) {
   const selected = palette(tone);
   return (
-    <View
-      accessibilityRole="summary"
-      style={{
-        padding: spacing.lg,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: selected.border,
-        backgroundColor: colors.background,
-        gap: spacing.md,
-      }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md }}>
-        <IconBubble icon={icon} tone={tone} compact />
-        <View style={{ flex: 1, gap: spacing.xs }}>
-          <Text style={[{ fontFamily, color: selected.foreground }, typography.caption]}>
-            LEITURA AUTOMÁTICA
-          </Text>
-          <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>{title}</Text>
-          <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{message}</Text>
-          {footer ? (
-            <Text style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>{footer}</Text>
-          ) : null}
+    <View style={{ gap: spacing.md }}>
+      <View
+        accessibilityRole="summary"
+        style={{
+          padding: spacing.lg,
+          borderRadius: radius.lg,
+          borderWidth: 1,
+          borderColor: selected.border,
+          backgroundColor: colors.background,
+          gap: spacing.md,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md }}>
+          <IconBubble icon={icon} tone={tone} compact />
+          <View style={{ flex: 1, gap: spacing.xs }}>
+            <Text style={[{ fontFamily, color: selected.foreground }, typography.caption]}>
+              LEITURA AUTOMÁTICA
+            </Text>
+            <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>{title}</Text>
+            <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{message}</Text>
+            {footer ? (
+              <Text style={[{ fontFamily, color: colors.textFaint }, typography.caption]}>{footer}</Text>
+            ) : null}
+          </View>
         </View>
       </View>
+      <AdminBusinessPulse />
     </View>
   );
 }
