@@ -1,4 +1,5 @@
 import {
+  deriveOperationalPhase,
   sanitizeRideErrorForClientLog,
   sanitizeRideForClientLog,
 } from '../clientRideLog';
@@ -86,5 +87,16 @@ describe('client ride debug logs', () => {
     expect(serialized).not.toContain('85999999999');
     expect(serialized).not.toContain('PIX-SECRET-PAYLOAD');
     expect(serialized).not.toContain('private stack');
+  });
+
+  it('normalizes existing event names into the shared operational phase vocabulary', () => {
+    expect(deriveOperationalPhase('work_session.start_requested')).toBe('requested');
+    expect(deriveOperationalPhase('ride.accept.started')).toBe('started');
+    expect(deriveOperationalPhase('ride.accept.won')).toBe('succeeded');
+    expect(deriveOperationalPhase('notification.failed')).toBe('failed');
+    expect(deriveOperationalPhase('network.connection.recovered')).toBe('restored');
+    expect(deriveOperationalPhase('notification.duplicate_ignored')).toBe('duplicate_ignored');
+    expect(deriveOperationalPhase('custom.event', 'succeeded')).toBe('succeeded');
+    expect(deriveOperationalPhase('custom.event', 'unknown')).toBeNull();
   });
 });
