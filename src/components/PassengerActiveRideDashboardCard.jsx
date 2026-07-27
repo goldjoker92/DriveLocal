@@ -18,6 +18,18 @@ const STATUS_COPY = Object.freeze({
     detail: 'Você pode acompanhar a busca sem refazer a solicitação.',
     action: 'ACOMPANHAR BUSCA',
   },
+  no_driver_available: {
+    eyebrow: 'BUSCA ENCERRADA',
+    title: 'Nenhum motorista ficou disponível',
+    detail: 'O servidor está liberando sua conta para uma nova solicitação.',
+    action: null,
+  },
+  dispatch_failed: {
+    eyebrow: 'BUSCA NÃO CONCLUÍDA',
+    title: 'Não foi possível concluir a busca',
+    detail: 'A solicitação continua registrada no histórico.',
+    action: null,
+  },
   assigned: {
     eyebrow: 'MOTORISTA A CAMINHO',
     title: 'Seu motorista está indo até você',
@@ -53,6 +65,18 @@ const STATUS_COPY = Object.freeze({
     title: 'O pagamento precisa de conferência',
     detail: 'Os dados da corrida e do Pix permanecem registrados.',
     action: 'VER DETALHES',
+  },
+  completed: {
+    eyebrow: 'CORRIDA CONCLUÍDA',
+    title: 'Pagamento confirmado',
+    detail: 'A corrida já está registrada no seu histórico.',
+    action: 'VER COMPROVANTE',
+  },
+  cancelled: {
+    eyebrow: 'CORRIDA CANCELADA',
+    title: 'Esta corrida foi encerrada',
+    detail: 'O motivo e o trajeto permanecem registrados no histórico.',
+    action: null,
   },
 });
 
@@ -149,7 +173,7 @@ export default function PassengerActiveRideDashboardCard({ ride, driverLocation,
         </View>
       ) : null}
 
-      <AppButton title={copy.action} onPress={onOpen} />
+      {copy.action ? <AppButton title={copy.action} onPress={onOpen} /> : null}
     </AppCard>
   );
 }
