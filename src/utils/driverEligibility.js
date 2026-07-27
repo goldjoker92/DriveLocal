@@ -5,7 +5,7 @@
 // cockpit and offer UI from presenting an action that is already known to fail.
 
 import { calculateCommissionBps } from './ridePricing';
-import { getSubscriptionEligibility } from './driverSubscription';
+import { resolveCommercialPolicy } from './commercialPolicy';
 import { MIN_WALLET_BALANCE_CENTAVOS } from '../constants/pricingConfig';
 
 // Rejection reason codes (stable strings — safe to switch on / log).
@@ -25,9 +25,10 @@ function isBlockedDriver(driver) {
 
 // Founder #1..#100: covered for 60 days. Driver #101+: covered for at most five
 // completed rides and only inside the same 60-day window. Day 60 or ride 6 requires
-// a paid subscription. This delegates to the centralized mobile policy mirror.
+// a paid subscription. Read the centralized commercial-policy projection directly
+// so this eligibility helper does not depend on the subscription presentation layer.
 export function passesSubscriptionOrTrial(driver, now = Date.now()) {
-  return !getSubscriptionEligibility(driver, now).required;
+  return resolveCommercialPolicy(driver, now).subscriptionCovered;
 }
 
 export function canDriverReceiveRide(driver, rideRequest, now = Date.now()) {
