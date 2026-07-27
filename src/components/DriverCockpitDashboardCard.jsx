@@ -51,9 +51,14 @@ function subscriptionCopy(subscription) {
 }
 
 function walletCopy(summary, commission) {
-  if (commission?.mode === 'free') return 'nenhuma recarga necessária';
-  if (summary.walletState === 'blocked') return 'recarga necessária';
-  return 'disponível para comissões';
+  if (commission?.mode === 'free') {
+    return commission.dateMs
+      ? `nenhuma recarga até ${formatDateBR(commission.dateMs)}`
+      : 'nenhuma recarga necessária';
+  }
+  const threshold = formatBRL(summary.walletMinimumCentavos || 300);
+  if (summary.walletNeedsTopup) return `recarga necessária • saldo deve ficar acima de ${threshold}`;
+  return `pronto para comissões • mínimo acima de ${threshold}`;
 }
 
 export default function DriverCockpitDashboardCard({
@@ -69,6 +74,9 @@ export default function DriverCockpitDashboardCard({
     ? `${formatBRL(summary.walletHeldCentavos)} reservado • `
     : '';
   const walletDetail = `${heldPrefix}${walletCopy(summary, commission)}`;
+  const walletBlocked = summary.walletNeedsTopup === true;
+  const thresholdLabel = formatBRL(summary.walletMinimumCentavos || 300);
+  const openWallet = onWalletPress || (() => router.push('/wallet'));
   const openSubscription = onSubscriptionPress || (() => router.push('/subscription-plans'));
 
   return (
@@ -101,6 +109,16 @@ export default function DriverCockpitDashboardCard({
         <CommercialMetric label="Assinatura" value={plan.value} detail={plan.detail} />
       </View>
 
+      {walletBlocked ? (
+        <View style={styles.walletAlert}>
+          <Text style={styles.walletAlertTitle}>Recarga necessária para receber corridas</Text>
+          <Text style={styles.walletAlertText}>
+            {`Seu saldo disponível é ${formatBRL(summary.walletAvailableCentavos)}. Depois da promoção de comissão 0%, o servidor exige saldo acima de ${thresholdLabel} para ficar disponível e também saldo suficiente para reservar a comissão da próxima corrida.`}
+          </Text>
+          <AppButton title="RECARREGAR AGORA" onPress={openWallet} />
+        </View>
+      ) : null}
+
       <View style={styles.footerRow}>
         {!summary.statsVersion ? (
           <Text style={styles.syncNote}>
@@ -111,7 +129,11 @@ export default function DriverCockpitDashboardCard({
           {`${summary.totalCompletedRideCount} corridas concluídas no total`}
         </Text>
         <View style={styles.actionRow}>
-          <AppButton title="Ver carteira" variant="ghost" onPress={onWalletPress} />
+          <AppButton
+            title={walletBlocked ? 'Recarregar saldo' : 'Ver carteira'}
+            variant={walletBlocked ? 'primary' : 'ghost'}
+            onPress={openWallet}
+          />
           <AppButton title="Ver assinatura" variant="ghost" onPress={openSubscription} />
         </View>
       </View>
@@ -155,6 +177,16 @@ const styles = StyleSheet.create({
   commercialLabel: { fontFamily, color: colors.textMuted, fontSize: 10, fontWeight: '700' },
   commercialValue: { fontFamily, color: colors.text, ...typography.bodyBold },
   commercialDetail: { fontFamily, color: colors.textMuted, fontSize: 10, lineHeight: 14 },
+  walletAlert: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.warningBg,
+    borderWidth: 1,
+    borderColor: colors.warning,
+  },
+  walletAlertTitle: { fontFamily, color: colors.warning, ...typography.bodyBold },
+  walletAlertText: { fontFamily, color: colors.text, ...typography.small, lineHeight: 19 },
   footerRow: { gap: spacing.xs },
   actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   syncNote: { fontFamily, color: colors.textMuted, ...typography.caption },
