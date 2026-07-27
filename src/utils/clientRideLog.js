@@ -36,7 +36,8 @@ function compact(object) {
 
 /**
  * Returns a privacy-safe but operationally complete ride snapshot for Metro logs.
- * Field names are included so a missing backend projection is immediately visible.
+ * Presence booleans make missing projections visible without listing arbitrary
+ * source keys, which could itself reveal private schema details.
  */
 export function sanitizeRideForClientLog(ride) {
   if (!ride || typeof ride !== 'object') return null;
@@ -66,7 +67,6 @@ export function sanitizeRideForClientLog(ride) {
     hasAcceptedDriver: Boolean(ride.acceptedDriverId || ride.acceptedDriverPublic),
     hasDriverPublicProfile: Boolean(ride.acceptedDriverPublic),
     hasPixPaymentPayload: Boolean(ride.paymentPixPayload),
-    availableFields: Object.keys(ride).sort().slice(0, 100),
   });
 }
 
@@ -74,9 +74,10 @@ export function sanitizeRideErrorForClientLog(error) {
   if (!error) return null;
   const details = error.details && typeof error.details === 'object' ? error.details : {};
 
+  // Error messages are deliberately excluded. They can contain an address, a name,
+  // a provider payload or user-entered text even when the surrounding key is safe.
   return compact({
     errorCode: safeString(details.code || error.code || error.name || 'UNKNOWN', 80),
-    errorMessage: safeString(details.message || error.message || 'Erro desconhecido', 180),
     retryable: details.retryable === true || error.retryable === true,
   });
 }
