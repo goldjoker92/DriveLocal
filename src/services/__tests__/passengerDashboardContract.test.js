@@ -68,10 +68,11 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(home).toContain('Histórico de corridas');
     expect(home).toContain("navigate('/passenger-ride-history', 'open_history')");
     expect(home).toContain('AJUDA E INFORMAÇÕES');
+    expect(home).toContain("params: { source: 'passenger_home' }");
     expect(home).toContain('Política de Privacidade');
     expect(home).toContain('Termos de Uso');
     expect(home).toContain('Excluir conta e dados');
-    expect(home).toContain("navigate('/privacy-center', 'open_account_deletion')");
+    expect(home).toContain("router.push('/privacy-center')");
     expect(home).toContain('await logoutUser()');
     expect(home).toContain('SAIR DA CONTA');
 
