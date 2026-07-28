@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { usePathname } from 'expo-router';
 import AppCard from './AppCard';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
@@ -30,6 +31,8 @@ function RouteRow({ marker, label, value, muted = false }) {
 }
 
 export default function DriverActiveRideCard({ offer, status = null }) {
+  const pathname = usePathname();
+  const compact = String(pathname || '').toLowerCase().includes('active-ride');
   const card = useMemo(
     () => deriveDriverActiveRideCard(offer, status),
     [offer, status]
@@ -54,6 +57,7 @@ export default function DriverActiveRideCard({ offer, status = null }) {
       destinationReleased: card.destinationReleased,
       passengerIdentityAvailable: Boolean(identity),
       passengerPhotoVerified: Boolean(verifiedPath),
+      presentation: compact ? 'compact' : 'full',
     };
     const signature = JSON.stringify(trace);
     if (lastTrace.current === signature) return;
@@ -68,6 +72,7 @@ export default function DriverActiveRideCard({ offer, status = null }) {
     card.destinationReleased,
     identity,
     verifiedPath,
+    compact,
   ]);
 
   useEffect(() => {
@@ -113,6 +118,44 @@ export default function DriverActiveRideCard({ offer, status = null }) {
   const fareLabel = card.fareCentavos == null
     ? 'Carregando valor…'
     : formatBRL(card.fareCentavos);
+
+  if (compact) {
+    return (
+      <AppCard style={[styles.card, styles.compactCard]}>
+        <View style={styles.compactMainRow}>
+          <View style={[styles.avatar, styles.compactAvatar]}>
+            {photoUrl ? (
+              <Image source={{ uri: photoUrl }} style={styles.photo} resizeMode="cover" />
+            ) : (
+              <Text style={[styles.initial, styles.compactInitial]}>{initial}</Text>
+            )}
+          </View>
+
+          <View style={styles.compactIdentity}>
+            <View style={styles.compactNameRow}>
+              <Text numberOfLines={1} style={styles.compactPassengerName}>
+                {card.passengerFirstName}
+              </Text>
+              <View style={styles.liveBadge}>
+                <View style={styles.liveDot} />
+                <Text style={styles.liveText}>ATIVA</Text>
+              </View>
+            </View>
+            <Text numberOfLines={1} style={styles.compactMeta}>
+              {`${card.vehicle.emoji} ${card.vehicle.label} · ${fareLabel}`}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.compactPickupRow}>
+          <Text style={styles.compactPickupLabel}>EMBARQUE</Text>
+          <Text numberOfLines={1} ellipsizeMode="tail" style={styles.compactPickupValue}>
+            {card.pickupLabel}
+          </Text>
+        </View>
+      </AppCard>
+    );
+  }
 
   return (
     <AppCard style={styles.card}>
@@ -165,6 +208,66 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: colors.background,
+  },
+  compactCard: {
+    gap: spacing.sm,
+    padding: spacing.sm,
+  },
+  compactMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  compactAvatar: {
+    width: 42,
+    height: 42,
+  },
+  compactInitial: {
+    fontSize: 18,
+  },
+  compactIdentity: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  compactNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  compactPassengerName: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily,
+    color: colors.text,
+    ...typography.bodyBold,
+  },
+  compactMeta: {
+    fontFamily,
+    color: colors.textMuted,
+    ...typography.caption,
+  },
+  compactPickupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  compactPickupLabel: {
+    fontFamily,
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  compactPickupValue: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily,
+    color: colors.textMuted,
+    ...typography.caption,
   },
   headerRow: {
     flexDirection: 'row',
