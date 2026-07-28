@@ -12,8 +12,9 @@ import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import PassengerActiveRideDashboardCard from '../../components/PassengerActiveRideDashboardCard';
+import PassengerRideRequestCta from '../../components/PassengerRideRequestCta';
 import { colors } from '../../constants/colors';
-import { radius, spacing } from '../../constants/spacing';
+import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { PUBLIC_POLICY_LINKS } from '../../config/publicPolicyLinks';
@@ -347,12 +348,10 @@ export default function PassengerHome() {
             </AppCard>
           )
         ) : (
-          <AppButton
-            title={profileLoading ? 'CARREGANDO CONTA…' : 'PEDIR CORRIDA'}
-            haptic="medium"
-            disabled={profileLoading || signingOut || !passenger}
+          <PassengerRideRequestCta
+            loading={profileLoading}
+            disabled={signingOut || !passenger}
             onPress={openRideRequest}
-            style={styles.primaryAction}
           />
         )}
 
@@ -427,10 +426,6 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
     gap: spacing.md,
     flexGrow: 1,
-  },
-  primaryAction: {
-    minHeight: 56,
-    borderRadius: radius.lg,
   },
   activeLoadingCard: {
     gap: spacing.md,
