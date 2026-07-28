@@ -8,6 +8,7 @@ const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateIdentifier, validateNonEmptyString } = require('../validation/validators');
 const { writeAuditLog } = require('../audit/auditLog');
+const { logInfo } = require('../logging/logger');
 const { requireAdmin } = require('../auth/adminAuth');
 const {
   bestEffortRiskSignal,
@@ -17,6 +18,7 @@ const {
 const riskC = require('../risk/constants');
 const { safeDriverView } = require('./eligibility');
 const { scanDriverDuplicates } = require('./duplicateCheck');
+const { COMMERCIAL_POLICY_VERSION } = require('./commercialPolicy');
 const C = require('./constants');
 
 // The source contains only a one-way fingerprint. A newly matching account changes
@@ -74,7 +76,16 @@ async function approveDriver({ db, request, context, clock }) {
     });
   }
   const initial = initialSnap.data() || {};
-  if (initial.approvalNumber != null) return safeDriverView(driverId, initial);
+  if (initial.approvalNumber != null) {
+    logInfo(context, 'driver.approval.duplicate_ignored', {
+      operation: 'approve_driver',
+      reasonCode: 'ALREADY_APPROVED',
+      approvalNumber: initial.approvalNumber,
+      founder: initial.founderEligible === true,
+      commercialPolicyVersion: initial.commercialPolicyVersion || null,
+    });
+    return safeDriverView(driverId, initial);
+  }
 
   let duplicateResult;
   try {
@@ -183,6 +194,8 @@ async function approveDriver({ db, request, context, clock }) {
       founderExpiresAt: isFounder ? freePeriodEnd : null,
       commissionFreeUntil: freePeriodEnd,
       subscriptionFreeUntil: isFounder ? freePeriodEnd : null,
+      commercialPolicyVersion: COMMERCIAL_POLICY_VERSION,
+      commercialPolicyAssignedAtMs: nowMs,
       duplicateCheckStatus,
       duplicateReasonCodes: reasonCodes,
       duplicateConflictFingerprints: conflictFingerprints,
@@ -241,6 +254,9 @@ async function approveDriver({ db, request, context, clock }) {
         availabilityStatus: 'offline',
         approvalNumber: outcome.after.approvalNumber,
         founderNumber: outcome.after.founderNumber,
+        commercialPolicyVersion: COMMERCIAL_POLICY_VERSION,
+        commissionFreeDays: C.FREE_PERIOD_DAYS,
+        subscriptionGraceRideLimit: outcome.after.founderEligible ? 0 : C.FREE_RIDE_LIMIT,
         driverPhotoPublicVersion: outcome.after.driverPhotoPublicVersion || null,
         duplicateCheckStatus: outcome.after.duplicateCheckStatus,
         duplicateOverrideSource: reviewedOverrideReason
@@ -250,6 +266,16 @@ async function approveDriver({ db, request, context, clock }) {
             : null,
       },
     }, clock);
+
+    logInfo(context, 'driver.commercial_policy_assigned', {
+      operation: 'approve_driver',
+      policyVersion: COMMERCIAL_POLICY_VERSION,
+      approvalNumber: outcome.after.approvalNumber,
+      founder: outcome.after.founderEligible === true,
+      freePeriodDays: C.FREE_PERIOD_DAYS,
+      subscriptionGraceRideLimit: outcome.after.founderEligible ? 0 : C.FREE_RIDE_LIMIT,
+      vehicleType: outcome.after.vehicleType || null,
+    });
   }
 
   return safeDriverView(driverId, outcome.after);

@@ -11,6 +11,7 @@ const { spawnSync } = require('child_process');
 
 const { loadFirebaseBuildConfig } = require('../build/firebaseBuildConfig');
 const { loadPublicPolicyConfig } = require('../build/publicPolicyConfig');
+const { validateProductionSourceAudit } = require('./production-source-audit');
 
 const ROOT = path.resolve(__dirname, '../..');
 const REQUIRED_CONFIRMATION = 'YES';
@@ -190,6 +191,8 @@ function validateStaticConfiguration(env = process.env) {
   check(mockFiles.length === 0,
     `Données MOCK_ détectées dans le code application: ${mockFiles.join(', ')}`);
 
+  problems.push(...validateProductionSourceAudit({ root: ROOT }));
+
   return problems;
 }
 
@@ -220,7 +223,7 @@ function main() {
     return;
   }
 
-  console.log('[RELEASE] OK — configuration statique production');
+  console.log('[RELEASE] OK — configuration et audit source production');
 
   try {
     runCommand('Tests application', ['test']);

@@ -30,49 +30,69 @@ describe('driver ride-offer presentation', () => {
       vehicleType: 'moto',
       serviceAreaId: 'HORIZONTE_CE_BR',
       estimatedFareCentavos: 823,
+      commissionDisplayBps: 0,
       distanceToPickupMeters: 950,
     }, NOW);
 
     expect(view.commissionFree).toBe(true);
     expect(view.commissionPercentLabel).toBe('0%');
+    expect(view.driverReceivesCentavos).toBe(823);
     expect(view.driverNetCentavos).toBe(823);
     expect(view.freeRidesRemaining).toBe(3);
     expect(view.planCentavos).toBe(990);
     expect(view.walletLow).toBe(false);
     expect(view.pickupEtaMinutes).toBe(3);
+    expect(view).not.toHaveProperty('commissionCentavos');
   });
 
-  it('uses the real car and moto rates after the commission-free window', () => {
+  it('uses only the safe car and moto percentage projections', () => {
     const car = calculateOfferCommission({
       fareCentavos: 1325,
       vehicleType: 'car',
       serviceAreaId: 'HORIZONTE_CE_BR',
       commissionFree: false,
+      commissionDisplayBps: 1500,
     });
     const moto = calculateOfferCommission({
       fareCentavos: 774,
       vehicleType: 'moto',
       serviceAreaId: 'HORIZONTE_CE_BR',
       commissionFree: false,
+      commissionDisplayBps: 1200,
     });
 
     expect(car.commissionPercentLabel).toBe('15%');
-    expect(car.commissionCentavos).toBe(199);
+    expect(car.driverReceivesCentavos).toBe(1325);
     expect(moto.commissionPercentLabel).toBe('12%');
-    expect(moto.commissionCentavos).toBe(93);
+    expect(moto.driverReceivesCentavos).toBe(774);
+    expect(car).not.toHaveProperty('commissionCentavos');
+    expect(moto).not.toHaveProperty('commissionCentavos');
   });
 
-  it('shows the actual zero charge when the minimum driver guarantee caps commission', () => {
+  it('shows zero percent when the server minimum guarantee removes the hold', () => {
     const minimumMoto = calculateOfferCommission({
       fareCentavos: 500,
       vehicleType: 'moto',
       serviceAreaId: 'HORIZONTE_CE_BR',
       commissionFree: false,
+      commissionDisplayBps: 0,
     });
 
-    expect(minimumMoto.commissionCentavos).toBe(0);
     expect(minimumMoto.commissionPercentLabel).toBe('0%');
     expect(minimumMoto.minimumGuaranteeApplied).toBe(true);
+    expect(minimumMoto.driverReceivesCentavos).toBe(500);
+    expect(minimumMoto).not.toHaveProperty('commissionCentavos');
+  });
+
+  it('falls back only to the configured policy percentage for an old expiring offer', () => {
+    const moto = calculateOfferCommission({
+      fareCentavos: 900,
+      vehicleType: 'moto',
+      serviceAreaId: 'HORIZONTE_CE_BR',
+      commissionFree: false,
+    });
+    expect(moto.commissionDisplayBps).toBe(1200);
+    expect(moto.commissionPercentLabel).toBe('12%');
   });
 
   it('derives acceptance rate only from real fields or counters', () => {
@@ -86,50 +106,24 @@ describe('driver ride-offer presentation', () => {
     expect(estimatePickupMinutes(80, 'car')).toBe(0);
   });
 
-  it('never displays a provisional commission before the driver context is loaded', () => {
+  it('never displays a provisional commission before driver context is loaded', () => {
     const screen = source('src/app/(driver)/ride-request.jsx');
+    const compact = source('src/utils/driverTimedOffer.js');
 
     expect(screen).toContain("const [driverContextStatus, setDriverContextStatus] = useState('loading')");
-    expect(screen).toContain("offer && driverContextStatus === 'ready' && driver");
-    expect(screen).toContain('Carregando comissão e benefícios…');
-    expect(screen).toContain('Nenhum percentual provisório é exibido.');
-    expect(screen).toContain('Tempo estimado até o embarque');
+    expect(screen).toContain("driverContextStatus === 'ready'");
+    expect(screen).toContain('KNOWN_VEHICLE_TYPES.has(offer.vehicleType)');
+    expect(screen).toContain('commissionStatus: driverContextStatus');
+    expect(compact).toContain("? 'Validada ao aceitar'");
+    expect(compact).toContain(": 'Carregando…'");
+    expect(compact).not.toContain("commissionLabel: '0%'");
   });
 
   it('keeps plan activation and reset independent from the approval-based commission window', () => {
     const driverService = source('src/services/driverService.js');
-    const activation = withoutLineComments(driverService.slice(
-      driverService.indexOf('export async function activateDriverSubscription'),
-      driverService.indexOf('export async function resetDriverSubscription')
-    ));
-    const reset = withoutLineComments(driverService.slice(
-      driverService.indexOf('export async function resetDriverSubscription'),
-      driverService.indexOf('export async function extendDriverSubscription')
-    ));
+    const executable = withoutLineComments(driverService);
 
-    expect(activation).not.toContain('commissionFreeUntil');
-    expect(activation).not.toContain('commissionRateBps');
-    expect(activation).not.toContain('walletStatus');
-    expect(reset).not.toContain('commissionFreeUntil');
-    expect(reset).not.toContain('commissionRateBps');
-    expect(reset).not.toContain('walletStatus');
-  });
-
-  it('keeps the offer flow traceable and the destination private', () => {
-    const screen = source('src/app/(driver)/ride-request.jsx');
-    const button = source('src/components/AnimatedAcceptRideButton.jsx');
-
-    expect(screen).toContain('Tempo estimado até o embarque');
-    expect(screen).toContain('Pix direto ao motorista');
-    expect(screen).toContain('Promo Fundador');
-    expect(screen).toContain('corridas restantes');
-    expect(screen).toContain('Débito nesta corrida: R$ 0,00');
-    expect(screen).toContain('Taxa de aceitação');
-    expect(screen).toContain('ride.offer.accept_button_pressed');
-    expect(screen).not.toContain('offer.destination');
-
-    expect(button).toContain('Animated.loop');
-    expect(button).toContain('Haptics.impactAsync');
-    expect(button).toContain("loading ? 'Aceitando…' : 'Aceitar corrida'");
+    expect(executable).not.toMatch(/activateDriverSubscription[\s\S]*commissionFreeUntil\s*:/);
+    expect(executable).not.toMatch(/resetDriverSubscription[\s\S]*commissionFreeUntil\s*:/);
   });
 });

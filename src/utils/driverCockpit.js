@@ -1,18 +1,19 @@
-// Approved-driver cockpit helpers (Iteration 2A).
+// Approved-driver cockpit helpers.
 //
 // Pure functions over an already-loaded drivers/{uid} object, plus PT-BR copy.
-// No Firestore access here — reads only. Business rule: the admin decision on
-// drivers/{uid} is the source of truth; the driver app only interprets it.
-//
-// Field tolerance: the admin/approval flow has evolved, so the same concept can
-// live under more than one field name. These helpers accept both the current
-// fields written by approveDriver (founderEligible, founderExpiresAt,
-// approvalNumber) and the friendlier names used elsewhere (founderBadgeActive,
-// commissionFreeUntil, founderNumber). Missing fields never crash the UI.
+// No Firestore access here: the backend remains authoritative and the cockpit only
+// presents the centralized commercial policy.
 
 import { passesSubscriptionOrTrial } from './driverEligibility';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import {
+  DAY_MS,
+  SUBSCRIPTION_COVERAGE_SOURCE,
+  founderSubscriptionUntilMs,
+  freePeriodUntilMs,
+  isFounderDriver as policyIsFounderDriver,
+  resolveCommercialPolicy,
+  toMillis as policyToMillis,
+} from './commercialPolicy';
 
 // The backend dispatch query accepts only "online". AVAILABLE remains a
 // compatibility alias so existing UI code cannot write the obsolete value.
@@ -23,12 +24,7 @@ export const AVAILABILITY = {
 };
 
 export function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value === 'number') return value;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  if (value instanceof Date) return value.getTime();
-  return 0;
+  return policyToMillis(value);
 }
 
 export function formatDateBR(ms) {
@@ -39,8 +35,7 @@ export function formatDateBR(ms) {
 }
 
 export function isFounderDriver(driver) {
-  if (!driver) return false;
-  return driver.founderBadgeActive === true || driver.founderEligible === true;
+  return policyIsFounderDriver(driver);
 }
 
 export function founderNumberLabel(driver) {
@@ -50,11 +45,11 @@ export function founderNumberLabel(driver) {
 }
 
 export function commissionFreeUntilMs(driver) {
-  return toMillis(driver && (driver.commissionFreeUntil || driver.founderExpiresAt));
+  return freePeriodUntilMs(driver);
 }
 
 export function subscriptionFreeUntilMs(driver) {
-  return toMillis(driver && driver.subscriptionFreeUntil);
+  return founderSubscriptionUntilMs(driver);
 }
 
 export function daysUntil(targetMs, nowMs) {
@@ -113,22 +108,53 @@ export function deriveEligibility(driver) {
   return { eligible: false, reasonCode: 'subscription_required' };
 }
 
-export function subscriptionDisplay(driver, nowMs) {
-  const d = driver || {};
-  const freeMs = subscriptionFreeUntilMs(d);
-  if (freeMs && nowMs < freeMs) {
-    return { mode: 'free', dateMs: freeMs };
+export function subscriptionDisplay(driver, nowMs = Date.now()) {
+  const policy = resolveCommercialPolicy(driver, nowMs);
+
+  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.FOUNDER_FREE_WINDOW) {
+    return {
+      mode: 'free',
+      dateMs: policy.founderSubscriptionUntilMs,
+      coverageSource: policy.subscriptionCoverageSource,
+      freeRideCountUsed: policy.freeRideCountUsed,
+      freeRidesRemaining: 0,
+    };
   }
-  if (d.subscriptionActive === true || d.subscriptionStatus === 'active') {
-    return { mode: 'active', dateMs: toMillis(d.subscriptionExpiresAt) };
+  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.NON_FOUNDER_RIDE_GRACE) {
+    return {
+      mode: 'ride_grace',
+      dateMs: policy.freePeriodUntilMs,
+      coverageSource: policy.subscriptionCoverageSource,
+      freeRideCountUsed: policy.freeRideCountUsed,
+      freeRidesRemaining: policy.freeRidesRemaining,
+    };
   }
-  return { mode: 'required', dateMs: 0 };
+  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.PAID_SUBSCRIPTION) {
+    return {
+      mode: 'active',
+      dateMs: policy.subscriptionExpiresAtMs,
+      coverageSource: policy.subscriptionCoverageSource,
+      freeRideCountUsed: policy.freeRideCountUsed,
+      freeRidesRemaining: policy.freeRidesRemaining,
+    };
+  }
+  return {
+    mode: 'required',
+    dateMs: 0,
+    coverageSource: policy.subscriptionCoverageSource,
+    freeRideCountUsed: policy.freeRideCountUsed,
+    freeRidesRemaining: 0,
+  };
 }
 
-export function commissionDisplay(driver, nowMs) {
-  const freeMs = commissionFreeUntilMs(driver);
-  if (freeMs && nowMs < freeMs) {
-    return { mode: 'free', dateMs: freeMs };
-  }
-  return { mode: 'standard', dateMs: 0 };
+export function commissionDisplay(driver, nowMs = Date.now()) {
+  const policy = resolveCommercialPolicy(driver, nowMs);
+  return {
+    mode: policy.freePeriodActive ? 'free' : 'standard',
+    dateMs: policy.freePeriodActive ? policy.freePeriodUntilMs : 0,
+    percent: policy.commissionPercent,
+    label: `${policy.commissionPercent}%`,
+    bps: policy.commissionBps,
+    policyVersion: policy.policyVersion,
+  };
 }

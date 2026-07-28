@@ -11,6 +11,7 @@
 // freeRideCountUsed — callers only write the subscription fields.
 
 const { validateEnum } = require('../validation/validators');
+const { toMillis } = require('./commercialPolicy');
 const C = require('./constants');
 
 /**
@@ -24,8 +25,11 @@ function computeSubscriptionExtension(driverData, nowMs) {
   const priceCentavos =
     vehicleType === 'moto' ? C.MOTO_SUBSCRIPTION_CENTAVOS : C.CAR_SUBSCRIPTION_CENTAVOS;
 
-  const currentExpiry = Number(d.subscriptionExpiresAt || 0);
-  const isActive = d.subscriptionActive === true && currentExpiry > nowMs;
+  // Existing records may contain an epoch number, Date or Firestore Timestamp.
+  // Normalize before comparing so early renewal never discards remaining days.
+  const currentExpiry = toMillis(d.subscriptionExpiresAt);
+  const activeFlag = d.subscriptionActive === true || d.subscriptionStatus === 'active';
+  const isActive = activeFlag && currentExpiry > nowMs;
   const base = isActive ? currentExpiry : nowMs;
   const newExpiry = base + C.SUBSCRIPTION_DURATION_DAYS * C.DAY_MS;
 

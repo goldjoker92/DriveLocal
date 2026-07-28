@@ -11,14 +11,15 @@ module.exports = Object.freeze({
 
   DAY_MS,
 
-  // Founder / free-period rules (per service area).
-  FOUNDER_LIMIT: 100, // first 100 approved drivers per city are founders
-  FREE_PERIOD_DAYS: 60, // founder commission-free + subscription-free window
+  // Launch policy measured from the immutable admin approval timestamp.
+  FOUNDER_LIMIT: 100, // first 100 approved drivers per service area
+  FREE_PERIOD_DAYS: 60, // 0% commission for all; free subscription for founders
 
-  // Non-founder onboarding grace: first rides allowed without a subscription.
+  // Drivers #101+ may use at most five subscription-free completed rides, and
+  // only while the same 60-day launch window is active. Day 60 always wins.
   FREE_RIDE_LIMIT: 5,
 
-  // Manual subscription plan (fixed server-side; never accepted from client).
+  // Paid subscription plan (fixed server-side; never accepted from client).
   SUBSCRIPTION_DURATION_DAYS: 30,
   MOTO_SUBSCRIPTION_CENTAVOS: 990, // R$9,90
   CAR_SUBSCRIPTION_CENTAVOS: 1990, // R$19,90

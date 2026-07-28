@@ -5,9 +5,9 @@
 // Security invariants:
 //   - the driver id ALWAYS comes from auth, never from the client payload;
 //   - subscription price is derived server-side from vehicleType (never client);
-//   - wallet amounts are limited to a server-approved pilot allowlist;
-//   - promotions (founder subscription window, non-founder free rides, founder
-//     commission-free window) block unnecessary payments with a stable PT-BR error;
+//   - wallet presets use an allowlist and explicit custom amounts use a strict range;
+//   - launch grace blocks unnecessary subscription/wallet payments with stable,
+//     traceable reason codes;
 //   - creation is idempotent on the client idempotency key, and the SAME key is
 //     forwarded to the provider on retry;
 //   - only safe fields are returned; no provider payload or PII leaks.
@@ -29,6 +29,7 @@ const {
   OPERATION_STATES,
 } = require('../idempotency/idempotency');
 const driverC = require('../drivers/constants');
+const { resolveCommercialPolicy } = require('../drivers/commercialPolicy');
 const { computeSubscriptionExtension } = require('../drivers/subscriptionDomain');
 const C = require('./constants');
 
@@ -39,18 +40,51 @@ function keyHash(key) {
   return fingerprintPayload({ k: key });
 }
 
-// Decides whether a subscription payment is currently unnecessary (covered).
+// Kept as a compatibility export for existing tests/callers. A paid subscription
+// alone does not block renewal; only the founder/free-ride launch grace does.
 function subscriptionAlreadyCovered(driver, nowMs) {
-  const isFounder = driver.founderEligible === true;
-  const founderCovered =
-    isFounder && driver.subscriptionFreeUntil != null && Number(driver.subscriptionFreeUntil) > nowMs;
-  const freeRidesRemaining =
-    !isFounder && Number(driver.freeRideCountUsed || 0) < driverC.FREE_RIDE_LIMIT;
-  return founderCovered || freeRidesRemaining;
+  return resolveCommercialPolicy(driver, nowMs).subscriptionPaymentBlockedByGrace;
 }
 
 function accountDeletionPending(driver) {
   return ['requested', 'processing'].includes(driver?.accountDeletionStatus);
+}
+
+function validateWalletTopupAmount(payload) {
+  const requested = validatePositiveCentavos(payload.amountCentavos, 'amountCentavos');
+  const customAmount = payload.customAmount === true;
+
+  if (payload.customAmount != null && typeof payload.customAmount !== 'boolean') {
+    throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
+      internalMessage: 'customAmount must be boolean',
+      safeMetadata: { field: 'customAmount' },
+    });
+  }
+
+  if (customAmount) {
+    if (
+      requested < C.WALLET_TOPUP_MIN_CENTAVOS
+      || requested > C.WALLET_TOPUP_MAX_CENTAVOS
+    ) {
+      throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
+        internalMessage: `custom top-up outside range: ${requested}`,
+        safeMetadata: {
+          field: 'amountCentavos',
+          minCentavos: C.WALLET_TOPUP_MIN_CENTAVOS,
+          maxCentavos: C.WALLET_TOPUP_MAX_CENTAVOS,
+        },
+      });
+    }
+    return { amountCentavos: requested, customAmount: true };
+  }
+
+  if (!C.ALLOWED_TOPUP_CENTAVOS.includes(requested)) {
+    throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
+      internalMessage: `unsupported preset top-up amount: ${requested}`,
+      safeMetadata: { field: 'amountCentavos' },
+    });
+  }
+  return { amountCentavos: requested, customAmount: false };
 }
 
 /**
@@ -67,7 +101,7 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
 
   const payload = assertShape(request && request.data, {
     required: ['purpose', 'idempotencyKey'],
-    optional: ['amountCentavos'],
+    optional: ['amountCentavos', 'customAmount'],
   });
   const purpose = validateEnum(payload.purpose, C.PURPOSES, 'purpose');
   const idempotencyKey = validateIdempotencyKey(payload.idempotencyKey);
@@ -79,7 +113,7 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     idempotencyKeyHash: keyHash(idempotencyKey),
   });
 
-  // Load the driver (server-authoritative source for vehicle type / promos).
+  // Load the driver (server-authoritative source for vehicle type / commercial policy).
   const driverRef = db.collection(driverC.DRIVERS).doc(driverId);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) {
@@ -96,36 +130,60 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     });
   }
 
+  const commercial = resolveCommercialPolicy(driver, nowMs);
+  logInfo(context, 'payment.create.commercial_policy_resolved', {
+    operation: OPERATION_TYPE,
+    purpose,
+    policyVersion: commercial.policyVersion,
+    founder: commercial.founder,
+    freePeriodActive: commercial.freePeriodActive,
+    commissionBps: commercial.commissionBps,
+    subscriptionCoverageSource: commercial.subscriptionCoverageSource,
+    freeRidesRemaining: commercial.freeRidesRemaining,
+  });
+
   // Resolve the amount server-side per purpose (never trust a client amount for
-  // subscription; restrict wallet to the pilot allowlist).
+  // subscription; wallet amounts are either known presets or explicit bounded custom values).
   let amountCentavos;
+  let customAmount = false;
   if (purpose === 'driver_subscription') {
-    if (subscriptionAlreadyCovered(driver, nowMs)) {
+    if (commercial.subscriptionPaymentBlockedByGrace) {
+      logInfo(context, 'payment.create.not_required', {
+        operation: OPERATION_TYPE,
+        purpose,
+        policyVersion: commercial.policyVersion,
+        reasonCode: commercial.subscriptionCoverageSource,
+        freeRidesRemaining: commercial.freeRidesRemaining,
+      });
       throw new AppError(ERROR_CODES.PAYMENT_NOT_REQUIRED, {
-        internalMessage: 'subscription payment not required (promotion/free window active)',
-        safeMetadata: { purpose },
+        internalMessage: `subscription payment blocked by ${commercial.subscriptionCoverageSource}`,
+        safeMetadata: {
+          purpose,
+          reason: commercial.subscriptionCoverageSource,
+          freeRidesRemaining: commercial.freeRidesRemaining,
+        },
       });
     }
     const { priceCentavos } = computeSubscriptionExtension(driver, nowMs);
     amountCentavos = priceCentavos;
   } else {
-    // wallet_topup — blocked entirely during the founder commission-free window.
-    const commissionFree =
-      driver.commissionFreeUntil != null && Number(driver.commissionFreeUntil) > nowMs;
-    if (commissionFree) {
+    // Wallet top-ups are unnecessary for every driver while commission is 0%.
+    // This guard runs before provider creation, so Mercado Pago is never called.
+    if (commercial.freePeriodActive) {
+      logInfo(context, 'payment.create.not_required', {
+        operation: OPERATION_TYPE,
+        purpose,
+        policyVersion: commercial.policyVersion,
+        reasonCode: 'COMMISSION_FREE_WINDOW_ACTIVE',
+      });
       throw new AppError(ERROR_CODES.PAYMENT_NOT_REQUIRED, {
         internalMessage: 'wallet top-up not required during commission-free window',
-        safeMetadata: { purpose },
+        safeMetadata: { purpose, reason: 'COMMISSION_FREE_WINDOW_ACTIVE' },
       });
     }
-    const requested = validatePositiveCentavos(payload.amountCentavos, 'amountCentavos');
-    if (!C.ALLOWED_TOPUP_CENTAVOS.includes(requested)) {
-      throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
-        internalMessage: `unsupported top-up amount: ${requested}`,
-        safeMetadata: { field: 'amountCentavos' },
-      });
-    }
-    amountCentavos = requested;
+    const validatedTopup = validateWalletTopupAmount(payload);
+    amountCentavos = validatedTopup.amountCentavos;
+    customAmount = validatedTopup.customAmount;
   }
 
   // Idempotency: same key + same logical request -> replay stored safe result.
@@ -136,12 +194,18 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
       operationType: OPERATION_TYPE,
       actorUid: driverId,
       traceId,
-      payload: { driverId, purpose, amountCentavos },
+      payload: { driverId, purpose, amountCentavos, customAmount },
     },
     clock
   );
   if (!acq.acquired) {
     if (acq.state === OPERATION_STATES.COMPLETED) {
+      logInfo(context, 'payment.create.duplicate_ignored', {
+        operation: OPERATION_TYPE,
+        purpose,
+        idempotencyKeyHash: keyHash(idempotencyKey),
+        normalizedStatus: OPERATION_STATES.COMPLETED,
+      });
       return acq.resultReference || null;
     }
     throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT, {
@@ -180,6 +244,7 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     driverId,
     purpose,
     amountCentavos,
+    customAmount,
     currency: C.CURRENCY,
     provider: C.PROVIDER,
     providerOrderId: order.providerOrderId,
@@ -189,7 +254,9 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     qrCodeBase64: order.qrCodeBase64 || null,
     environment: context && context.environment ? context.environment : null,
     idempotencyKey,
-    idempotencyFingerprint: fingerprintPayload({ driverId, purpose, amountCentavos }),
+    idempotencyFingerprint: fingerprintPayload({ driverId, purpose, amountCentavos, customAmount }),
+    commercialPolicyVersion: commercial.policyVersion,
+    commercialPolicyReason: commercial.subscriptionCoverageSource,
     appliedAtMs: null,
     createdAtMs: nowMs,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -202,7 +269,9 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     localPaymentId,
     providerOrderId: order.providerOrderId,
     purpose,
+    customAmount,
     normalizedStatus: C.STATUS.PENDING,
+    policyVersion: commercial.policyVersion,
     idempotencyKeyHash: keyHash(idempotencyKey),
   });
 
@@ -223,4 +292,5 @@ module.exports = {
   createDriverPixPayment,
   subscriptionAlreadyCovered,
   accountDeletionPending,
+  validateWalletTopupAmount,
 };

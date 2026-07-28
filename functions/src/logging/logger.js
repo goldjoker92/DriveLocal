@@ -17,18 +17,28 @@ function shortHash(value) {
 }
 
 // Keys whose values must NEVER be logged (case-insensitive substring match).
+// Keep operational status/version/count fields visible, but fail closed for
+// identity, exact route/location and provider payload fields.
+//
+// Very short document identifiers such as `rg` must NOT live in this list:
+// substring matching would also redact unrelated safe fields such as
+// `targetUserIdHash`. Those identifiers belong in SENSITIVE_IDENTITY_KEYS below.
 const SENSITIVE_KEY_PATTERNS = [
   'accesstoken', 'access_token', 'authorization', 'token', 'fcmtoken',
   'webhooksecret', 'webhook_secret', 'secret', 'password', 'passwd',
   'verificationcode', 'verification_code', 'otp',
-  'cpf', 'cnpj', 'cnh', 'rg', 'identity',
+  'cpf', 'cnpj', 'cnh', 'identity',
+  'fullname', 'passengername', 'drivername',
   'phone', 'telefone', 'whatsapp',
-  'email', 'pixkey', 'pix_key', 'address', 'endereco',
-  'rawpayload', 'providerpayload', 'internalmessage',
+  'email', 'pixkey', 'pix_key', 'pixpayload', 'pix_payload', 'copiaecola',
+  'address', 'endereco', 'logradouro', 'street',
+  'pickup', 'destination', 'origin', 'coordinates', 'location',
+  'rawpayload', 'providerpayload', 'provider_payload', 'requestpayload',
+  'internalmessage',
 ];
 
-// Exact identity keys. They cannot use substring matching because safe correlation
-// fields such as actorUidHash and driverIdHash must remain visible.
+// Exact identity/location keys. They cannot all use substring matching because
+// safe correlation fields such as actorUidHash and driverIdHash must remain visible.
 const SENSITIVE_IDENTITY_KEYS = new Set([
   'uid',
   'actoruid',
@@ -39,8 +49,22 @@ const SENSITIVE_IDENTITY_KEYS = new Set([
   'userid',
   'driverid',
   'passengerid',
+  'rg',
+  'registrogeral',
+  'lat',
+  'lng',
+  'latitude',
+  'longitude',
 ]);
 
+const OPERATIONAL_PHASES = new Set([
+  'requested',
+  'started',
+  'succeeded',
+  'failed',
+  'restored',
+  'duplicate_ignored',
+]);
 const REDACTED = '[REDACTED]';
 const MAX_DEPTH = 8;
 
@@ -52,6 +76,22 @@ function isSensitiveKey(key) {
   const k = String(key).toLowerCase();
   return SENSITIVE_IDENTITY_KEYS.has(normalizedKey(key))
     || SENSITIVE_KEY_PATTERNS.some((p) => k.includes(p));
+}
+
+function deriveOperationalPhase(eventName, explicitPhase = null) {
+  const explicit = String(explicitPhase || '').trim().toLowerCase();
+  if (OPERATIONAL_PHASES.has(explicit)) return explicit;
+
+  const event = String(eventName || '').trim().toLowerCase();
+  if (event.includes('duplicate_ignored')) return 'duplicate_ignored';
+  if (/(restored|recovered|replayed|resume)/.test(event)) return 'restored';
+  if (/(requested|request_started)/.test(event)) return 'requested';
+  if (/(started|starting|attempted)/.test(event)) return 'started';
+  if (/(failed|failure|rejected|denied|error|expired)/.test(event)) return 'failed';
+  if (/(succeeded|success|sent|completed|confirmed|captured|created|accepted|arrived|won|cancelled)/.test(event)) {
+    return 'succeeded';
+  }
+  return null;
 }
 
 /**
@@ -101,7 +141,14 @@ function createLoggerContext(fields = {}) {
 }
 
 function buildEntry(context, eventName, severity, extra) {
-  const merged = { ...(context || {}), eventName, severity, ...(extra || {}) };
+  const phase = deriveOperationalPhase(eventName, extra?.phase);
+  const merged = {
+    ...(context || {}),
+    eventName,
+    severity,
+    ...(extra || {}),
+    ...(phase ? { phase } : {}),
+  };
   return redactSensitiveData(merged);
 }
 
@@ -131,6 +178,7 @@ async function measureDuration(clock, fn) {
 module.exports = {
   createTraceId,
   createLoggerContext,
+  deriveOperationalPhase,
   redactSensitiveData,
   logInfo,
   logWarning,
@@ -139,5 +187,6 @@ module.exports = {
   shortHash,
   SENSITIVE_KEY_PATTERNS,
   SENSITIVE_IDENTITY_KEYS,
+  OPERATIONAL_PHASES,
   REDACTED,
 };

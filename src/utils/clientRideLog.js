@@ -4,10 +4,20 @@ import { APP_ENVIRONMENT } from '../config/runtimeEnvironment';
 //
 // These logs are intentionally rich enough to debug the whole passenger flow
 // (request -> quote -> dispatch -> assignment -> payment), while still excluding
-// exact coordinates, street labels, Pix payloads, phone numbers, tokens and
-// counterparty identifiers. Production builds do not emit these traces.
+// exact coordinates, street labels, Pix payloads, phone numbers, tokens,
+// counterparty identifiers and exact platform commission amounts. Production
+// builds do not emit these traces.
 const DEV_RUNTIME = typeof __DEV__ !== 'undefined' && __DEV__ === true;
 const CLIENT_RIDE_LOGS_ENABLED = APP_ENVIRONMENT === 'development' || DEV_RUNTIME;
+const SAFE_COMMISSION_DISPLAY_BPS = new Set([0, 1200, 1500]);
+const OPERATIONAL_PHASES = new Set([
+  'requested',
+  'started',
+  'succeeded',
+  'failed',
+  'restored',
+  'duplicate_ignored',
+]);
 
 function safeString(value, max = 120) {
   if (value == null) return null;
@@ -21,15 +31,37 @@ function safeNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function safeCommissionDisplayBps(value) {
+  const bps = safeNumber(value);
+  return SAFE_COMMISSION_DISPLAY_BPS.has(bps) ? bps : null;
+}
+
 function compact(object) {
   return Object.fromEntries(
     Object.entries(object).filter(([, value]) => value !== null && value !== undefined)
   );
 }
 
+export function deriveOperationalPhase(eventName, explicitPhase = null) {
+  const explicit = safeString(explicitPhase, 32)?.toLowerCase();
+  if (explicit && OPERATIONAL_PHASES.has(explicit)) return explicit;
+
+  const event = safeString(eventName, 160)?.toLowerCase() || '';
+  if (event.includes('duplicate_ignored')) return 'duplicate_ignored';
+  if (/(restored|recovered|replayed|resume)/.test(event)) return 'restored';
+  if (/(requested|request_started)/.test(event)) return 'requested';
+  if (/(started|starting|attempted)/.test(event)) return 'started';
+  if (/(failed|failure|rejected|denied|error|expired)/.test(event)) return 'failed';
+  if (/(succeeded|success|sent|completed|confirmed|captured|created|accepted|arrived|won|cancelled)/.test(event)) {
+    return 'succeeded';
+  }
+  return null;
+}
+
 /**
  * Returns a privacy-safe but operationally complete ride snapshot for Metro logs.
- * Field names are included so a missing backend projection is immediately visible.
+ * Presence booleans make missing projections visible without listing arbitrary
+ * source keys, which could itself reveal private schema details.
  */
 export function sanitizeRideForClientLog(ride) {
   if (!ride || typeof ride !== 'object') return null;
@@ -44,6 +76,7 @@ export function sanitizeRideForClientLog(ride) {
     estimatedFareCentavos: safeNumber(ride.estimatedFareCentavos),
     finalFareCentavos: safeNumber(ride.finalFareCentavos),
     paymentAmountCentavos: safeNumber(ride.paymentAmountCentavos),
+    commissionDisplayBps: safeCommissionDisplayBps(ride.commissionDisplayBps),
     routeDistanceMeters: safeNumber(ride.routeDistanceMeters),
     routeDurationSeconds: safeNumber(ride.routeDurationSeconds),
     pricingConfigVersion: safeString(ride.pricingConfigVersion, 80),
@@ -58,7 +91,6 @@ export function sanitizeRideForClientLog(ride) {
     hasAcceptedDriver: Boolean(ride.acceptedDriverId || ride.acceptedDriverPublic),
     hasDriverPublicProfile: Boolean(ride.acceptedDriverPublic),
     hasPixPaymentPayload: Boolean(ride.paymentPixPayload),
-    availableFields: Object.keys(ride).sort().slice(0, 100),
   });
 }
 
@@ -66,9 +98,10 @@ export function sanitizeRideErrorForClientLog(error) {
   if (!error) return null;
   const details = error.details && typeof error.details === 'object' ? error.details : {};
 
+  // Error messages are deliberately excluded. They can contain an address, a name,
+  // a provider payload or user-entered text even when the surrounding key is safe.
   return compact({
     errorCode: safeString(details.code || error.code || error.name || 'UNKNOWN', 80),
-    errorMessage: safeString(details.message || error.message || 'Erro desconhecido', 180),
     retryable: details.retryable === true || error.retryable === true,
   });
 }
@@ -90,9 +123,11 @@ export function logRideClientEvent(eventName, fields = {}, level = 'info') {
     scope: 'ride_client',
     severity,
     eventName: safeString(eventName, 96),
+    phase: deriveOperationalPhase(eventName, fields.phase),
     at: new Date().toISOString(),
     action: safeString(fields.action, 64),
     step: safeString(fields.step, 64),
+    provider: safeString(fields.provider, 32),
     rideId: safeString(fields.rideId, 128),
     status: safeString(fields.status, 48),
     resultStatus: safeString(fields.resultStatus, 48),

@@ -19,6 +19,7 @@ const { resolveEnvironment } = require('../config/environment');
 const { createMercadoPagoAdapter } = require('./mercadoPago');
 const { createDriverPixPayment } = require('./createPixPayment');
 const { getDriverPaymentStatus, reprocessDriverPayment } = require('./paymentStatus');
+const { getDriverSubscriptionSnapshot } = require('./subscriptionSnapshot');
 const { handleWebhook } = require('./webhook');
 
 const REGION = 'southamerica-east1';
@@ -50,6 +51,20 @@ const getDriverPaymentStatusFn = onCall(
   { region: REGION },
   withCallableBoundary('getDriverPaymentStatus', (request, context) =>
     getDriverPaymentStatus({ db: admin.firestore(), request, context, clock: systemClock })
+  )
+);
+
+// Restores only the latest actionable subscription payment for the authenticated
+// driver. Raw paymentRequests remain server-only and no provider secret is needed.
+const getDriverSubscriptionSnapshotFn = onCall(
+  { region: REGION },
+  withCallableBoundary('getDriverSubscriptionSnapshot', (request, context) =>
+    getDriverSubscriptionSnapshot({
+      db: admin.firestore(),
+      request,
+      context,
+      clock: systemClock,
+    })
   )
 );
 
@@ -101,6 +116,7 @@ const mercadoPagoWebhookFn = onRequest(
 module.exports = {
   createDriverPixPayment: createDriverPixPaymentFn,
   getDriverPaymentStatus: getDriverPaymentStatusFn,
+  getDriverSubscriptionSnapshot: getDriverSubscriptionSnapshotFn,
   reprocessDriverPayment: reprocessDriverPaymentFn,
   mercadoPagoWebhook: mercadoPagoWebhookFn,
   // Exported for deployment tooling / documentation of required secret names.

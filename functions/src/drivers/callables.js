@@ -11,6 +11,7 @@ const { rejectDriver, blockDriver, unblockDriver, suspendDriver, reactivateDrive
 const { activateSubscription } = require('./activateSubscription');
 const { approveDriverPhoto, rejectDriverPhoto } = require('./photoReview');
 const { setDriverAvailability } = require('./availability');
+const { getDriverRideHistory } = require('./history');
 
 const REGION = 'southamerica-east1';
 
@@ -34,4 +35,5 @@ module.exports = {
   approveDriverPhotoSecure: bind('approveDriverPhotoSecure', approveDriverPhoto),
   rejectDriverPhotoSecure: bind('rejectDriverPhotoSecure', rejectDriverPhoto),
   setDriverAvailabilitySecure: bind('setDriverAvailabilitySecure', setDriverAvailability),
+  getDriverRideHistorySecure: bind('getDriverRideHistorySecure', getDriverRideHistory),
 };

@@ -25,7 +25,7 @@ const PICKUP = { lat: -4.10, lng: -38.49, label: 'Centro' };
 const DEST_IN = { lat: -4.11, lng: -38.5 };
 const DEST_OUT = { lat: -23.55, lng: -46.63 }; // São Paulo — out of area
 
-// Fixed route: 3 km / 10 min -> moto fare 655, commission 79 (12% capped ok).
+// Fixed route: 3 km / 10 min -> moto fare 655; 12%=79, raised to R$1 minimum.
 function fakeRouting(over = {}) {
   const calls = [];
   return {
@@ -142,11 +142,13 @@ describe('ride creation & geofence & pricing authority', () => {
       createRide(db, fixedClock(T0), fakeRouting(), 'pax1', { estimatedFareCentavos: 1 })
     ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
 
-    // A valid call prices from the provider route (3 km/10 min): moto fare 655.
+    // Provider route 3 km/10 min: fare 655, minimum platform commission R$1.00.
     const view = await createRide(db, fixedClock(T0), fakeRouting(), 'pax2');
     expect(view.estimatedFareCentavos).toBe(655);
     expect(view.routeDistanceMeters).toBe(3000);
-    expect(db._store.get(`${C.RIDE_REQUESTS}/${view.rideId}`).estimatedCommissionCentavos).toBe(79);
+    const storedRide = db._store.get(`${C.RIDE_REQUESTS}/${view.rideId}`);
+    expect(storedRide.estimatedCommissionCentavos).toBe(100);
+    expect(storedRide.pricingConfigVersion).toBe('horizonte-1.2.0');
 
     // Routing failure aborts creation WITHOUT persisting an incomplete ride.
     const db2 = makeFakeFirestore();
@@ -303,14 +305,14 @@ describe('transactional acceptance & wallet hold', () => {
       acceptDriverOfferSecure({ db, request: { auth: { uid: 'S' }, data: { offerId: `${view.rideId}_S`, idempotencyKey: 'acc-poor-000001' } }, context: ctx, clock })
     ).rejects.toMatchObject({ code: 'WALLET_INSUFFICIENT' });
 
-    // Top up above threshold and enough to cover commission (79).
+    // Top up above readiness threshold and enough to cover the R$1.00 hold.
     db.collection(C.DRIVERS).doc('S').set({ walletAvailableCentavos: 5000 }, { merge: true });
     const won = await acceptDriverOfferSecure({
       db, request: { auth: { uid: 'S' }, data: { offerId: `${view.rideId}_S`, idempotencyKey: 'acc-ok-00000001' } }, context: ctx, clock,
     });
-    expect(won.commissionHoldCentavos).toBe(79);
-    expect(db._store.get(`${C.DRIVERS}/S`).walletHeldCentavos).toBe(79);
-    expect(db._store.get(`${C.DRIVERS}/S`).walletAvailableCentavos).toBe(5000 - 79);
+    expect(won.commissionHoldCentavos).toBe(100);
+    expect(db._store.get(`${C.DRIVERS}/S`).walletHeldCentavos).toBe(100);
+    expect(db._store.get(`${C.DRIVERS}/S`).walletAvailableCentavos).toBe(5000 - 100);
   });
 
   it('T10: duplicate acceptance creates exactly one hold and one assignment', async () => {
@@ -334,7 +336,7 @@ describe('transactional acceptance & wallet hold', () => {
     expect(first.status).toBe(C.RIDE_STATUS.ASSIGNED);
     expect(second.status).toBe(C.RIDE_STATUS.ASSIGNED);
     expect(holdCount(db, view.rideId)).toBe(1); // one hold
-    expect(db._store.get(`${C.DRIVERS}/S`).walletHeldCentavos).toBe(79); // not doubled
+    expect(db._store.get(`${C.DRIVERS}/S`).walletHeldCentavos).toBe(100); // not doubled
     expect(db._store.get(`${C.RIDE_REQUESTS}/${view.rideId}`).acceptedDriverId).toBe('S');
   });
 });

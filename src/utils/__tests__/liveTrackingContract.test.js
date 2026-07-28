@@ -53,12 +53,12 @@ describe('Android live driver tracking contracts', () => {
     expect(auth).toContain('availabilitySessionId: null');
     expect(availability).toContain("'setDriverAvailabilitySecure'");
     expect(home).toContain('🔴 Você está indisponível');
-    expect(home).toContain('Ative sua disponibilidade quando quiser começar a trabalhar.');
-    expect(home).toContain('Sua localização será usada somente durante seu período de trabalho.');
+    expect(home).toContain('Comece quando estiver pronto para receber ofertas.');
+    expect(home).toContain('Sua localização fica desligada enquanto você não trabalha.');
     expect(home).toContain('Começar a trabalhar');
     expect(home).toContain('🟢 Você está disponível');
     expect(home).toContain('Buscando corridas próximas.');
-    expect(home).toContain('A localização de trabalho está ativa.');
+    expect(home).toContain('GPS de trabalho ativo.');
     expect(home).toContain('Parar de trabalhar');
     expect(home).toContain('cockpit.remote_session_revoked');
     expect(home).toContain('timestampMs(driver.availabilityUpdatedAt)');

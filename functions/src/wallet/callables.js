@@ -1,13 +1,13 @@
 // @ts-check
-// Callable binding for the secure admin wallet-adjustment domain. Thin v2 onCall
-// wrapped by the single error boundary; real logic lives in the pure,
-// clock-injected handler so tests stay deterministic.
+// Callable bindings for the wallet domain. Admin adjustments and driver-owned
+// read projections stay separate; raw ledger/payment collections remain server-only.
 
 const { onCall } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const { withCallableBoundary } = require('../errors/boundary');
 const { systemClock } = require('../time/clock');
 const { adjustDriverWallet } = require('./adminWallet');
+const { getDriverWalletSnapshot } = require('./driverWalletSnapshot');
 
 const REGION = 'southamerica-east1';
 
@@ -16,6 +16,12 @@ module.exports = {
     { region: REGION },
     withCallableBoundary('adjustDriverWalletSecure', (request, context) =>
       adjustDriverWallet({ db: admin.firestore(), request, context, clock: systemClock })
+    )
+  ),
+  getDriverWalletSnapshot: onCall(
+    { region: REGION },
+    withCallableBoundary('getDriverWalletSnapshot', (request, context) =>
+      getDriverWalletSnapshot({ db: admin.firestore(), request, context, clock: systemClock })
     )
   ),
 };

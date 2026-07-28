@@ -56,12 +56,15 @@ describe('driver dispatch freshness contract', () => {
     expect(layout).toContain('layout.remote_session_revoked');
   });
 
-  it('normalizes Firestore Timestamp dates in backend driver eligibility', () => {
+  it('normalizes Firestore Timestamp dates inside the authoritative commercial policy', () => {
     const eligibility = source('functions/src/drivers/eligibility.js');
+    const commercialPolicy = source('functions/src/drivers/commercialPolicy.js');
 
-    expect(eligibility).toContain('function toMillis(value)');
-    expect(eligibility).toContain('toMillis(d.subscriptionFreeUntil || d.founderFreeUntil)');
-    expect(eligibility).toContain('toMillis(d.subscriptionExpiresAt)');
-    expect(eligibility).not.toContain('Number(d.subscriptionFreeUntil)');
+    expect(eligibility).toContain("require('./commercialPolicy')");
+    expect(eligibility).toContain('resolveCommercialPolicy(d, now)');
+    expect(commercialPolicy).toContain('function toMillis(value)');
+    expect(commercialPolicy).toContain('driver.subscriptionFreeUntil');
+    expect(commercialPolicy).toContain('toMillis(driver.subscriptionExpiresAt)');
+    expect(commercialPolicy).not.toContain('Number(driver.subscriptionFreeUntil)');
   });
 });

@@ -1,13 +1,16 @@
 // Driver route group layout. Keeps one offer listener and one inexpensive
 // foreground GPS safety pulse alive across every driver screen.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
+import DriverActiveRideCard from '../../components/DriverActiveRideCard';
 import { auth, db } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
+import { spacing } from '../../constants/spacing';
 import { getDriver } from '../../services/driverService';
 import {
   getDriverTrackingSession,
@@ -17,6 +20,7 @@ import {
 } from '../../services/driverLocationTracking';
 import { getRobotDriverState } from '../../services/robotDriverEngine';
 import { listenToMyOffer } from '../../services/ridesService';
+import { deriveDriverActiveRideCard } from '../../utils/driverActiveRideCard';
 
 const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000;
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
@@ -61,10 +65,17 @@ function snapshotNeedsServerConfirmation(metadata = {}) {
 export default function DriverLayout() {
   const router = useRouter();
   const segments = useSegments();
+  const insets = useSafeAreaInsets();
   const lastOfferId = useRef(null);
   const reconciliationBusy = useRef(false);
+  const [activeRideId, setActiveRideId] = useState(null);
+  const [activeOffer, setActiveOffer] = useState(null);
   const onRobotScreen = segments.includes('robot-driver');
   const onActiveRideScreen = segments.includes('active-ride');
+  const activeRideCardVisible = deriveDriverActiveRideCard(
+    activeOffer,
+    activeOffer?.driverRideStatus
+  ).visible;
 
   async function reconcileRemoteDriver(remote, source, metadata = {}) {
     if (reconciliationBusy.current) return;
@@ -204,9 +215,16 @@ export default function DriverLayout() {
       doc(db, 'drivers', uid),
       { includeMetadataChanges: true },
       (snapshot) => {
-        if (!snapshot.exists()) return;
+        if (!snapshot.exists()) {
+          setActiveRideId(null);
+          return;
+        }
+        const remote = snapshot.data();
+        // activeRideId is the authoritative pointer for restoring the exact accepted
+        // offer, including non-terminal payment disputes after a process restart.
+        setActiveRideId(remote?.activeRideId || null);
         reconcileRemoteDriver(
-          snapshot.data(),
+          remote,
           'driver_snapshot',
           snapshot.metadata || {}
         ).catch((error) => {
@@ -234,56 +252,124 @@ export default function DriverLayout() {
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return undefined;
+    const restoredRideId = activeRideId || null;
 
-    return listenToMyOffer(uid, async (offer) => {
-      if (!offer?.offerId) return;
+    if (restoredRideId) {
+      console.log('[DRIVER_ACTIVE_RIDE] restore_listener.started', {
+        scope: 'driver_active_ride',
+        event: 'restore_listener.started',
+        rideId: shortId(restoredRideId),
+        atMs: Date.now(),
+      });
+    }
 
-      if (offer.status === 'accepted') {
-        if (offer.driverRideStatus) {
-          await updateActiveRideTrackingStatus(offer.driverRideStatus).catch(() => undefined);
+    return listenToMyOffer(
+      uid,
+      async (offer) => {
+        if (!offer?.offerId) {
+          setActiveOffer(null);
+          return;
         }
 
-        // Do not steal navigation from tools/screens that intentionally coexist
-        // with an active ride. Re-subscribing replays the accepted snapshot.
-        if (onRobotScreen || onActiveRideScreen) return;
-
-        try {
-          const driver = await getDriver(uid);
-          if (driver?.activeRideId && driver.activeRideId === offer.rideId) {
-            router.replace({ pathname: '/active-ride', params: { rideId: driver.activeRideId } });
+        if (offer.status === 'accepted') {
+          if (restoredRideId && offer.rideId !== restoredRideId) return;
+          const cardVisible = deriveDriverActiveRideCard(
+            offer,
+            offer.driverRideStatus
+          ).visible;
+          if (!cardVisible) {
+            setActiveOffer(null);
+            return;
           }
-        } catch (_error) {
-          // Screen listeners and push notifications remain available.
+          setActiveOffer(offer);
+
+          if (restoredRideId) {
+            console.log('[DRIVER_ACTIVE_RIDE] restore_listener.succeeded', {
+              scope: 'driver_active_ride',
+              event: 'restore_listener.succeeded',
+              rideId: shortId(restoredRideId),
+              status: offer.driverRideStatus || 'assigned',
+              atMs: Date.now(),
+            });
+          }
+
+          if (offer.driverRideStatus) {
+            await updateActiveRideTrackingStatus(offer.driverRideStatus).catch(() => undefined);
+          }
+
+          // Do not steal navigation from tools/screens that intentionally coexist
+          // with an active ride. Re-subscribing replays the accepted snapshot.
+          if (onRobotScreen || onActiveRideScreen) return;
+
+          try {
+            const driver = await getDriver(uid);
+            const targetRideId = restoredRideId || offer.rideId;
+            if (driver?.activeRideId && driver.activeRideId === targetRideId) {
+              router.replace({ pathname: '/active-ride', params: { rideId: targetRideId } });
+            }
+          } catch (_error) {
+            // Screen listeners and push notifications remain available.
+          }
+          return;
         }
-        return;
-      }
 
-      if (offer.status !== 'offered' || Number(offer.expiresAtMs || 0) <= Date.now()) return;
+        setActiveOffer(null);
+        if (restoredRideId) return;
+        if (offer.status !== 'offered' || Number(offer.expiresAtMs || 0) <= Date.now()) return;
 
-      const trackingSession = await getDriverTrackingSession();
-      if (
-        !trackingSession?.availabilitySessionId
-        || offer.availabilitySessionId !== trackingSession.availabilitySessionId
-      ) {
-        if (typeof __DEV__ !== 'undefined' && __DEV__) {
-          console.log('[RIDE_OFFER] stale work-session offer ignored', {
-            offerId: offer.offerId,
-            atMs: Date.now(),
-          });
+        const trackingSession = await getDriverTrackingSession();
+        if (
+          !trackingSession?.availabilitySessionId
+          || offer.availabilitySessionId !== trackingSession.availabilitySessionId
+        ) {
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.log('[RIDE_OFFER] stale work-session offer ignored', {
+              offerId: offer.offerId,
+              atMs: Date.now(),
+            });
+          }
+          return;
         }
-        return;
-      }
 
-      const alreadyOnOfferScreen = segments.includes('ride-request');
-      if (alreadyOnOfferScreen && lastOfferId.current === offer.offerId) return;
-      lastOfferId.current = offer.offerId;
-      router.push({ pathname: '/ride-request', params: { offerId: offer.offerId } });
-    });
-  }, [router, segments, onRobotScreen, onActiveRideScreen]);
+        const alreadyOnOfferScreen = segments.includes('ride-request');
+        if (alreadyOnOfferScreen && lastOfferId.current === offer.offerId) return;
+        lastOfferId.current = offer.offerId;
+        router.push({ pathname: '/ride-request', params: { offerId: offer.offerId } });
+      },
+      (error) => {
+        if (!restoredRideId) return;
+        console.warn('[DRIVER_ACTIVE_RIDE] restore_listener.failed', {
+          scope: 'driver_active_ride',
+          event: 'restore_listener.failed',
+          rideId: shortId(restoredRideId),
+          errorCode: error?.code || 'ACTIVE_RIDE_RESTORE_FAILED',
+          atMs: Date.now(),
+        });
+      },
+      restoredRideId
+    );
+  }, [activeRideId, router, segments, onRobotScreen, onActiveRideScreen]);
 
   return (
     <View style={styles.container}>
-      <Stack screenOptions={{ headerShown: false }} />
+      {activeRideCardVisible ? (
+        <SafeAreaView style={styles.activeRideArea} edges={['top']}>
+          <DriverActiveRideCard
+            offer={activeOffer}
+            status={activeOffer.driverRideStatus}
+          />
+        </SafeAreaView>
+      ) : null}
+      <View
+        style={[
+          styles.stackContainer,
+          activeRideCardVisible && onActiveRideScreen && insets.top > 0
+            ? { marginTop: -insets.top }
+            : null,
+        ]}
+      >
+        <Stack screenOptions={{ headerShown: false }} />
+      </View>
       {DEV_RIDE_SIMULATOR_ENABLED && !onRobotScreen ? (
         <Pressable
           accessibilityRole="button"
@@ -299,7 +385,15 @@ export default function DriverLayout() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: colors.background },
+  stackContainer: { flex: 1 },
+  activeRideArea: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    backgroundColor: colors.background,
+    zIndex: 5,
+    elevation: 5,
+  },
   robotButton: {
     position: 'absolute',
     right: 14,

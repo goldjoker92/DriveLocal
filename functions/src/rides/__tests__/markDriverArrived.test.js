@@ -55,7 +55,7 @@ function arrivalRequest() {
 }
 
 describe('markDriverArrived safe wait projection', () => {
-  it('copies only server timing metadata to the winning driver offer', async () => {
+  it('atomically updates arrival and creates the passenger notification event', async () => {
     const nowMs = 1_000_000;
     const store = createFirestore({
       [`${C.RIDE_REQUESTS}/ride-1`]: {
@@ -86,6 +86,9 @@ describe('markDriverArrived safe wait projection', () => {
       driverArrivedAtMs: nowMs,
       passengerNoShowEligibleAtMs: nowMs + PASSENGER_NO_SHOW_WAIT_MS,
       replay: false,
+      passengerScreenUpdated: true,
+      notificationEventReady: true,
+      notificationEventCreated: true,
     });
 
     const ride = store.get(C.RIDE_REQUESTS, 'ride-1');
@@ -114,7 +117,7 @@ describe('markDriverArrived safe wait projection', () => {
     });
   });
 
-  it('backfills the private offer during an idempotent arrival replay', async () => {
+  it('repairs a missing notification event during an idempotent arrival replay', async () => {
     const originalArrivedAtMs = 800_000;
     const store = createFirestore({
       [`${C.RIDE_REQUESTS}/ride-1`]: {
@@ -139,15 +142,58 @@ describe('markDriverArrived safe wait projection', () => {
       clock: { now: () => 1_000_000 },
     });
 
-    expect(result.replay).toBe(true);
-    expect(result.driverArrivedAtMs).toBe(originalArrivedAtMs);
-    expect(result.passengerNoShowEligibleAtMs)
-      .toBe(originalArrivedAtMs + PASSENGER_NO_SHOW_WAIT_MS);
+    expect(result).toMatchObject({
+      replay: true,
+      driverArrivedAtMs: originalArrivedAtMs,
+      passengerNoShowEligibleAtMs: originalArrivedAtMs + PASSENGER_NO_SHOW_WAIT_MS,
+      notificationEventReady: true,
+      notificationEventCreated: true,
+    });
     expect(store.get(C.DRIVER_OFFERS, 'ride-1_driver-1')).toMatchObject({
       driverArrivedAtMs: originalArrivedAtMs,
       passengerNoShowEligibleAtMs: originalArrivedAtMs + PASSENGER_NO_SHOW_WAIT_MS,
     });
-    expect(store.get(C.NOTIFICATION_EVENTS, 'ride-1_ride_arrived_passenger')).toBeUndefined();
+    expect(store.get(C.NOTIFICATION_EVENTS, 'ride-1_ride_arrived_passenger')).toMatchObject({
+      status: C.NOTIFICATION_STATUS.PENDING,
+      eventType: C.NOTIFICATION_EVENT.RIDE_ARRIVED,
+    });
+  });
+
+  it('never resets an existing processed arrival notification during a double tap', async () => {
+    const originalNotification = {
+      notificationId: 'ride-1_ride_arrived_passenger',
+      eventType: C.NOTIFICATION_EVENT.RIDE_ARRIVED,
+      status: C.NOTIFICATION_STATUS.SENT,
+      successCount: 1,
+      attemptCount: 1,
+    };
+    const store = createFirestore({
+      [`${C.RIDE_REQUESTS}/ride-1`]: {
+        rideId: 'ride-1',
+        status: C.RIDE_STATUS.DRIVER_ARRIVED,
+        acceptedDriverId: 'driver-1',
+        passengerId: 'passenger-1',
+        driverArrivedAtMs: 800_000,
+      },
+      [`${C.DRIVER_OFFERS}/ride-1_driver-1`]: {
+        rideId: 'ride-1',
+        driverId: 'driver-1',
+        status: C.OFFER_STATUS.ACCEPTED,
+        driverRideStatus: C.RIDE_STATUS.DRIVER_ARRIVED,
+      },
+      [`${C.NOTIFICATION_EVENTS}/ride-1_ride_arrived_passenger`]: originalNotification,
+    });
+
+    const result = await markDriverArrived({
+      db: store.db,
+      request: arrivalRequest(),
+      context: { traceId: 'trace-double-tap' },
+      clock: { now: () => 1_000_000 },
+    });
+
+    expect(result).toMatchObject({ replay: true, notificationEventCreated: false });
+    expect(store.get(C.NOTIFICATION_EVENTS, 'ride-1_ride_arrived_passenger'))
+      .toEqual(originalNotification);
   });
 
   it('starts a fresh full wait when a legacy arrived ride lacks its timestamp', async () => {
@@ -177,6 +223,7 @@ describe('markDriverArrived safe wait projection', () => {
       replay: true,
       driverArrivedAtMs: nowMs,
       passengerNoShowEligibleAtMs: nowMs + PASSENGER_NO_SHOW_WAIT_MS,
+      notificationEventCreated: true,
     });
     expect(store.get(C.RIDE_REQUESTS, 'ride-1')).toMatchObject({
       driverArrivedAtMs: nowMs,

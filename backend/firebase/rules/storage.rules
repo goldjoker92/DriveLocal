@@ -55,10 +55,17 @@ service firebase.storage {
       allow read: if isOwner(driverId) || isAdmin();
     }
 
-    // Versioned, admin-approved passenger profile photos. Client writes are
-    // forbidden; Cloud Functions Admin SDK copies the sanitized candidate here.
+    // Versioned, admin-approved driver profile photos. Client writes are forbidden;
+    // Cloud Functions Admin SDK publishes the sanitized immutable copy here.
     match /publicDriverPhotos/{driverId}/{fileName} {
       allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // Opaque, admin-approved passenger profile photos. The object name contains no
+    // passenger uid. The path is disclosed to a driver only after ride acceptance.
+    match /publicPassengerPhotos/{fileName} {
+      allow read: if isSignedIn() && fileName.matches('[A-Za-z0-9_-]{12,80}\\.jpg');
       allow write: if false;
     }
 

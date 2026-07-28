@@ -7,6 +7,7 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 const { withCallableBoundary } = require('../errors/boundary');
+const { logInfo } = require('../logging/logger');
 const { systemClock } = require('../time/clock');
 const { resolveEnvironment } = require('../config/environment');
 const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
@@ -17,7 +18,12 @@ const { markDriverArrived } = require('./markDriverArrived');
 const { cancelRide } = require('./cancelRide');
 const { normalizedCancellationRequest } = require('./cancellationCompatibility');
 const { sendRideQuickMessage } = require('./sendQuickMessage');
+const { getPassengerRideHistory } = require('./passengerHistory');
 const lifecycle = require('./lifecycle');
+const {
+  safeDriverAcceptanceView,
+  safeDriverLifecycleView,
+} = require('./safeViews');
 const { resolveRideDispute } = require('./disputeResolution');
 const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
 const C = require('./constants');
@@ -75,6 +81,36 @@ async function finishRideWithPixMigration({ db, request, context, clock }) {
   return lifecycle.finishRide({ db, request, context, clock });
 }
 
+// Core acceptance keeps exact hold values for backend ledger/audit tests. Only the
+// closed 0/12/15 percentage crosses the callable boundary to the driver app.
+async function acceptDriverOfferPublic(args) {
+  const result = await acceptDriverOfferSecure(args);
+  const safeView = safeDriverAcceptanceView(result);
+  logInfo(args.context, 'ride.accept.public_view_sanitized', {
+    operation: 'accept',
+    rideId: safeView.rideId,
+    status: safeView.status,
+    commissionDisplayBps: safeView.commissionDisplayBps,
+    exactCommissionExcluded: true,
+  });
+  return safeView;
+}
+
+// The internal lifecycle returns exact capture values for ledger/audit tests. The
+// public driver callable deliberately strips those values before crossing the
+// trust boundary to the mobile application.
+async function confirmDriverPixReceivedPublic(args) {
+  const result = await lifecycle.confirmDriverPixReceived(args);
+  const safeView = safeDriverLifecycleView(result);
+  logInfo(args.context, 'ride.complete.public_view_sanitized', {
+    operation: 'confirm_paid',
+    rideId: safeView.rideId,
+    status: safeView.status,
+    exactCommissionExcluded: true,
+  });
+  return safeView;
+}
+
 const ROUTING_PROVIDER_API_KEY = defineSecret('ROUTING_PROVIDER_API_KEY');
 
 const createRideRequestSecureFn = onCall(
@@ -93,7 +129,7 @@ const createRideRequestSecureFn = onCall(
 const acceptDriverOfferSecureFn = onCall(
   { region: REGION },
   withCallableBoundary('acceptDriverOfferSecure', (request, context) =>
-    acceptDriverOfferSecure({ db: admin.firestore(), request, context, clock: systemClock })
+    acceptDriverOfferPublic({ db: admin.firestore(), request, context, clock: systemClock })
   )
 );
 
@@ -112,12 +148,15 @@ module.exports = {
   startRideSecure: bindLifecycle('startRideSecure', lifecycle.startRide),
   finishRideSecure: bindLifecycle('finishRideSecure', finishRideWithPixMigration),
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
-  confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', lifecycle.confirmDriverPixReceived),
+  confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', confirmDriverPixReceivedPublic),
   cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRideWithCompatibility),
   sendRideQuickMessageSecure: bindLifecycle('sendRideQuickMessageSecure', sendRideQuickMessage),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),
+  getPassengerRideHistorySecure: bindLifecycle('getPassengerRideHistorySecure', getPassengerRideHistory),
   getAdminRideSummarySecure: bindLifecycle('getAdminRideSummarySecure', getAdminRideSummary),
   listAdminDisputedRidesSecure: bindLifecycle('listAdminDisputedRidesSecure', listAdminDisputedRides),
   SECRET_PARAMS: { ROUTING_PROVIDER_API_KEY },
+  acceptDriverOfferPublic,
+  confirmDriverPixReceivedPublic,
 };

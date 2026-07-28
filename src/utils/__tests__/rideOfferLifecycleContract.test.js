@@ -11,9 +11,12 @@ describe('ride offer lifecycle contract', () => {
     expect(layout).toContain('listenToMyOffer');
     expect(layout).toContain('getDriver(uid)');
     expect(layout).toContain('driver?.activeRideId');
-    expect(layout).toContain('driver.activeRideId === offer.rideId');
+    expect(layout).toContain('const targetRideId = restoredRideId || offer.rideId');
+    expect(layout).toContain('driver.activeRideId === targetRideId');
+    expect(layout).toContain('offer.rideId !== restoredRideId');
     expect(layout).toContain("pathname: '/ride-request'");
     expect(layout).toContain("pathname: '/active-ride'");
+    expect(layout).toContain('params: { rideId: targetRideId }');
   });
 
   it('uses a real countdown and server-authoritative refusal', () => {
@@ -55,12 +58,17 @@ describe('ride offer lifecycle contract', () => {
     expect(decline).toContain('{ activeRideId: null, updatedAt: ts() }');
   });
 
-  it('mirrors assigned and terminal ride states without timestamp coercion', () => {
+  it('mirrors assigned and terminal ride states with centralized timestamp normalization', () => {
     const acceptance = source('functions/src/rides/acceptOffer.js');
+    const commercialPolicy = source('functions/src/drivers/commercialPolicy.js');
     const lifecycle = source('functions/src/rides/lifecycle.js');
 
     expect(acceptance).toContain('driverRideStatus: C.RIDE_STATUS.ASSIGNED');
-    expect(acceptance).toContain('toMillis(driver.commissionFreeUntil)');
+    expect(acceptance).toContain("require('../drivers/commercialPolicy')");
+    expect(acceptance).toContain('buildCommercialPolicySnapshot(driver, nowMs)');
+    expect(acceptance).toContain('commercialPolicySnapshot');
+    expect(commercialPolicy).toContain('function toMillis(value)');
+    expect(commercialPolicy).toContain('toMillis(driver.commissionFreeUntil || driver.founderExpiresAt)');
     expect(lifecycle).toContain('setDriverOfferStatusTx');
     expect(lifecycle).toContain('C.RIDE_STATUS.COMPLETED');
     expect(lifecycle).toContain('C.RIDE_STATUS.CANCELLED');

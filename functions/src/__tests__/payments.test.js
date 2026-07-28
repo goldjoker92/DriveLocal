@@ -15,6 +15,7 @@ const { makeFakeFirestore } = require('./helpers/fakeFirestore');
 const C = require('../payments/constants');
 
 const T0 = 1_700_000_000_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const ENV = 'emulator';
 const ctx = { traceId: 'trace_pay', environment: ENV };
 
@@ -133,11 +134,24 @@ describe('payments — creation', () => {
   it('T3: promotions block unnecessary subscription and wallet payments', async () => {
     const db = makeFakeFirestore();
     const clock = fixedClock(T0);
-    const future = T0 + 30 * 24 * 60 * 60 * 1000;
+    const future = T0 + 30 * DAY_MS;
     // Founder covered by subscriptionFreeUntil + commissionFreeUntil.
-    seedDriver(db, 'founder', { founderEligible: true, subscriptionFreeUntil: future, commissionFreeUntil: future });
-    // Non-founder still within free rides.
-    seedDriver(db, 'newbie', { founderEligible: false, freeRideCountUsed: 2 });
+    seedDriver(db, 'founder', {
+      verificationStatus: 'approved',
+      approvalNumber: 1,
+      founderEligible: true,
+      subscriptionFreeUntil: future,
+      commissionFreeUntil: future,
+    });
+    // Non-founder #101+ still inside the 60-day window with grace rides remaining.
+    seedDriver(db, 'newbie', {
+      verificationStatus: 'approved',
+      approvalNumber: 101,
+      approvedAtMs: T0 - 30 * DAY_MS,
+      founderEligible: false,
+      commissionFreeUntil: future,
+      freeRideCountUsed: 2,
+    });
     const adapter = makeAdapter();
 
     await expect(

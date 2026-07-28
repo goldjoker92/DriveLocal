@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 
 import { auth } from '../config/firebase';
+import { DEV_RIDE_SIMULATOR_ENABLED } from '../config/runtimeEnvironment';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
 import { fontFamily, typography } from '../constants/typography';
@@ -21,6 +22,7 @@ import {
   refreshDriverOnlineHeartbeat,
   stopDriverOnlineTracking,
 } from '../services/driverLocationTracking';
+import { getRobotDriverState } from '../services/robotDriverEngine';
 import AppButton from './AppButton';
 
 const CHECK_INTERVAL_MS = 30_000;
@@ -54,6 +56,55 @@ function traceGuard(event, details = {}, level = 'log') {
   });
 }
 
+function robotSimulationCoversTrackingSession(session) {
+  if (!DEV_RIDE_SIMULATOR_ENABLED || !session || !auth.currentUser) return null;
+
+  const robot = getRobotDriverState();
+  if (!robot?.enabled || robot.driverId !== auth.currentUser.uid) return null;
+  if (
+    !robot.availabilitySessionId
+    || robot.availabilitySessionId !== session.availabilitySessionId
+  ) return null;
+  if (['idle', 'failed', 'stopped'].includes(robot.phase)) return null;
+
+  const sessionRideId = session.rideId || null;
+  const robotRideId = robot.rideId || null;
+  if (sessionRideId ? robotRideId !== sessionRideId : robotRideId !== null) return null;
+
+  return robot;
+}
+
+function applyRobotSimulationTrackingSource(snapshot, session) {
+  if (snapshot?.primaryIssue?.code !== 'native_task_missing') {
+    return { snapshot, robot: null };
+  }
+
+  const robot = robotSimulationCoversTrackingSession(session);
+  if (!robot) return { snapshot, robot: null };
+
+  const issues = Array.isArray(snapshot.issues)
+    ? snapshot.issues.filter((candidate) => candidate.code !== 'native_task_missing')
+    : [];
+  const primaryIssue = issues.find((candidate) => candidate.severity === 'blocking')
+    || issues[0]
+    || null;
+  const blocking = issues.some((candidate) => candidate.severity === 'blocking');
+
+  return {
+    snapshot: Object.freeze({
+      ...snapshot,
+      healthy: issues.length === 0,
+      blocking,
+      readyForAvailability: !blocking,
+      issues,
+      primaryIssue,
+      devSimulationBypass: true,
+      trackingSource: 'robot_simulation',
+    }),
+    robot,
+  };
+}
+
 export default function DriverDeviceHealthGuard({ route }) {
   const relevantRoute = isDriverOperationalRoute(route);
   const [authenticated, setAuthenticated] = useState(Boolean(auth.currentUser));
@@ -72,10 +123,23 @@ export default function DriverDeviceHealthGuard({ route }) {
     try {
       traceGuard('diagnostic.started', { route: String(route || '') });
       let snapshot = await getDriverDeviceDiagnostic();
+      let session = await getDriverTrackingSession();
+      let robotResolution = applyRobotSimulationTrackingSource(snapshot, session);
+      snapshot = robotResolution.snapshot;
+
+      if (robotResolution.robot) {
+        traceGuard('robot_tracking.accepted', {
+          result: 'native_task_bypass',
+          trackingSource: 'robot_simulation',
+          activeRide: Boolean(session?.rideId),
+          phase: robotResolution.robot.phase,
+        });
+      }
 
       // The normal online foreground heartbeat can safely repair a missing native
       // task. Active-ride tracking is owned by the active-ride screen and must not
-      // be detached or replaced from this global guard.
+      // be detached or replaced from this global guard. DEV Robot Driver sessions
+      // are resolved above, before this repair can restart real GPS by mistake.
       if (
         allowTrackingRepair
         && snapshot.primaryIssue?.code === 'native_task_missing'
@@ -86,6 +150,9 @@ export default function DriverDeviceHealthGuard({ route }) {
         });
         await refreshDriverOnlineHeartbeat().catch(() => undefined);
         snapshot = await getDriverDeviceDiagnostic();
+        session = await getDriverTrackingSession();
+        robotResolution = applyRobotSimulationTrackingSource(snapshot, session);
+        snapshot = robotResolution.snapshot;
         traceGuard('tracking_repair.completed', {
           issueCode: snapshot.primaryIssue?.code || null,
           blocking: snapshot.blocking,
@@ -98,9 +165,9 @@ export default function DriverDeviceHealthGuard({ route }) {
         blocking: snapshot.blocking,
         issueCode: snapshot.primaryIssue?.code || null,
         activeRide: snapshot.activeRide,
+        trackingSource: snapshot.trackingSource || 'native',
       }, snapshot.blocking ? 'warn' : 'log');
 
-      const session = await getDriverTrackingSession();
       const shouldSuspend = Boolean(
         snapshot.blocking
         && session

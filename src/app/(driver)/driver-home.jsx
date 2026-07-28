@@ -1,25 +1,22 @@
 // Driver home / operational cockpit.
-// The admin decision remains the source of truth. Starting work opens a secure
-// server session and only turns the UI green after the first session-bound GPS
-// point has been published successfully.
+// The server remains authoritative for approval, commercial policy and work
+// sessions. The UI turns green only after the first session-bound GPS point is
+// published successfully.
 
 import { useEffect, useRef, useState } from 'react';
-import { Alert, View, Text, ScrollView } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
-import AppBadge from '../../components/AppBadge';
-import DriverStatusBadge from '../../components/DriverStatusBadge';
-import WalletCard from '../../components/WalletCard';
 import AdminTableRow from '../../components/AdminTableRow';
+import DriverCockpitProfileCard from '../../components/DriverCockpitProfileCard';
+import DriverCockpitDashboardCard from '../../components/DriverCockpitDashboardCard';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
-import { FOUNDER_LABEL_PT_BR } from '../../constants/founderOfferRules';
-import { WALLET_FALLBACK_LOW_THRESHOLD_CENTS } from '../../constants/walletRules';
 import {
   driverPhotoStatus,
   hasApprovedDriverPhoto,
@@ -32,7 +29,6 @@ import {
   startDriverWorkSession,
   stopDriverWorkSession,
 } from '../../services/driverAvailabilityService';
-import { isFounderCommissionFreeActive } from '../../services/founderService';
 import {
   getDriverTrackingPermissionState,
   getDriverTrackingSession,
@@ -43,17 +39,15 @@ import {
 import { getRobotDriverState, stopRobotDriver } from '../../services/robotDriverEngine';
 import {
   AVAILABILITY,
-  formatDateBR,
-  isFounderDriver,
-  founderNumberLabel,
-  commissionFreeUntilMs,
-  subscriptionFreeUntilMs,
   benefitWarning,
-  rideBlockReasonLabel,
-  deriveEligibility,
-  subscriptionDisplay,
   commissionDisplay,
+  commissionFreeUntilMs,
+  deriveEligibility,
+  rideBlockReasonLabel,
+  subscriptionDisplay,
+  subscriptionFreeUntilMs,
 } from '../../utils/driverCockpit';
+import { deriveDriverCockpitSummary } from '../../utils/driverCockpitSummary';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
@@ -65,29 +59,20 @@ function shortId(value) {
   return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
 }
 
-function SectionTitle({ children }) {
-  return (
-    <Text style={[{ fontFamily, color: colors.textMuted }, typography.caption]}>{children}</Text>
-  );
-}
-
 function Line({ children, tone = 'muted' }) {
-  const color =
-    tone === 'text' ? colors.text
-    : tone === 'success' ? colors.success
-    : tone === 'warning' ? colors.warning
-    : colors.textMuted;
-  return <Text style={[{ fontFamily, color }, typography.small]}>{children}</Text>;
+  const color = tone === 'text'
+    ? colors.text
+    : tone === 'success'
+      ? colors.success
+      : tone === 'warning'
+        ? colors.warning
+        : colors.textMuted;
+  return <Text style={[styles.line, { color }]}>{children}</Text>;
 }
 
 function WorkStatusTitle({ online }) {
   return (
-    <Text
-      style={[
-        { fontFamily, color: online ? colors.success : colors.danger },
-        typography.bodyBold,
-      ]}
-    >
+    <Text style={[styles.workTitle, { color: online ? colors.success : colors.danger }]}>
       {online ? '🟢 Você está disponível' : '🔴 Você está indisponível'}
     </Text>
   );
@@ -126,13 +111,6 @@ function robotSimulationActive() {
   return DEV_RIDE_SIMULATOR_ENABLED && getRobotDriverState().enabled;
 }
 
-function photoBadge(status, activePublicPhoto) {
-  if (status === 'pending') return { label: 'Nova foto em análise', tone: 'warning' };
-  if (status === 'rejected') return { label: 'Nova foto recusada', tone: 'danger' };
-  if (activePublicPhoto) return { label: 'Foto aprovada', tone: 'success' };
-  return { label: 'Foto necessária', tone: 'neutral' };
-}
-
 function timestampMs(value) {
   if (!value) return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -146,8 +124,6 @@ function timestampMs(value) {
 
 function hasFreshRemoteWorkSession(driver, nowMs = Date.now()) {
   if (!driver?.availabilitySessionId) return false;
-  // Firestore server time is authoritative. Epoch-ms remains a compatibility
-  // fallback for deterministic tests and records written by an older build.
   const updatedAtMs = timestampMs(driver.availabilityUpdatedAt)
     || Number(driver.availabilityUpdatedAtMs || 0);
   return updatedAtMs > 0 && nowMs - updatedAtMs <= WORK_SESSION_MAX_AGE_MS;
@@ -167,6 +143,7 @@ function snapshotNeedsServerConfirmation(metadata = {}) {
 export default function DriverHome() {
   const router = useRouter();
   const activationInProgress = useRef(false);
+  const lastCockpitTrace = useRef(null);
   const [driver, setDriver] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -188,8 +165,8 @@ export default function DriverHome() {
         if (!active) return;
         setDriver(data);
 
-        // A ride already accepted always wins over availability restoration. The
-        // dedicated active-ride screen owns its higher-frequency tracking.
+        // An accepted ride always wins over cockpit restoration. The dedicated
+        // screen owns high-frequency tracking and payment actions.
         if (data?.activeRideId) {
           router.replace({ pathname: '/active-ride', params: { rideId: data.activeRideId } });
           return;
@@ -200,8 +177,6 @@ export default function DriverHome() {
         const online = data?.availabilityStatus === AVAILABILITY.ONLINE;
 
         if (!online) {
-          // A reload can expose a cached pre-callable offline document while the new
-          // local session is being written. Do not cancel that transition.
           if (localSessionInTransition(localBeforeRestore)) {
             console.log('[DRIVER_AVAILABILITY] cockpit.initial_reconciliation_deferred', {
               scope: 'driver_availability',
@@ -222,9 +197,6 @@ export default function DriverHome() {
           return;
         }
 
-        // Legacy flags and expired leases are closed instead of silently
-        // resurrecting a ghost driver. A just-created matching local session gets a
-        // short grace because the callable result may not have reached every read.
         if (!remoteSessionId || !hasFreshRemoteWorkSession(data)) {
           const matchingTransition = Boolean(
             localBeforeRestore?.availabilitySessionId
@@ -277,9 +249,6 @@ export default function DriverHome() {
           availabilitySessionId: remoteSessionId,
         });
 
-        // AsyncStorage is not an authority. If Android removed it but the server
-        // session is fresh and belongs to this authenticated driver, reconstruct the
-        // local tracking session and publish a new session-bound point.
         if (restored.status === 'no_session') {
           console.log('[DRIVER_AVAILABILITY] cockpit.online_restore_recovering', {
             scope: 'driver_availability',
@@ -327,28 +296,22 @@ export default function DriverHome() {
         if (active) setLoading(false);
       });
 
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [router]);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return undefined;
 
-    // Live reconciliation prevents a green cockpit while the server has already
-    // revoked the work session because of moderation, finance or lease expiry.
+    // Cached snapshots may render but can never revoke GPS. Only a server-confirmed
+    // document may close a work session.
     return onSnapshot(
       doc(db, 'drivers', uid),
       { includeMetadataChanges: true },
       async (snapshot) => {
         if (!snapshot.exists()) return;
         const remote = snapshot.data();
-
-        // Cached/pending data may still be rendered, but it must never stop GPS.
-        if (!snapshotNeedsServerConfirmation(snapshot.metadata || {})) {
-          setDriver(remote);
-        }
+        if (!snapshotNeedsServerConfirmation(snapshot.metadata || {})) setDriver(remote);
 
         if (remote?.activeRideId) return;
         if (availability !== AVAILABILITY.ONLINE) return;
@@ -434,15 +397,57 @@ export default function DriverHome() {
 
   const nowMs = Date.now();
   const uid = auth.currentUser?.uid;
-  const displayName = driver && (driver.displayName || driver.fullName || driver.email);
-  const founderActive = isFounderCommissionFreeActive(driver);
   const eligibility = deriveEligibility(driver);
   const subscription = subscriptionDisplay(driver, nowMs);
   const commission = commissionDisplay(driver, nowMs);
+  const summary = deriveDriverCockpitSummary(driver, nowMs);
   const isAvailable = availability === AVAILABILITY.ONLINE;
   const photoStatus = driverPhotoStatus(driver);
   const activePublicPhoto = hasApprovedDriverPhoto(driver);
-  const photo = photoBadge(photoStatus, activePublicPhoto);
+  const commissionWarn = benefitWarning('Sua comissão gratuita', commissionFreeUntilMs(driver), nowMs);
+  const subscriptionWarn = benefitWarning('Sua assinatura gratuita', subscriptionFreeUntilMs(driver), nowMs);
+
+  useEffect(() => {
+    if (!driver) return;
+    const entry = {
+      scope: 'driver_cockpit',
+      event: 'summary.rendered',
+      availability: isAvailable ? 'online' : 'offline',
+      trackingActive,
+      eligible: eligibility.eligible,
+      reasonCode: eligibility.reasonCode,
+      vehicleType: driver.vehicleType || null,
+      founder: driver.founderEligible === true,
+      photoStatus,
+      commissionBps: commission.bps,
+      subscriptionMode: subscription.mode,
+      walletStatus: driver.walletStatus || null,
+      statsVersion: summary.statsVersion,
+      dayKey: summary.dayKey,
+      weekKey: summary.weekKey,
+      todayRideCount: summary.todayRideCount,
+      weekRideCount: summary.weekRideCount,
+      atMs: Date.now(),
+    };
+    const signature = JSON.stringify(entry);
+    if (signature === lastCockpitTrace.current) return;
+    lastCockpitTrace.current = signature;
+    console.info('[DRIVER_COCKPIT] summary.rendered', entry);
+  }, [
+    driver,
+    isAvailable,
+    trackingActive,
+    eligibility.eligible,
+    eligibility.reasonCode,
+    photoStatus,
+    commission.bps,
+    subscription.mode,
+    summary.statsVersion,
+    summary.dayKey,
+    summary.weekKey,
+    summary.todayRideCount,
+    summary.weekRideCount,
+  ]);
 
   function openDriverPhoto() {
     logDriverPhotoEvent('cockpit.open_photo', {
@@ -528,9 +533,7 @@ export default function DriverHome() {
         atMs: Date.now(),
       });
     } catch (errorValue) {
-      if (!robotSimulationActive()) {
-        await stopDriverOnlineTracking().catch(() => undefined);
-      }
+      if (!robotSimulationActive()) await stopDriverOnlineTracking().catch(() => undefined);
       if (workSession?.availabilitySessionId) {
         await stopDriverWorkSession(workSession.availabilitySessionId).catch(() => undefined);
       }
@@ -568,13 +571,9 @@ export default function DriverHome() {
     setSavingAvailability(true);
     const sessionId = driver?.availabilitySessionId || null;
     try {
-      // Stop locally first: queued GPS events immediately lose their session and
-      // cannot publish after the user pressed “Parar de trabalhar”.
-      if (robotSimulationActive()) {
-        await stopRobotDriver({ restoreRealTracking: false });
-      } else {
-        await stopDriverOnlineTracking();
-      }
+      // Stop locally first so queued GPS events lose their session immediately.
+      if (robotSimulationActive()) await stopRobotDriver({ restoreRealTracking: false });
+      else await stopDriverOnlineTracking();
       await stopDriverWorkSession(sessionId);
       setAvailability(AVAILABILITY.OFFLINE);
       setTrackingActive(false);
@@ -614,28 +613,12 @@ export default function DriverHome() {
     }
   }
 
-  const commissionWarn = benefitWarning('Sua comissão gratuita', commissionFreeUntilMs(driver), nowMs);
-  const subscriptionWarn = benefitWarning('Sua assinatura gratuita', subscriptionFreeUntilMs(driver), nowMs);
-
-  const founderLabel = (() => {
-    const num = founderNumberLabel(driver);
-    return num ? `${FOUNDER_LABEL_PT_BR} ${num}` : FOUNDER_LABEL_PT_BR;
-  })();
-
-  const balanceCents = Number(driver?.walletBalanceCentavos ?? driver?.balanceCents ?? 0);
-  const walletBlocked =
-    balanceCents <= WALLET_FALLBACK_LOW_THRESHOLD_CENTS &&
-    (driver && (driver.walletStatus === 'required' || driver.walletStatus === 'blocked'));
+  const photoIssue = !activePublicPhoto || photoStatus === 'pending' || photoStatus === 'rejected';
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header
-          title="Motorista"
-          subtitle={loading ? 'Carregando…' : displayName}
-          onBack={() => router.back()}
-          right={<DriverStatusBadge status={isAvailable ? 'online' : 'offline'} />}
-        />
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Header title="Motorista" subtitle="Seu cockpit" onBack={() => router.back()} />
 
         {loading ? (
           <AppCard><AdminTableRow label="Carregando…" /></AppCard>
@@ -645,146 +628,94 @@ export default function DriverHome() {
           <AppCard><AdminTableRow label="Cadastro não encontrado" /></AppCard>
         ) : (
           <>
-            <AppCard>
-              <SectionTitle>STATUS</SectionTitle>
-              <AppBadge label="Motorista aprovado" tone="success" />
-              {driver.approvalNumber ? (
-                <AdminTableRow label="Número de aprovação" value={`#${driver.approvalNumber}`} />
-              ) : null}
-            </AppCard>
+            <DriverCockpitProfileCard
+              driver={driver}
+              online={isAvailable}
+              onPhotoPress={openDriverPhoto}
+            />
 
-            <AppCard>
-              <SectionTitle>FOTO DO MOTORISTA</SectionTitle>
-              <AppBadge label={photo.label} tone={photo.tone} />
-              {activePublicPhoto ? (
-                <Line tone="success">Sua foto aprovada continua visível aos passageiros.</Line>
-              ) : (
-                <Line>Envie uma foto clara para o passageiro reconhecer você.</Line>
-              )}
-              {photoStatus === 'pending' ? (
-                <Line tone="warning">
-                  A nova candidata está em análise. A foto aprovada anterior, se existir, permanece ativa.
-                </Line>
-              ) : null}
-              {photoStatus === 'rejected' ? (
-                <Line tone="warning">
-                  {driver.driverPhotoRejectionReason
-                    || rejectionReasonLabel(driver.driverPhotoRejectionCode)}
-                </Line>
-              ) : null}
-              <AppButton
-                title={activePublicPhoto ? 'Ver ou trocar minha foto' : 'Enviar minha foto'}
-                variant="secondary"
-                onPress={openDriverPhoto}
-              />
-            </AppCard>
-
-            <AppCard>
-              <SectionTitle>BENEFÍCIOS</SectionTitle>
-              {isFounderDriver(driver) ? <AppBadge label={founderLabel} tone="success" /> : null}
-              {commission.mode === 'free' ? (
-                <Line tone="success">{`Comissão 0% até ${formatDateBR(commission.dateMs)}`}</Line>
-              ) : null}
-              {subscription.mode === 'free' ? (
-                <Line tone="success">{`Assinatura grátis até ${formatDateBR(subscription.dateMs)}`}</Line>
-              ) : null}
-              {commissionWarn ? <Line tone="warning">{commissionWarn}</Line> : null}
-              {subscriptionWarn ? <Line tone="warning">{subscriptionWarn}</Line> : null}
-              {!isFounderDriver(driver) && commission.mode !== 'free' && subscription.mode !== 'free' ? (
-                <Line>Nenhum benefício ativo no momento.</Line>
-              ) : null}
-            </AppCard>
-
-            <AppCard>
-              <SectionTitle>DISPONIBILIDADE E GPS</SectionTitle>
-              <WorkStatusTitle online={isAvailable} />
-              {isAvailable ? (
-                <>
-                  <Line tone="text">Buscando corridas próximas.</Line>
-                  <Line tone={trackingActive ? 'success' : 'warning'}>
-                    {trackingActive
-                      ? 'A localização de trabalho está ativa.'
-                      : 'Verificando localização de trabalho…'}
+            {photoIssue ? (
+              <AppCard style={styles.compactWarningCard}>
+                <Text style={styles.warningTitle}>
+                  {photoStatus === 'rejected'
+                    ? 'Sua nova foto precisa ser corrigida.'
+                    : photoStatus === 'pending'
+                      ? 'Sua nova foto está em análise.'
+                      : 'Adicione uma foto para o passageiro reconhecer você.'}
+                </Text>
+                {photoStatus === 'rejected' ? (
+                  <Line tone="warning">
+                    {driver.driverPhotoRejectionReason
+                      || rejectionReasonLabel(driver.driverPhotoRejectionCode)}
                   </Line>
-                  <AppButton
-                    title={savingAvailability ? 'Parando…' : 'Parar de trabalhar'}
-                    variant="secondary"
-                    onPress={goOffline}
-                    disabled={savingAvailability}
-                  />
-                </>
-              ) : (
-                <>
-                  <Line tone="text">Ative sua disponibilidade quando quiser começar a trabalhar.</Line>
-                  <Line>Sua localização será usada somente durante seu período de trabalho.</Line>
-                  <AppButton
-                    title={savingAvailability ? 'Ativando…' : 'Começar a trabalhar'}
-                    onPress={goAvailable}
-                    disabled={savingAvailability || !eligibility.eligible}
-                  />
-                </>
-              )}
+                ) : null}
+              </AppCard>
+            ) : null}
+
+            <AppCard style={styles.availabilityCard}>
+              <WorkStatusTitle online={isAvailable} />
+              <Line tone="text">
+                {isAvailable ? 'Buscando corridas próximas.' : 'Comece quando estiver pronto para receber ofertas.'}
+              </Line>
+              <Line tone={isAvailable && trackingActive ? 'success' : 'muted'}>
+                {isAvailable
+                  ? trackingActive
+                    ? 'GPS de trabalho ativo.'
+                    : 'Verificando GPS de trabalho…'
+                  : 'Sua localização fica desligada enquanto você não trabalha.'}
+              </Line>
+
+              <AppButton
+                title={isAvailable
+                  ? savingAvailability ? 'Parando…' : 'Parar de trabalhar'
+                  : savingAvailability ? 'Ativando…' : 'Começar a trabalhar'}
+                variant={isAvailable ? 'secondary' : 'primary'}
+                onPress={isAvailable ? goOffline : goAvailable}
+                disabled={savingAvailability || (!isAvailable && !eligibility.eligible)}
+              />
+
               {!eligibility.eligible ? (
-                <View style={{ backgroundColor: colors.warningBg, borderRadius: radius.md, padding: spacing.md, gap: spacing.xs }}>
-                  <Text style={[{ fontFamily, color: colors.warning }, typography.bodyBold]}>
-                    Você ainda não pode ficar disponível.
-                  </Text>
-                  <Text style={[{ fontFamily, color: colors.text }, typography.small]}>
-                    {rideBlockReasonLabel(eligibility.reasonCode)}
-                  </Text>
+                <View style={styles.eligibilityWarning}>
+                  <Text style={styles.warningTitle}>Você ainda não pode ficar disponível.</Text>
+                  <Text style={styles.warningText}>{rideBlockReasonLabel(eligibility.reasonCode)}</Text>
                 </View>
               ) : null}
               {availabilityError ? <Line tone="warning">{availabilityError}</Line> : null}
             </AppCard>
 
-            <AppCard>
-              <SectionTitle>ASSINATURA</SectionTitle>
-              {subscription.mode === 'free' ? (
-                <Line tone="success">{`Assinatura grátis até ${formatDateBR(subscription.dateMs)}`}</Line>
-              ) : subscription.mode === 'active' ? (
-                <>
-                  <Line tone="text">Assinatura ativa.</Line>
-                  {subscription.dateMs ? <Line>{`Válida até ${formatDateBR(subscription.dateMs)}`}</Line> : null}
-                </>
-              ) : (
-                <>
-                  <Line tone="text">Para receber corridas, ative sua assinatura.</Line>
-                  <Line>Após ativar sua assinatura, você terá 0% de comissão por 60 dias.</Line>
-                  <AppButton title="Ativar assinatura — em breve" variant="secondary" disabled />
-                </>
-              )}
-            </AppCard>
+            <DriverCockpitDashboardCard
+              summary={summary}
+              commission={commission}
+              subscription={subscription}
+              onWalletPress={() => router.push('/wallet')}
+            />
 
-            <AppCard>
-              <SectionTitle>COMISSÃO</SectionTitle>
-              {commission.mode === 'free' ? (
-                <>
-                  <Line tone="success">{`Comissão 0% até ${formatDateBR(commission.dateMs)}`}</Line>
-                  <Line>Você recebe 100% do valor das corridas durante este período.</Line>
-                </>
-              ) : (
-                <>
-                  <Line tone="text">Comissão padrão: 15% por corrida concluída.</Line>
-                  <Line>A taxa será descontada do seu Saldo DriveLocal quando as comissões forem ativadas.</Line>
-                </>
-              )}
-            </AppCard>
-
-            <AppCard>
-              <SectionTitle>SALDO DRIVELOCAL</SectionTitle>
-              <WalletCard balanceCents={balanceCents} isFounderActive={founderActive} />
-              <Line>Será usado para pagar taxas da plataforma quando as comissões forem ativadas.</Line>
-              {walletBlocked ? <Line tone="warning">Recarregue seu saldo para receber corridas.</Line> : null}
-              <AppButton title="Ver carteira" variant="ghost" onPress={() => router.push('/wallet')} />
-            </AppCard>
-
-            <AppCard>
-              <SectionTitle>CORRIDAS</SectionTitle>
-              <Line>Quando você estiver disponível, novas ofertas aparecerão automaticamente.</Line>
-            </AppCard>
+            {commissionWarn || subscriptionWarn ? (
+              <AppCard style={styles.compactWarningCard}>
+                {commissionWarn ? <Line tone="warning">{commissionWarn}</Line> : null}
+                {subscriptionWarn ? <Line tone="warning">{subscriptionWarn}</Line> : null}
+              </AppCard>
+            ) : null}
           </>
         )}
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: colors.background },
+  content: { padding: spacing.lg, gap: spacing.md, flexGrow: 1 },
+  line: { fontFamily, ...typography.small },
+  workTitle: { fontFamily, ...typography.bodyBold },
+  availabilityCard: { gap: spacing.sm },
+  compactWarningCard: { gap: spacing.xs },
+  eligibilityWarning: {
+    backgroundColor: colors.warningBg,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  warningTitle: { fontFamily, color: colors.warning, ...typography.bodyBold },
+  warningText: { fontFamily, color: colors.text, ...typography.small },
+});

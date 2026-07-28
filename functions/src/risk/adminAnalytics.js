@@ -21,7 +21,7 @@ const LIMITS = Object.freeze({
   riskCases: 500,
   supplySnapshots: 2200,
 });
-const ALLOWED_RANGE_DAYS = new Set([1, 7, 30, 90]);
+const ALLOWED_RANGE_DAYS = new Set([1, 7, 30, 45, 90]);
 
 function docs(snapshot) {
   return snapshot.docs.map((document) => ({ id: document.id, ...(document.data() || {}) }));

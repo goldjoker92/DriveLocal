@@ -47,6 +47,25 @@ describe('driver device health integration contracts', () => {
       .toBeLessThan(guard.indexOf('await stopDriverOnlineTracking()'));
   });
 
+  it('treats the DEV Robot Driver as an authoritative tracking source only for its bound session', () => {
+    const guard = source('src/components/DriverDeviceHealthGuard.jsx');
+    const diagnostics = source('src/services/driverDeviceDiagnostics.js');
+
+    expect(guard).toContain('DEV_RIDE_SIMULATOR_ENABLED');
+    expect(guard).toContain('getRobotDriverState');
+    expect(guard).toContain('robot.availabilitySessionId !== session.availabilitySessionId');
+    expect(guard).toContain('robotRideId !== sessionRideId');
+    expect(guard).toContain("candidate.code !== 'native_task_missing'");
+    expect(guard).toContain("trackingSource: 'robot_simulation'");
+    expect(guard).toContain("traceGuard('robot_tracking.accepted'");
+    expect(guard.indexOf('applyRobotSimulationTrackingSource(snapshot, session)'))
+      .toBeLessThan(guard.indexOf("snapshot.primaryIssue?.code === 'native_task_missing'"));
+
+    // Production keeps the strict native-task requirement. The bypass lives only
+    // in the DEV guard and only after matching the authenticated robot session.
+    expect(diagnostics).toContain("issue('native_task_missing', 'blocking')");
+  });
+
   it('persists only a safe notification receipt and never the FCM token', () => {
     const notifications = source('src/services/notificationsService.js');
     const safeStateStart = notifications.indexOf('const safeState = {');

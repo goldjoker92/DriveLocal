@@ -1,0 +1,55 @@
+name: MVP product completion CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'functions/**'
+      - 'backend/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'functions/package.json'
+      - 'functions/package-lock.json'
+      - '.github/workflows/mvp-product-completion-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Run mobile Jest suite
+        run: npx jest --ci --runInBand --forceExit
+
+      - name: Run Functions Jest suite
+        run: npm --prefix functions test -- --forceExit
+
+      - name: Check whitespace errors
+        run: git diff --check origin/${{ github.base_ref }}...HEAD

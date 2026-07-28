@@ -1,8 +1,8 @@
 // @ts-check
 // Deterministic launch platform flow using fixed Horizonte coordinates:
 // application -> approved public photo -> admin approval #101 -> explicit work
-// session -> 0% launch ride -> exact promotion expiry -> wallet gate -> normal
-// commission hold and capture.
+// session -> 0% launch ride -> exact promotion expiry -> paid plan -> wallet gate
+// -> normal commission hold and capture.
 
 const { approveDriver } = require('../drivers/approveDriver');
 const { createRideRequestSecure } = require('../rides/createRideRequest');
@@ -243,11 +243,15 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
     const firstCompleted = await completeRide(db, clock, first.rideId, 'launch-0001');
     expect(firstCompleted.commissionCapturedCentavos).toBe(0);
 
-    // Exact expiry is exclusive: the normal 15% commission applies immediately.
+    // Exact expiry is exclusive: an active paid plan becomes mandatory and the
+    // normal 15% commission applies immediately. Wallet remains a separate gate.
     clock.advance(60 * DRIVER_C.DAY_MS);
     await db.collection(DRIVER_C.DRIVERS).doc(DRIVER_ID).set({
       availabilityUpdatedAtMs: clock.now(),
       locationUpdatedAtMs: clock.now(),
+      subscriptionActive: true,
+      subscriptionStatus: 'active',
+      subscriptionExpiresAt: clock.now() + 30 * DRIVER_C.DAY_MS,
       walletBalanceCentavos: 0,
       walletAvailableCentavos: 0,
       walletHeldCentavos: 0,

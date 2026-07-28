@@ -9,10 +9,12 @@ const admin = require('firebase-admin');
 const { getFunctions } = require('firebase-admin/functions');
 const { buildNotificationEvent, enqueueEvent } = require('../notifications/events');
 const { logInfo, logWarning } = require('../logging/logger');
+const { resolveCommercialPolicy } = require('../drivers/commercialPolicy');
 const C = require('./constants');
 
 const REGION = 'southamerica-east1';
 const EXPIRY_TASK_NAME = `locations/${REGION}/functions/expireRideOffersTask`;
+const SAFE_DRIVER_COMMISSION_BPS = new Set([0, 1200, 1500]);
 
 // Coarsen a coordinate to ~110 m so a pre-acceptance offer never reveals the
 // passenger's exact location.
@@ -31,6 +33,19 @@ function pickupPreview(pickup) {
     approxLat: coarse(pickup.lat),
     approxLng: coarse(pickup.lng),
   };
+}
+
+// Only the closed percentage vocabulary crosses into driverOffers. The exact
+// estimated commission remains on the private ride/ledger side of the boundary.
+function commissionDisplayBpsForOffer(ride, driver, nowMs) {
+  const commercial = resolveCommercialPolicy(driver || {}, nowMs);
+  if (commercial.freePeriodActive || !(Number(ride?.estimatedCommissionCentavos) > 0)) {
+    return 0;
+  }
+
+  const standardBps = Number(commercial.standardCommissionBps);
+  if (SAFE_DRIVER_COMMISSION_BPS.has(standardBps) && standardBps > 0) return standardBps;
+  return ride?.vehicleType === 'moto' ? 1200 : 1500;
 }
 
 function isTaskAlreadyExists(error) {
@@ -110,6 +125,7 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
       vehicleType: ride.vehicleType,
       availabilitySessionId: cand.availabilitySessionId,
       estimatedFareCentavos: ride.estimatedFareCentavos,
+      commissionDisplayBps: commissionDisplayBpsForOffer(ride, cand.data, nowMs),
       pickupPreview: preview,
       distanceToPickupMeters: cand.distanceToPickupMeters,
       status: C.OFFER_STATUS.OFFERED,
@@ -152,6 +168,7 @@ module.exports = {
   createTargetedOffers,
   offerId,
   pickupPreview,
+  commissionDisplayBpsForOffer,
   scheduleOfferExpiry,
   isTaskAlreadyExists,
   EXPIRY_TASK_NAME,
