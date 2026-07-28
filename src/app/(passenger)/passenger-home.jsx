@@ -3,7 +3,7 @@
 // recovery server-driven and sends a new request to the dedicated /request-ride flow.
 
 import { useEffect, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -172,13 +172,13 @@ export default function PassengerHome() {
     );
   }, [activeRideId]);
 
-  function navigate(route, action, params = undefined) {
+  function navigate(route, action) {
     setError('');
     logRideClientEvent('ride.passenger_home.menu_selected', {
       route,
       action,
     });
-    router.push(params ? { pathname: route, params } : route);
+    router.push(route);
   }
 
   function openRideRequest() {
@@ -187,6 +187,27 @@ export default function PassengerHome() {
       action: 'router.push',
     });
     router.push('/request-ride');
+  }
+
+  function openSupportCenter() {
+    setError('');
+    logRideClientEvent('ride.passenger_home.menu_selected', {
+      route: '/support-center',
+      action: 'open_support',
+    });
+    router.push({
+      pathname: '/support-center',
+      params: { source: 'passenger_home' },
+    });
+  }
+
+  function openPrivacyCenter() {
+    setError('');
+    logRideClientEvent('ride.passenger_home.menu_selected', {
+      route: '/privacy-center',
+      action: 'open_account_deletion',
+    });
+    router.push('/privacy-center');
   }
 
   function openActiveRide() {
@@ -350,7 +371,7 @@ export default function PassengerHome() {
         <DashboardSection title="AJUDA E INFORMAÇÕES">
           <DashboardRow
             label="Central de suporte"
-            onPress={() => navigate('/support-center', 'open_support', { source: 'passenger_home' })}
+            onPress={openSupportCenter}
           />
           <DashboardRow
             label="Política de Privacidade"
@@ -372,7 +393,7 @@ export default function PassengerHome() {
             label="Excluir conta e dados"
             destructive
             last
-            onPress={() => navigate('/privacy-center', 'open_account_deletion')}
+            onPress={openPrivacyCenter}
           />
         </DashboardSection>
 
