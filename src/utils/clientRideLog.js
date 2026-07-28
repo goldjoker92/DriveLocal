@@ -1,11 +1,12 @@
 import { APP_ENVIRONMENT } from '../config/runtimeEnvironment';
 
-// Structured client-side ride traces for development builds.
+// Structured client-side ride and passenger-flow traces for development builds.
 //
 // These logs are intentionally rich enough to debug the whole passenger flow
-// (request -> quote -> dispatch -> assignment -> payment), while still excluding
-// exact coordinates, street labels, Pix payloads, phone numbers, tokens and
-// counterparty identifiers. Production builds do not emit these traces.
+// (dashboard -> request -> quote -> dispatch -> assignment -> payment), while
+// still excluding exact coordinates, street labels, names, email addresses, Pix
+// payloads, phone numbers, tokens and counterparty identifiers. Production builds
+// do not emit these traces.
 const DEV_RUNTIME = typeof __DEV__ !== 'undefined' && __DEV__ === true;
 const CLIENT_RIDE_LOGS_ENABLED = APP_ENVIRONMENT === 'development' || DEV_RUNTIME;
 
@@ -75,7 +76,7 @@ export function sanitizeRideErrorForClientLog(error) {
 
 /**
  * Emits one stable JSON line. Search Metro with "[DriveLocal][RIDE_CLIENT]" or a
- * rideId/traceId to follow a complete client-side ride lifecycle.
+ * rideId/traceId to follow a complete client-side passenger lifecycle.
  *
  * Operational failures use console.warn instead of console.error. React Native's
  * development console turns console.error into a red overlay with a stack pointing
@@ -93,6 +94,8 @@ export function logRideClientEvent(eventName, fields = {}, level = 'info') {
     at: new Date().toISOString(),
     action: safeString(fields.action, 64),
     step: safeString(fields.step, 64),
+    route: safeString(fields.route, 96),
+    itemCount: safeNumber(fields.itemCount),
     rideId: safeString(fields.rideId, 128),
     status: safeString(fields.status, 48),
     resultStatus: safeString(fields.resultStatus, 48),
