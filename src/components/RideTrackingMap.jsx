@@ -14,6 +14,8 @@ import {
 } from '../utils/rideTracking';
 
 const EARTH_RADIUS_KM = 6371;
+const MAX_TRACKING_LOG_CACHE = 50;
+const trackingLogStateByRide = new Map();
 
 function regionAround(points) {
   const valid = points.filter(Boolean);
@@ -75,6 +77,34 @@ function lastUpdateLabel(updatedAtMs, nowMs) {
   return `há ${Math.floor(ageSeconds / 60)} min`;
 }
 
+function trimTrackingLogCache() {
+  while (trackingLogStateByRide.size > MAX_TRACKING_LOG_CACHE) {
+    const oldestKey = trackingLogStateByRide.keys().next().value;
+    trackingLogStateByRide.delete(oldestKey);
+  }
+}
+
+function meaningfulTrackingState({ configured, mapReady, targetPoint, driverPoint, fresh }) {
+  if (!configured) return 'maps_unconfigured';
+  if (!mapReady) return 'map_loading';
+  if (!targetPoint) return 'waiting_target';
+  if (!driverPoint) return 'waiting_driver_location';
+  return fresh ? 'tracking_fresh' : 'tracking_stale';
+}
+
+function logTrackingStateOnce(rideId, state, details) {
+  if (!rideId || !state) return;
+  if (trackingLogStateByRide.get(rideId) === state) return;
+  trackingLogStateByRide.delete(rideId);
+  trackingLogStateByRide.set(rideId, state);
+  trimTrackingLogCache();
+  logRideClientEvent('ride.map.tracking_state_changed', {
+    rideId,
+    trackingState: state,
+    ...details,
+  });
+}
+
 export default function RideTrackingMap({
   rideId = null,
   target,
@@ -109,10 +139,16 @@ export default function RideTrackingMap({
     return () => clearInterval(timer);
   }, []);
 
+  const trackingState = meaningfulTrackingState({
+    configured: googleMapsAndroidConfigured,
+    mapReady,
+    targetPoint,
+    driverPoint,
+    fresh,
+  });
+
   useEffect(() => {
-    if (!rideId) return;
-    logRideClientEvent('ride.map.tracking_state_changed', {
-      rideId,
+    logTrackingStateOnce(rideId, trackingState, {
       mapReady,
       googleMapsAndroidConfigured,
       hasTarget: !!targetPoint,
@@ -120,8 +156,17 @@ export default function RideTrackingMap({
       fresh,
       distanceKm: directDistanceKm,
       updatedAtMs: driverLocation?.updatedAtMs || null,
+      logPolicy: 'semantic_state_only',
     });
-  }, [rideId, mapReady, googleMapsAndroidConfigured, !!targetPoint, !!driverPoint, fresh]);
+  }, [
+    rideId,
+    trackingState,
+    mapReady,
+    googleMapsAndroidConfigured,
+    !!targetPoint,
+    !!driverPoint,
+    fresh,
+  ]);
 
   useEffect(() => {
     if (!mapRef.current || !targetPoint || !driverPoint) return;
@@ -139,7 +184,11 @@ export default function RideTrackingMap({
 
   function recenter() {
     if (!mapRef.current) return;
-    logRideClientEvent('ride.map.recenter_pressed', { rideId, hasTarget: !!targetPoint, hasDriverLocation: !!driverPoint });
+    logRideClientEvent('ride.map.recenter_pressed', {
+      rideId,
+      hasTarget: !!targetPoint,
+      hasDriverLocation: !!driverPoint,
+    });
     mapRef.current.animateToRegion(regionAround([targetPoint, driverPoint]), 350);
   }
 
@@ -165,10 +214,7 @@ export default function RideTrackingMap({
           showsTraffic
           toolbarEnabled={false}
           moveOnMarkerPress={false}
-          onMapReady={() => {
-            setMapReady(true);
-            logRideClientEvent('ride.map.ready', { rideId, googleMapsAndroidConfigured });
-          }}
+          onMapReady={() => setMapReady(true)}
         >
           {targetPoint ? (
             <Marker
