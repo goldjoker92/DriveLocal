@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -36,8 +38,15 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Run Jest
+      - name: Run dashboard policy Jest test
+        run: npx jest src/utils/__tests__/passengerDashboardPolicy.test.js --ci --runInBand --verbose
+
+      - name: Run dashboard contract Jest test
+        run: npx jest src/services/__tests__/passengerDashboardContract.test.js --ci --runInBand --verbose
+
+      - name: Run full Jest suite
         run: npm test
 
       - name: Check whitespace errors
+        if: always()
         run: git diff --check origin/${{ github.base_ref }}...HEAD
