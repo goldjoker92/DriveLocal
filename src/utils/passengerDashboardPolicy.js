@@ -85,6 +85,7 @@ export function passengerRideFareCentavos(ride) {
     ride?.estimatedFareCentavos,
   ];
   for (const value of values) {
+    if (value == null || value === '') continue;
     const number = Number(value);
     if (Number.isFinite(number) && number >= 0) return Math.trunc(number);
   }
@@ -92,6 +93,7 @@ export function passengerRideFareCentavos(ride) {
 }
 
 export function formatCentavosBRL(value) {
+  if (value == null || value === '') return 'Valor indisponível';
   const centavos = Number(value);
   if (!Number.isFinite(centavos) || centavos < 0) return 'Valor indisponível';
   const reais = Math.trunc(centavos) / 100;
