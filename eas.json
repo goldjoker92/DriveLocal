@@ -17,7 +17,10 @@
       "env": {
         "EXPO_NO_TELEMETRY": "1",
         "APP_ENV": "dev",
-        "ENABLE_DEV_RIDE_SIMULATOR": "1"
+        "ENABLE_DEV_RIDE_SIMULATOR": "1",
+        "PRIVACY_POLICY_URL": "https://rize-website-steel.vercel.app/drivelocal/privacy",
+        "TERMS_OF_USE_URL": "https://rize-website-steel.vercel.app/terms",
+        "ACCOUNT_DELETION_WEB_URL": "https://rize-website-steel.vercel.app/drivelocal/account-deletion"
       }
     },
     "preview": {
@@ -32,7 +35,10 @@
       "env": {
         "EXPO_NO_TELEMETRY": "1",
         "APP_ENV": "dev",
-        "ENABLE_DEV_RIDE_SIMULATOR": "0"
+        "ENABLE_DEV_RIDE_SIMULATOR": "0",
+        "PRIVACY_POLICY_URL": "https://rize-website-steel.vercel.app/drivelocal/privacy",
+        "TERMS_OF_USE_URL": "https://rize-website-steel.vercel.app/terms",
+        "ACCOUNT_DELETION_WEB_URL": "https://rize-website-steel.vercel.app/drivelocal/account-deletion"
       }
     },
     "production": {
@@ -47,7 +53,10 @@
       "env": {
         "EXPO_NO_TELEMETRY": "1",
         "APP_ENV": "prod",
-        "ENABLE_DEV_RIDE_SIMULATOR": "0"
+        "ENABLE_DEV_RIDE_SIMULATOR": "0",
+        "PRIVACY_POLICY_URL": "https://rize-website-steel.vercel.app/drivelocal/privacy",
+        "TERMS_OF_USE_URL": "https://rize-website-steel.vercel.app/terms",
+        "ACCOUNT_DELETION_WEB_URL": "https://rize-website-steel.vercel.app/drivelocal/account-deletion"
       }
     }
   },

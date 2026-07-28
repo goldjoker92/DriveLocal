@@ -20,10 +20,10 @@ import { radius, spacing } from '../constants/spacing';
 import { fontFamily, typography } from '../constants/typography';
 import {
   listenToMyOffer,
-  listenToRide,
   listenToRideQuickMessages,
   sendRideQuickMessage,
 } from '../services/ridesService';
+import { listenToPassengerRide as listenToRide } from '../services/passengerRideLiveListeners';
 import AppButton from './AppButton';
 
 const MESSAGE_PHASES = new Set(['assigned', 'driver_arrived']);
@@ -98,6 +98,9 @@ export default function RideQuickMessagesGuard({ route }) {
       );
     }
 
+    // Passenger UI shares the exact same Firestore ride listener with the main
+    // /driver-accepted screen. This keeps quick-message permissions current without
+    // opening a second network listener or duplicating phase snapshots.
     return listenToRide(
       rideId,
       (ride) => setRideStatus(ride?.status || null),

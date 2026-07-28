@@ -2,8 +2,9 @@
 // The server-authoritative acceptedDriverPublic snapshot contains only approved,
 // passenger-safe identity fields. Private selfie/document paths never reach here.
 
-import { useEffect, useState } from 'react';
-import { Image, ScrollView, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
@@ -16,13 +17,18 @@ import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { getDriverPhotoDownloadUrl } from '../../services/driverPhotoService';
-import { listenToRide, listenToRideLocation, cancelRide } from '../../services/ridesService';
+import { cancelRide } from '../../services/ridesService';
+import {
+  listenToPassengerRide as listenToRide,
+  listenToPassengerRideLocation as listenToRideLocation,
+} from '../../services/passengerRideLiveListeners';
 import { firstName } from '../../utils/driverPhoto';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 import { formatBRL } from '../../utils/format';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 
 const MAP_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
+const ARRIVAL_NOTICE_VISIBLE_MS = 12_000;
 
 const PHASES = {
   assigned: {
@@ -124,13 +130,54 @@ function DriverIdentityCard({ driver, ride, photoUrl, onPhotoError }) {
   );
 }
 
+function DriverArrivalNotice({ visible, onDismiss }) {
+  if (!visible) return null;
+  return (
+    <AppCard style={{ backgroundColor: colors.accentTint, borderColor: colors.accent }}>
+      <View accessibilityRole="alert" style={{ flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md }}>
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: colors.background,
+          }}
+        >
+          <Text style={{ fontSize: 23 }}>🔔</Text>
+        </View>
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={[{ fontFamily, color: colors.success }, typography.bodyBold]}>
+            Motorista chegou
+          </Text>
+          <Text style={[{ fontFamily, color: colors.text }, typography.small]}>
+            Seu motorista chegou ao local de embarque. Confira a placa antes de entrar.
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Fechar aviso de chegada"
+          hitSlop={12}
+          onPress={onDismiss}
+          style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1, padding: 4 })}
+        >
+          <Text style={[{ fontFamily, color: colors.textMuted }, typography.bodyBold]}>×</Text>
+        </Pressable>
+      </View>
+    </AppCard>
+  );
+}
+
 export default function DriverAccepted() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const rideId = typeof params.rideId === 'string' ? params.rideId : null;
+  const previousStatusRef = useRef(null);
   const [ride, setRide] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
   const [driverPhotoUrl, setDriverPhotoUrl] = useState(null);
+  const [arrivalNoticeVisible, setArrivalNoticeVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -140,13 +187,30 @@ export default function DriverAccepted() {
       rideId,
       (nextRide) => {
         if (!nextRide) return;
+        const previousStatus = previousStatusRef.current;
+        previousStatusRef.current = nextRide.status || null;
         setRide(nextRide);
-        logRideClientEvent('ride.passenger.phase_changed', {
-          rideId,
-          status: nextRide.status,
-          hasDriverPublic: !!nextRide.acceptedDriverPublic,
-          hasApprovedDriverPhoto: Boolean(nextRide.acceptedDriverPublic?.photoStoragePath),
-        });
+
+        if (previousStatus !== nextRide.status) {
+          logRideClientEvent('ride.passenger.phase_changed', {
+            rideId,
+            status: nextRide.status,
+            previousStatus,
+            hasDriverPublic: !!nextRide.acceptedDriverPublic,
+            hasApprovedDriverPhoto: Boolean(nextRide.acceptedDriverPublic?.photoStoragePath),
+          });
+        }
+
+        if (nextRide.status === 'driver_arrived' && previousStatus !== 'driver_arrived') {
+          setArrivalNoticeVisible(true);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+          logRideClientEvent('ride.passenger.arrival_notice_presented', {
+            rideId,
+            source: 'ride_snapshot_fallback',
+          });
+        } else if (nextRide.status !== 'driver_arrived') {
+          setArrivalNoticeVisible(false);
+        }
 
         if (nextRide.status === 'completed') {
           router.replace({ pathname: '/ride-completed', params: { rideId } });
@@ -162,6 +226,12 @@ export default function DriverAccepted() {
       }
     );
   }, [rideId, router]);
+
+  useEffect(() => {
+    if (!arrivalNoticeVisible) return undefined;
+    const timeout = setTimeout(() => setArrivalNoticeVisible(false), ARRIVAL_NOTICE_VISIBLE_MS);
+    return () => clearTimeout(timeout);
+  }, [arrivalNoticeVisible]);
 
   useEffect(() => {
     if (!rideId) return undefined;
@@ -250,6 +320,11 @@ export default function DriverAccepted() {
         <Header
           title={ride?.status === 'in_progress' ? 'Corrida em andamento' : 'Sua corrida'}
           onBack={() => router.back()}
+        />
+
+        <DriverArrivalNotice
+          visible={arrivalNoticeVisible && ride?.status === 'driver_arrived'}
+          onDismiss={() => setArrivalNoticeVisible(false)}
         />
 
         {!rideId ? (

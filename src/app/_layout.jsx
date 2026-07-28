@@ -17,12 +17,42 @@ import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
 import RideQuickMessagesGuard from '../components/RideQuickMessagesGuard';
 import AccountPrivacyShortcut from '../components/AccountPrivacyShortcut';
 import SupportShortcut from '../components/SupportShortcut';
+import { auth } from '../config/firebase';
 import { colors } from '../constants/colors';
 import { useRideNotifications } from '../hooks/useRideNotifications';
 import {
   installGlobalErrorHandler,
   setCurrentCrashRoute,
 } from '../services/clientErrorReporter';
+import { getDriver } from '../services/driverService';
+import {
+  getDriverTrackingSession,
+  stopDriverOnlineTracking,
+} from '../services/driverLocationTracking';
+
+const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
+
+function shortId(value) {
+  const text = typeof value === 'string' ? value : '';
+  if (!text) return null;
+  return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
+}
+
+function timestampMs(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return Number(value.toMillis()) || 0;
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (Number.isFinite(Number(value.seconds))) {
+    return Number(value.seconds) * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6);
+  }
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function remoteWorkSessionFresh(driver, nowMs = Date.now()) {
+  const updatedAtMs = timestampMs(driver?.availabilityUpdatedAt)
+    || Number(driver?.availabilityUpdatedAtMs || 0);
+  return updatedAtMs > 0 && nowMs - updatedAtMs <= WORK_SESSION_MAX_AGE_MS;
+}
 
 // Install once, before route components mount. The reporter preserves React
 // Native's original fatal handler after scheduling the privacy-safe report.
@@ -37,6 +67,108 @@ export default function RootLayout() {
   useEffect(() => {
     setCurrentCrashRoute(pathname);
   }, [pathname]);
+
+  useEffect(() => {
+    let disposed = false;
+    let reconciliation = Promise.resolve();
+
+    async function reconcileRestoredAccount(user) {
+      if (typeof auth.authStateReady === 'function') {
+        await auth.authStateReady();
+      }
+      if (disposed) return;
+
+      const authenticatedUid = auth.currentUser?.uid || user?.uid || null;
+      const trackingSession = await getDriverTrackingSession();
+      if (disposed || !trackingSession?.driverId) return;
+
+      let staleReason = null;
+      if (!authenticatedUid) {
+        staleReason = 'signed_out_restore';
+      } else if (authenticatedUid !== trackingSession.driverId) {
+        staleReason = 'account_mismatch';
+      } else if (!trackingSession.rideId) {
+        // The same Firebase account may be restored with an old online work session.
+        // Validate the server lease globally, not only while a driver screen is open.
+        let remoteDriver;
+        try {
+          remoteDriver = await getDriver(authenticatedUid);
+        } catch (error) {
+          console.warn('[AUTH_TRACKING_CLEANUP] remote_session_validation_failed', {
+            scope: 'auth_tracking_cleanup',
+            event: 'remote_session_validation_failed',
+            authenticatedUid: shortId(authenticatedUid),
+            reason: error?.code || error?.message || 'unknown',
+            atMs: Date.now(),
+          });
+          return;
+        }
+
+        const sessionMatches = Boolean(
+          remoteDriver?.availabilityStatus === 'online'
+          && remoteDriver?.availabilitySessionId
+          && remoteDriver.availabilitySessionId === trackingSession.availabilitySessionId
+          && remoteWorkSessionFresh(remoteDriver)
+        );
+        if (sessionMatches) return;
+
+        staleReason = !remoteDriver
+          ? 'driver_missing'
+          : remoteDriver.availabilityStatus !== 'online'
+            ? 'remote_offline'
+            : remoteDriver.availabilitySessionId !== trackingSession.availabilitySessionId
+              ? 'session_mismatch'
+              : 'lease_expired';
+      } else {
+        // Active rides have their own recovery path. Never discard one from the root
+        // reconciler solely because an availability lease changed during the ride.
+        return;
+      }
+
+      console.warn('[AUTH_TRACKING_CLEANUP] stale_native_session_detected', {
+        scope: 'auth_tracking_cleanup',
+        event: 'stale_native_session_detected',
+        authenticatedUid: shortId(authenticatedUid),
+        trackingDriverId: shortId(trackingSession.driverId),
+        trackingRideId: shortId(trackingSession.rideId),
+        localSessionId: shortId(trackingSession.availabilitySessionId),
+        reason: staleReason,
+        atMs: Date.now(),
+      });
+
+      // A native Android location task can survive a DEV reload, an account switch,
+      // or an expired seven-minute server lease. Stop the stale local task so it can
+      // no longer generate repeated Firestore permission-denied publications.
+      await stopDriverOnlineTracking();
+
+      console.log('[AUTH_TRACKING_CLEANUP] stale_native_session_stopped', {
+        scope: 'auth_tracking_cleanup',
+        event: 'stale_native_session_stopped',
+        authenticatedUid: shortId(authenticatedUid),
+        trackingDriverId: shortId(trackingSession.driverId),
+        reason: staleReason,
+        atMs: Date.now(),
+      });
+    }
+
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      reconciliation = reconciliation
+        .then(() => reconcileRestoredAccount(user))
+        .catch((error) => {
+          console.warn('[AUTH_TRACKING_CLEANUP] stale_native_session_stop_failed', {
+            scope: 'auth_tracking_cleanup',
+            event: 'stale_native_session_stop_failed',
+            reason: error?.code || error?.message || 'unknown',
+            atMs: Date.now(),
+          });
+        });
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, []);
 
   return (
     <AppErrorBoundary route={pathname}>

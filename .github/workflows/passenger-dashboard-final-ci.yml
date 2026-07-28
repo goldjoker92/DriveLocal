@@ -1,0 +1,69 @@
+name: Passenger dashboard final CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/(passenger)/**'
+      - 'src/components/AppButton.jsx'
+      - 'src/config/publicPolicyLinks.js'
+      - 'src/constants/legalUrls.js'
+      - 'src/services/__tests__/passengerDashboardContract.test.js'
+      - 'src/utils/clientRideLog.js'
+      - 'src/utils/passengerDashboardPolicy.js'
+      - 'src/utils/__tests__/passengerDashboardPolicy.test.js'
+      - '.env.example'
+      - 'eas.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/passenger-dashboard-final-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run passenger greeting policy test
+        run: npx jest src/utils/__tests__/passengerDashboardPolicy.test.js --ci --runInBand --verbose
+
+      - name: Run passenger dashboard contract test
+        run: npx jest src/services/__tests__/passengerDashboardContract.test.js --ci --runInBand --verbose
+
+      - name: Run full mobile Jest suite
+        id: full_jest
+        continue-on-error: true
+        run: npx jest --ci --runInBand --forceExit --json --outputFile=passenger-dashboard-jest-results.json
+
+      - name: Upload Jest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: passenger-dashboard-jest-results
+          path: passenger-dashboard-jest-results.json
+          retention-days: 3
+
+      - name: Check whitespace errors
+        if: always()
+        run: git diff --check origin/${{ github.base_ref }}...HEAD
+
+      - name: Enforce full Jest result
+        if: steps.full_jest.outcome == 'failure'
+        run: exit 1

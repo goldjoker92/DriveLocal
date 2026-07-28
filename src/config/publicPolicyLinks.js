@@ -1,5 +1,7 @@
 import Constants from 'expo-constants';
 
+import { LEGAL_URLS } from '../constants/legalUrls';
+
 function manifestExtra() {
   return Constants.expoConfig?.extra
     || Constants.manifest?.extra
@@ -14,10 +16,15 @@ function safeHttpsUrl(value) {
 
 const links = manifestExtra().publicPolicyLinks || {};
 
+// EAS build values remain authoritative. The committed Vercel URLs are a safe
+// runtime fallback for local DEV, tests and already-installed development clients.
 export const PUBLIC_POLICY_LINKS = Object.freeze({
-  privacyPolicyUrl: safeHttpsUrl(links.privacyPolicyUrl),
-  termsOfUseUrl: safeHttpsUrl(links.termsOfUseUrl),
-  accountDeletionWebUrl: safeHttpsUrl(links.accountDeletionWebUrl),
+  privacyPolicyUrl:
+    safeHttpsUrl(links.privacyPolicyUrl) || LEGAL_URLS.privacyPolicyUrl,
+  termsOfUseUrl:
+    safeHttpsUrl(links.termsOfUseUrl) || LEGAL_URLS.termsOfUseUrl,
+  accountDeletionWebUrl:
+    safeHttpsUrl(links.accountDeletionWebUrl) || LEGAL_URLS.accountDeletionWebUrl,
 });
 
 export function publicPolicyLinksConfigured() {

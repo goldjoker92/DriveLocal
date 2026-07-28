@@ -80,6 +80,18 @@ function dataPayload(event) {
   };
 }
 
+function safeAndroidTag(event) {
+  return `drivelocal_${String(event?.notificationId || event?.rideId || 'ride')}`
+    .replace(/[^A-Za-z0-9_.:-]/g, '_')
+    .slice(0, 120);
+}
+
+function safeCollapseKey(event) {
+  return `ride_${String(event?.rideId || 'status')}`
+    .replace(/[^A-Za-z0-9_-]/g, '_')
+    .slice(0, 64);
+}
+
 function buildMulticastMessage(event, tokens) {
   const presentation = presentationForEvent(event);
   const channelId = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED
@@ -92,10 +104,13 @@ function buildMulticastMessage(event, tokens) {
     data: dataPayload(event),
     android: {
       priority: 'high',
+      ttl: 10 * 60 * 1000,
+      collapseKey: safeCollapseKey(event),
       notification: {
         channelId,
         sound: 'default',
         defaultVibrateTimings: true,
+        tag: safeAndroidTag(event),
       },
     },
   };
@@ -124,8 +139,17 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
   });
 
   if (targets.length === 0) {
-    await eventRef.set({ status: C.NOTIFICATION_STATUS.FAILED, failureReason: 'no_active_tokens', processedAtMs: nowMs, attemptCount: (event.attemptCount || 0) + 1 }, { merge: true });
-    logWarning(context, 'notification.failed', { operation: 'notify', notificationId: event.notificationId, reasonCode: 'no_active_tokens' });
+    await eventRef.set({
+      status: C.NOTIFICATION_STATUS.FAILED,
+      failureReason: 'no_active_tokens',
+      processedAtMs: nowMs,
+      attemptCount: (event.attemptCount || 0) + 1,
+    }, { merge: true });
+    logWarning(context, 'notification.failed', {
+      operation: 'notify',
+      notificationId: event.notificationId,
+      reasonCode: 'no_active_tokens',
+    });
     return { status: C.NOTIFICATION_STATUS.FAILED, successCount: 0, failureCount: 0 };
   }
 
@@ -143,7 +167,11 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
       failureCount += 1;
       const code = r && r.error && r.error.code;
       if (INVALID_TOKEN_CODES.has(code)) {
-        disables.push(targets[i].ref.set({ active: false, disabledReason: code, disabledAtMs: nowMs }, { merge: true }));
+        disables.push(targets[i].ref.set({
+          active: false,
+          disabledReason: code,
+          disabledAtMs: nowMs,
+        }, { merge: true }));
       }
     }
   });
@@ -155,10 +183,23 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
       : successCount > 0
         ? C.NOTIFICATION_STATUS.PARTIALLY_FAILED
         : C.NOTIFICATION_STATUS.FAILED;
-  await eventRef.set({ status, successCount, failureCount, processedAtMs: nowMs, attemptCount: (event.attemptCount || 0) + 1 }, { merge: true });
+  await eventRef.set({
+    status,
+    successCount,
+    failureCount,
+    processedAtMs: nowMs,
+    attemptCount: (event.attemptCount || 0) + 1,
+  }, { merge: true });
 
   const logEvent = status === C.NOTIFICATION_STATUS.FAILED ? 'notification.failed' : 'notification.sent';
-  logInfo(context, logEvent, { operation: 'notify', notificationId: event.notificationId, rideId: event.rideId, eventType: event.eventType, successCount, failureCount });
+  logInfo(context, logEvent, {
+    operation: 'notify',
+    notificationId: event.notificationId,
+    rideId: event.rideId,
+    eventType: event.eventType,
+    successCount,
+    failureCount,
+  });
   return { status, successCount, failureCount };
 }
 
@@ -167,6 +208,8 @@ module.exports = {
   buildMulticastMessage,
   presentationForEvent,
   dataPayload,
+  safeAndroidTag,
+  safeCollapseKey,
   INVALID_TOKEN_CODES,
   PRESENTATION,
 };

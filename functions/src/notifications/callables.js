@@ -23,9 +23,16 @@ const syncNotificationTokenSecureFn = onCall(
   )
 );
 
-// Fires once per created notificationEvents document; idempotent on re-delivery.
+// Fires once per created notificationEvents document. Gen-2 retry is enabled so
+// a transient Firebase Messaging/provider failure is delivered again instead of
+// being silently lost. processRideNotificationEvent remains idempotent after the
+// event reaches a terminal sent/failed state.
 const processRideNotificationEventFn = onDocumentCreated(
-  { region: REGION, document: `${C.NOTIFICATION_EVENTS}/{eventId}` },
+  {
+    region: REGION,
+    document: `${C.NOTIFICATION_EVENTS}/{eventId}`,
+    retry: true,
+  },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -40,8 +47,12 @@ const processRideNotificationEventFn = onDocumentCreated(
         clock: systemClock,
       });
     } catch (err) {
-      // Never rethrow raw provider errors; log sanitized and let retry policy act.
-      logError(context, 'notification.failed', { operation: 'notify', internalMessage: err && err.message });
+      logError(context, 'notification.failed', {
+        operation: 'notify',
+        internalMessage: err && err.message,
+      });
+      // Re-throw so Eventarc/Cloud Functions can perform the configured retry.
+      throw err;
     }
   }
 );

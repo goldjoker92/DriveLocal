@@ -126,6 +126,7 @@ export function logRideClientEvent(eventName, fields = {}, level = 'info') {
     phase: deriveOperationalPhase(eventName, fields.phase),
     at: new Date().toISOString(),
     action: safeString(fields.action, 64),
+    route: safeString(fields.route, 96),
     step: safeString(fields.step, 64),
     provider: safeString(fields.provider, 32),
     rideId: safeString(fields.rideId, 128),
