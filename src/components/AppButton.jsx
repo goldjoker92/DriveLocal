@@ -16,6 +16,8 @@ import { colors } from '../constants/colors';
 import { spacing, radius } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 async function triggerHaptic(type) {
   if (!type) return;
   if (type === 'selection') return Haptics.selectionAsync();
@@ -47,6 +49,7 @@ export default function AppButton({
   pressScale = true,
 }) {
   const scale = useRef(new Animated.Value(1)).current;
+  const pressedOpacity = useRef(new Animated.Value(1)).current;
 
   const backgroundColor = variant === 'primary'
     ? colors.primary
@@ -65,14 +68,20 @@ export default function AppButton({
   const borderWidth = variant === 'ghost' || variant === 'danger' ? 1 : 0;
   const borderColor = variant === 'danger' ? colors.danger : colors.border;
 
-  function animateScale(toValue) {
-    if (!pressScale) return;
-    Animated.spring(scale, {
-      toValue,
-      useNativeDriver: true,
-      speed: 40,
-      bounciness: 0,
-    }).start();
+  function animatePressed(pressed) {
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: pressScale && pressed ? 0.98 : 1,
+        useNativeDriver: true,
+        speed: 40,
+        bounciness: 0,
+      }),
+      Animated.timing(pressedOpacity, {
+        toValue: pressed ? 0.88 : 1,
+        duration: 80,
+        useNativeDriver: true,
+      }),
+    ]).start();
   }
 
   function handlePress() {
@@ -81,13 +90,13 @@ export default function AppButton({
     if (onPress) onPress();
   }
 
-  const button = (
-    <Pressable
+  return (
+    <AnimatedPressable
       onPress={handlePress}
-      onPressIn={() => animateScale(0.98)}
-      onPressOut={() => animateScale(1)}
+      onPressIn={() => animatePressed(true)}
+      onPressOut={() => animatePressed(false)}
       disabled={disabled}
-      style={({ pressed }) => [
+      style={[
         {
           backgroundColor,
           paddingVertical: spacing.md,
@@ -96,7 +105,8 @@ export default function AppButton({
           alignItems: 'center',
           borderWidth,
           borderColor,
-          opacity: disabled ? 0.5 : pressed ? 0.88 : 1,
+          opacity: disabled ? 0.5 : pressedOpacity,
+          transform: [{ scale }],
         },
         style,
       ]}
@@ -104,13 +114,6 @@ export default function AppButton({
       <Text style={[{ fontFamily, color: textColor }, typography.bodyBold]}>
         {title}
       </Text>
-    </Pressable>
-  );
-
-  if (!pressScale) return button;
-  return (
-    <Animated.View style={{ alignSelf: 'stretch', transform: [{ scale }] }}>
-      {button}
-    </Animated.View>
+    </AnimatedPressable>
   );
 }
