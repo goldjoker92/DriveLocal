@@ -5,8 +5,9 @@
 //   ghost     - transparent with neutral border
 //   danger    - destructive action with red tint
 //
-// Optional haptic + scale feedback is opt-in so existing screens keep their
-// current interaction behavior until deliberately upgraded.
+// Every enabled app button receives subtle light haptic + scale feedback by
+// default. Critical actions can override the haptic type, and either behavior can
+// still be disabled explicitly when a screen must remain silent/static.
 
 import { useRef } from 'react';
 import { Animated, Pressable, Text } from 'react-native';
@@ -42,8 +43,8 @@ export default function AppButton({
   variant = 'primary',
   disabled = false,
   style,
-  haptic = null,
-  pressScale = false,
+  haptic = 'light',
+  pressScale = true,
 }) {
   const scale = useRef(new Animated.Value(1)).current;
 
