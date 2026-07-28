@@ -2,6 +2,13 @@ const appJson = require('./app.json');
 const { loadFirebaseBuildConfig } = require('./scripts/build/firebaseBuildConfig');
 const { loadPublicPolicyConfig } = require('./scripts/build/publicPolicyConfig');
 
+function writeConfigDiagnostic(message) {
+  // Expo/EAS commands may evaluate app.config.js through a child process whose
+  // stdout must contain JSON only. Diagnostics belong on stderr so commands such
+  // as `eas env:*`, `eas config --json` and fingerprints cannot be corrupted.
+  process.stderr.write(`${String(message)}\n`);
+}
+
 const expoConfig = appJson.expo ?? {};
 const packageName = expoConfig.android?.package || 'com.drivelocal.app';
 const firebaseBuild = loadFirebaseBuildConfig({
@@ -35,14 +42,14 @@ if (!googleMapsAndroidApiKey) {
   // Never publish an EAS binary that is known to contain an unusable Google map.
   // Local config commands keep working so the developer can add the variable and rebuild.
   if (easBuildActive) throw new Error(message);
-  console.warn(message);
+  writeConfigDiagnostic(message);
 }
 
 if (!easBuildActive && firebaseProjectId !== expectedProjectId) {
   // Local commands intentionally remain usable with the checked-in DEV file even
   // when APP_ENV is absent and UI behavior fails closed to production. EAS builds
   // can never use this exception; scripts/build/firebaseBuildConfig.js blocks it.
-  console.warn(
+  writeConfigDiagnostic(
     `[app.config] Local Firebase fallback selected ${firebaseProjectId} while `
     + `APP_ENV resolves to ${appEnvironment}. EAS builds remain strict.`
   );
@@ -51,7 +58,7 @@ if (!easBuildActive && firebaseProjectId !== expectedProjectId) {
 if (!publicPolicy.configured) {
   // Missing public pages are allowed only outside production EAS. Never print the
   // supplied URLs themselves; configuration state is enough for build diagnostics.
-  console.warn(
+  writeConfigDiagnostic(
     `[app.config] Public policy links incomplete missing=${publicPolicy.missing.join('|') || 'none'} `
     + `invalid=${publicPolicy.invalid.join('|') || 'none'}`
   );
@@ -59,7 +66,7 @@ if (!publicPolicy.configured) {
 
 // Safe build trace: project identifiers and boolean configuration states only.
 // Never log API keys, app IDs, policy URLs, file contents or secret-file paths.
-console.info(
+writeConfigDiagnostic(
   `[app.config] Firebase project=${firebaseProjectId} environment=${appEnvironment} `
   + `source=${firebaseConfigSource} easBuild=${easBuildActive} `
   + `publicPolicyConfigured=${publicPolicy.configured}`
