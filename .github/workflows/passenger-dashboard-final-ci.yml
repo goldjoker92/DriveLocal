@@ -48,7 +48,22 @@ jobs:
         run: npx jest src/services/__tests__/passengerDashboardContract.test.js --ci --runInBand --verbose
 
       - name: Run full mobile Jest suite
-        run: npx jest --ci --runInBand --forceExit
+        id: full_jest
+        continue-on-error: true
+        run: npx jest --ci --runInBand --forceExit --json --outputFile=passenger-dashboard-jest-results.json
+
+      - name: Upload Jest diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: passenger-dashboard-jest-results
+          path: passenger-dashboard-jest-results.json
+          retention-days: 3
 
       - name: Check whitespace errors
+        if: always()
         run: git diff --check origin/${{ github.base_ref }}...HEAD
+
+      - name: Enforce full Jest result
+        if: steps.full_jest.outcome == 'failure'
+        run: exit 1
