@@ -137,6 +137,17 @@ export default function PassengerHome() {
     router.push('/request-ride');
   }
 
+  function openSupportCenter() {
+    logRideClientEvent('ride.passenger_home.menu_selected', {
+      route: '/support-center',
+      action: 'open_support',
+    });
+    router.push({
+      pathname: '/support-center',
+      params: { source: 'passenger_home' },
+    });
+  }
+
   function resumeActiveRide() {
     if (!passenger?.activeRideId) return;
     logRideClientEvent('ride.passenger_home.resume_selected', {
@@ -283,7 +294,7 @@ export default function PassengerHome() {
         <DashboardSection title="AJUDA E INFORMAÇÕES">
           <DashboardRow
             label="Central de suporte"
-            onPress={() => navigate('/support-center', 'open_support')}
+            onPress={openSupportCenter}
           />
           <DashboardRow
             label="Política de Privacidade"
