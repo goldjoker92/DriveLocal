@@ -32,7 +32,9 @@ describe('passenger dashboard policy', () => {
     expect(passengerRideStatusLabel('completed')).toBe('Concluída');
     expect(passengerRideVehicleLabel('moto')).toBe('Moto');
     expect(passengerRideFareCentavos({ finalFareCentavos: 1325 })).toBe(1325);
+    expect(passengerRideFareCentavos({})).toBeNull();
     expect(formatCentavosBRL(1325)).toBe('R$ 13,25');
+    expect(formatCentavosBRL(null)).toBe('Valor indisponível');
     expect(passengerRidePointLabel({ label: '  Centro  ' }, 'Fallback')).toBe('Centro');
     expect(passengerRidePointLabel(null, 'Fallback')).toBe('Fallback');
   });
