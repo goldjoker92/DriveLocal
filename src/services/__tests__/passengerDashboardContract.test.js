@@ -41,6 +41,7 @@ describe('authenticated passenger dashboard and history contract', () => {
   it('separates the account dashboard from the secure ride request flow', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
     const request = source('src/app/(passenger)/request-ride.jsx');
+    const locationAction = source('src/components/LocationActionButton.jsx');
 
     expect(home).toContain('Olá, ${firstName} 👋');
     expect(home).toContain('Pronto para sua próxima corrida?');
@@ -49,7 +50,8 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(home).not.toContain('resolveAddressToCoords');
     expect(home).not.toContain('requestRide({');
 
-    expect(request).toContain('Usar minha localização atual');
+    expect(request).toContain('<LocationActionButton');
+    expect(locationAction).toContain('Usar minha localização atual');
     expect(request).toContain('getCurrentLocationWithAddress');
     expect(request).toContain('resolveAddressToCoords');
     expect(request).toContain('requestRide({');
@@ -93,6 +95,7 @@ describe('authenticated passenger dashboard and history contract', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
     const button = source('src/components/AppButton.jsx');
     const request = source('src/app/(passenger)/request-ride.jsx');
+    const locationAction = source('src/components/LocationActionButton.jsx');
     const logger = source('src/utils/clientRideLog.js');
 
     expect(button).toContain("import * as Haptics from 'expo-haptics'");
@@ -102,7 +105,11 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(home).toContain('haptic="medium"');
     expect(home).toContain('haptic="warning"');
     expect(request).toContain('<AppButton');
-    expect(request).toContain('Usar minha localização atual');
+    expect(request).toContain('<LocationActionButton');
+    expect(locationAction).toContain('Usar minha localização atual');
+    expect(locationAction).toContain('AnimatedPressable');
+    expect(locationAction).toContain('Haptics.ImpactFeedbackStyle.Medium');
+    expect(locationAction).toContain('Haptics.NotificationFeedbackType.Success');
     expect(logger).toContain('route: safeString(fields.route, 96)');
   });
 
