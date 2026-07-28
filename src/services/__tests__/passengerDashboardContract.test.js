@@ -47,7 +47,7 @@ describe('passenger dashboard client contract', () => {
     expect(history).toContain('sortPassengerRideHistory(result)');
     expect(history).toContain('RefreshControl');
     expect(profile).toContain('getPassenger(uid)');
-    expect(profile).toContain('Dados cadastrados');
+    expect(profile).toContain('Informações cadastradas na sua conta');
     expect(profile).not.toContain('updateDoc(');
     expect(profile).not.toContain('setDoc(');
   });
@@ -64,7 +64,8 @@ describe('passenger dashboard client contract', () => {
     expect(logger).toContain('route: safeString(fields.route, 96)');
     expect(button).toContain("import * as Haptics from 'expo-haptics'");
     expect(button).toContain('Animated.spring(scale');
-    expect(button).toContain('pressScale');
+    expect(button).toContain("haptic = 'light'");
+    expect(button).toContain('pressScale = true');
     expect(home).toContain('haptic="medium"');
     expect(home).toContain('haptic="warning"');
   });
