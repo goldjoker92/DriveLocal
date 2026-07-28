@@ -40,12 +40,14 @@ describe('authenticated passenger dashboard and history contract', () => {
 
   it('separates the account dashboard from the secure ride request flow', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
+    const rideCta = source('src/components/PassengerRideRequestCta.jsx');
     const request = source('src/app/(passenger)/request-ride.jsx');
     const locationAction = source('src/components/LocationActionButton.jsx');
 
     expect(home).toContain('Olá, ${firstName} 👋');
     expect(home).toContain('Pronto para sua próxima corrida?');
-    expect(home).toContain('PEDIR CORRIDA');
+    expect(home).toContain('<PassengerRideRequestCta');
+    expect(rideCta).toContain('Pedir corrida');
     expect(home).toContain("router.push('/request-ride')");
     expect(home).not.toContain('resolveAddressToCoords');
     expect(home).not.toContain('requestRide({');
@@ -94,6 +96,7 @@ describe('authenticated passenger dashboard and history contract', () => {
   it('keeps haptic and animated feedback reusable without duplicating button logic', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
     const button = source('src/components/AppButton.jsx');
+    const rideCta = source('src/components/PassengerRideRequestCta.jsx');
     const request = source('src/app/(passenger)/request-ride.jsx');
     const locationAction = source('src/components/LocationActionButton.jsx');
     const logger = source('src/utils/clientRideLog.js');
@@ -104,6 +107,8 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(button).toContain('pressScale = true');
     expect(home).toContain('haptic="medium"');
     expect(home).toContain('haptic="warning"');
+    expect(rideCta).toContain('AnimatedPressable');
+    expect(rideCta).toContain('Haptics.ImpactFeedbackStyle.Medium');
     expect(request).toContain('<AppButton');
     expect(request).toContain('<LocationActionButton');
     expect(locationAction).toContain('Usar minha localização atual');
