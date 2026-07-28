@@ -38,6 +38,23 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Find process exit mutations
+        shell: bash
+        run: |
+          grep -RInE "process\.(exit|exitCode)|exitCode" . \
+            --exclude-dir=node_modules \
+            --exclude-dir=.git \
+            > process-exit-search.txt || true
+          cat process-exit-search.txt
+
+      - name: Upload process exit diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: passenger-dashboard-process-exit-search
+          path: process-exit-search.txt
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Run dashboard policy Jest test
         run: npx jest src/utils/__tests__/passengerDashboardPolicy.test.js --ci --runInBand --verbose
 
@@ -48,4 +65,5 @@ jobs:
         run: npm test
 
       - name: Check whitespace errors
+        if: always()
         run: git diff --check origin/${{ github.base_ref }}...HEAD
