@@ -45,7 +45,7 @@ jobs:
         run: npx jest src/services/__tests__/passengerDashboardContract.test.js --ci --runInBand --verbose
 
       - name: Run full Jest suite
-        run: npx jest --ci --runInBand
+        run: npx jest --ci --runInBand --forceExit
 
       - name: Check whitespace errors
         run: git diff --check origin/${{ github.base_ref }}...HEAD
