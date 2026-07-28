@@ -28,7 +28,8 @@ describe('passenger dashboard client contract', () => {
     expect(home).toContain("router.push('/request-ride')");
     expect(home).toContain("navigate('/passenger-profile', 'open_profile')");
     expect(home).toContain("navigate('/passenger-history', 'open_history')");
-    expect(home).toContain("navigate('/support-center', 'open_support')");
+    expect(home).toContain("pathname: '/support-center'");
+    expect(home).toContain("params: { source: 'passenger_home' }");
     expect(home).toContain('PUBLIC_POLICY_LINKS.privacyPolicyUrl');
     expect(home).toContain('PUBLIC_POLICY_LINKS.termsOfUseUrl');
     expect(home).toContain("router.push('/privacy-center')");
