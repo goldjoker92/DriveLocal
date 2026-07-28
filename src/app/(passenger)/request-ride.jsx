@@ -19,6 +19,7 @@ import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import LocationActionButton from '../../components/LocationActionButton';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
@@ -362,12 +363,11 @@ export default function RequestRide() {
 
         <AppCard>
           <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Origem</Text>
-          <AppButton
-            title={loadingLocation ? 'Localizando...' : 'Usar minha localização atual'}
-            variant="secondary"
+          <LocationActionButton
+            loading={loadingLocation}
+            found={gpsFound}
             onPress={handleUseMyLocation}
-            disabled={loadingLocation || submitting}
-            style={{ marginTop: spacing.sm }}
+            disabled={submitting}
           />
           {gpsFound ? (
             <Text style={[{ fontFamily, color: colors.success }, typography.small]}>
