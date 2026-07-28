@@ -32,7 +32,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20.19.4'
           cache: npm
 
       - name: Install locked dependencies
@@ -44,31 +44,8 @@ jobs:
       - name: Run dashboard contract Jest test
         run: npx jest src/services/__tests__/passengerDashboardContract.test.js --ci --runInBand --verbose
 
-      - name: Run full Jest suite with diagnostics
-        shell: bash
-        run: |
-          set +e
-          set -o pipefail
-          npm test 2>&1 | tee jest-full.log
-          status=${PIPESTATUS[0]}
-          echo "$status" > jest-exit-code.txt
-          exit 0
-
-      - name: Upload full Jest diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: passenger-dashboard-full-jest-log
-          path: |
-            jest-full.log
-            jest-exit-code.txt
-          if-no-files-found: error
-          retention-days: 3
+      - name: Run full Jest suite
+        run: npm test
 
       - name: Check whitespace errors
-        if: always()
         run: git diff --check origin/${{ github.base_ref }}...HEAD
-
-      - name: Enforce full Jest result
-        shell: bash
-        run: test "$(cat jest-exit-code.txt)" = "0"
