@@ -17,12 +17,23 @@ import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
 import RideQuickMessagesGuard from '../components/RideQuickMessagesGuard';
 import AccountPrivacyShortcut from '../components/AccountPrivacyShortcut';
 import SupportShortcut from '../components/SupportShortcut';
+import { auth } from '../config/firebase';
 import { colors } from '../constants/colors';
 import { useRideNotifications } from '../hooks/useRideNotifications';
 import {
   installGlobalErrorHandler,
   setCurrentCrashRoute,
 } from '../services/clientErrorReporter';
+import {
+  getDriverTrackingSession,
+  stopDriverOnlineTracking,
+} from '../services/driverLocationTracking';
+
+function shortId(value) {
+  const text = typeof value === 'string' ? value : '';
+  if (!text) return null;
+  return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
+}
 
 // Install once, before route components mount. The reporter preserves React
 // Native's original fatal handler after scheduling the privacy-safe report.
@@ -37,6 +48,64 @@ export default function RootLayout() {
   useEffect(() => {
     setCurrentCrashRoute(pathname);
   }, [pathname]);
+
+  useEffect(() => {
+    let disposed = false;
+    let reconciliation = Promise.resolve();
+
+    async function reconcileRestoredAccount(user) {
+      if (typeof auth.authStateReady === 'function') {
+        await auth.authStateReady();
+      }
+      if (disposed) return;
+
+      const authenticatedUid = auth.currentUser?.uid || user?.uid || null;
+      const trackingSession = await getDriverTrackingSession();
+      if (disposed || !trackingSession?.driverId) return;
+      if (authenticatedUid === trackingSession.driverId) return;
+
+      console.warn('[AUTH_TRACKING_CLEANUP] stale_native_session_detected', {
+        scope: 'auth_tracking_cleanup',
+        event: 'stale_native_session_detected',
+        authenticatedUid: shortId(authenticatedUid),
+        trackingDriverId: shortId(trackingSession.driverId),
+        trackingRideId: shortId(trackingSession.rideId),
+        reason: authenticatedUid ? 'account_mismatch' : 'signed_out_restore',
+        atMs: Date.now(),
+      });
+
+      // A native Android location task can survive a DEV reload or a previous test
+      // account. Never let that stale driver session run under a passenger/admin
+      // account. This only clears the local task; server leases remain authoritative.
+      await stopDriverOnlineTracking();
+
+      console.log('[AUTH_TRACKING_CLEANUP] stale_native_session_stopped', {
+        scope: 'auth_tracking_cleanup',
+        event: 'stale_native_session_stopped',
+        authenticatedUid: shortId(authenticatedUid),
+        trackingDriverId: shortId(trackingSession.driverId),
+        atMs: Date.now(),
+      });
+    }
+
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      reconciliation = reconciliation
+        .then(() => reconcileRestoredAccount(user))
+        .catch((error) => {
+          console.warn('[AUTH_TRACKING_CLEANUP] stale_native_session_stop_failed', {
+            scope: 'auth_tracking_cleanup',
+            event: 'stale_native_session_stop_failed',
+            reason: error?.code || error?.message || 'unknown',
+            atMs: Date.now(),
+          });
+        });
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, []);
 
   return (
     <AppErrorBoundary route={pathname}>
