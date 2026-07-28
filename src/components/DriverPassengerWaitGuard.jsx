@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { auth } from '../config/firebase';
@@ -70,16 +78,21 @@ export default function DriverPassengerWaitGuard({ route }) {
   const [offer, setOffer] = useState(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => auth.onAuthStateChanged((user) => {
     setAuthenticatedUid(user?.uid || null);
-    if (!user) setOffer(null);
+    if (!user) {
+      setOffer(null);
+      setDetailsOpen(false);
+    }
   }), []);
 
   useEffect(() => {
     if (!relevantRoute || !authenticatedUid) {
       setOffer(null);
+      setDetailsOpen(false);
       return undefined;
     }
 
@@ -88,8 +101,12 @@ export default function DriverPassengerWaitGuard({ route }) {
     return listenToMyOffer(
       authenticatedUid,
       (nextOffer) => {
-        setOffer(nextOffer?.driverRideStatus === 'driver_arrived' ? nextOffer : null);
-        if (nextOffer?.driverRideStatus !== 'driver_arrived') setError('');
+        const waitingOffer = nextOffer?.driverRideStatus === 'driver_arrived' ? nextOffer : null;
+        setOffer(waitingOffer);
+        if (!waitingOffer) {
+          setError('');
+          setDetailsOpen(false);
+        }
       },
       (listenerError) => {
         traceWait('offer_listener.failed', {
@@ -132,6 +149,7 @@ export default function DriverPassengerWaitGuard({ route }) {
     });
     try {
       const result = await reportPassengerNotFound(activeRideId);
+      setDetailsOpen(false);
       traceWait('passenger_no_show.succeeded', {
         rideId: activeRideId,
         resultStatus: result?.status || 'cancelled',
@@ -169,6 +187,7 @@ export default function DriverPassengerWaitGuard({ route }) {
       await stopDevRideSimulation({ restoreRealTracking: false }).catch(() => undefined);
       await detachActiveRideTracking(activeRideId).catch(() => undefined);
 
+      setDetailsOpen(false);
       traceWait('dev_test_reset.succeeded', {
         rideId: activeRideId,
         resultStatus: result?.status || 'cancelled',
@@ -185,59 +204,119 @@ export default function DriverPassengerWaitGuard({ route }) {
     }
   }
 
-  // During physical testing the global wait guard must not consume the entire small
-  // Android viewport. DEV keeps a compact status and an explicit destructive reset;
-  // production preserves the full evidence, timer and server-enforced no-show rule.
-  if (DEV_RIDE_SIMULATOR_ENABLED) {
-    return (
-      <View accessibilityRole="alert" style={[styles.container, styles.devContainer]}>
-        <View style={styles.devCopy}>
-          <Text style={styles.devEyebrow}>🧪 MODO DE TESTE</Text>
-          <Text style={styles.devTitle}>Motorista chegou · aguardando {formatWaitDuration(elapsedMs)}</Text>
-          <Text style={styles.devMessage}>
-            Continue o fluxo normal na tela abaixo ou apague esta corrida de teste para começar do zero.
-          </Text>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-        </View>
-        <AppButton
-          title={busy ? 'REINICIANDO…' : 'RECOMEÇAR O TESTE'}
-          variant="danger"
-          haptic="warning"
-          onPress={handleDevRideReset}
-          disabled={busy}
-        />
-      </View>
-    );
-  }
-
   return (
-    <View accessibilityRole="alert" style={styles.container}>
-      <View style={styles.confirmationBox}>
-        <Text style={styles.confirmationEyebrow}>PASSAGEIRO AVISADO</Text>
-        <Text style={styles.confirmationTitle}>{arrivalCopy.title}</Text>
-        <Text style={styles.confirmationMessage}>{arrivalCopy.message}</Text>
-        <Text style={styles.confirmationNote}>{arrivalCopy.deliveryNote}</Text>
-        <Text style={styles.confirmationNote}>{arrivalCopy.offlineNote}</Text>
-      </View>
+    <>
+      <View
+        accessibilityRole="alert"
+        style={[styles.container, DEV_RIDE_SIMULATOR_ENABLED && styles.devContainer]}
+      >
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryCopy}>
+            <Text style={[
+              styles.eyebrow,
+              DEV_RIDE_SIMULATOR_ENABLED && styles.devEyebrow,
+            ]}>
+              {DEV_RIDE_SIMULATOR_ENABLED ? '🧪 MODO DE TESTE' : 'PASSAGEIRO AVISADO'}
+            </Text>
+            <Text style={styles.title}>
+              Chegada registrada · {formatWaitDuration(elapsedMs)}
+            </Text>
+            <Text style={styles.waiting}>
+              {noShowAvailable
+                ? 'Você já pode registrar que o passageiro não apareceu.'
+                : `Ausência disponível em ${formatWaitDuration(remainingMs)}`}
+            </Text>
+          </View>
 
-      <View style={styles.copy}>
-        <Text style={styles.title}>Aguardando no local de embarque</Text>
-        <Text style={styles.timer}>{formatWaitDuration(elapsedMs)}</Text>
-        <Text style={styles.message}>Permaneça no ponto indicado até o passageiro embarcar.</Text>
-        {!noShowAvailable ? (
-          <Text style={styles.waiting}>
-            “Passageiro não apareceu” em {formatWaitDuration(remainingMs)}
-          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ver detalhes da espera"
+            onPress={() => setDetailsOpen(true)}
+            style={({ pressed }) => [styles.detailsButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.detailsButtonText}>DETALHES</Text>
+          </Pressable>
+        </View>
+
+        {noShowAvailable ? (
+          <AppButton
+            title={busy ? 'REGISTRANDO…' : 'PASSAGEIRO NÃO APARECEU'}
+            variant="secondary"
+            onPress={handlePassengerNotFound}
+            disabled={busy || !noShowAvailable}
+            style={styles.compactAction}
+          />
         ) : null}
+
+        {DEV_RIDE_SIMULATOR_ENABLED ? (
+          <AppButton
+            title={busy ? 'REINICIANDO…' : 'RECOMEÇAR O TESTE'}
+            variant="danger"
+            haptic="warning"
+            onPress={handleDevRideReset}
+            disabled={busy}
+            style={styles.compactAction}
+          />
+        ) : null}
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
-      <AppButton
-        title={busy ? 'REGISTRANDO…' : 'PASSAGEIRO NÃO APARECEU'}
-        variant="secondary"
-        onPress={handlePassengerNotFound}
-        disabled={busy || !noShowAvailable}
-      />
-    </View>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={detailsOpen}
+        onRequestClose={() => !busy && setDetailsOpen(false)}
+      >
+        <View style={styles.backdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Aguardando passageiro</Text>
+            <Text style={styles.modalSubtitle}>
+              A corrida continua disponível na tela principal enquanto você aguarda.
+            </Text>
+
+            <ScrollView contentContainerStyle={styles.modalContent}>
+              <View style={styles.confirmationBox}>
+                <Text style={styles.confirmationEyebrow}>PASSAGEIRO AVISADO</Text>
+                <Text style={styles.confirmationTitle}>{arrivalCopy.title}</Text>
+                <Text style={styles.confirmationMessage}>{arrivalCopy.message}</Text>
+                <Text style={styles.confirmationNote}>{arrivalCopy.deliveryNote}</Text>
+                <Text style={styles.confirmationNote}>{arrivalCopy.offlineNote}</Text>
+              </View>
+
+              <View style={styles.waitDetails}>
+                <Text style={styles.waitDetailsTitle}>Tempo no local</Text>
+                <Text style={styles.timer}>{formatWaitDuration(elapsedMs)}</Text>
+                <Text style={styles.message}>
+                  Permaneça no ponto indicado até o passageiro embarcar.
+                </Text>
+                {!noShowAvailable ? (
+                  <Text style={styles.waiting}>
+                    “Passageiro não apareceu” em {formatWaitDuration(remainingMs)}
+                  </Text>
+                ) : null}
+              </View>
+
+              <AppButton
+                title={busy ? 'REGISTRANDO…' : 'PASSAGEIRO NÃO APARECEU'}
+                variant="secondary"
+                onPress={handlePassengerNotFound}
+                disabled={busy || !noShowAvailable}
+              />
+
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+            </ScrollView>
+
+            <AppButton
+              title="FECHAR"
+              variant="ghost"
+              onPress={() => setDetailsOpen(false)}
+              disabled={busy}
+            />
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
@@ -245,39 +324,93 @@ const styles = StyleSheet.create({
   container: {
     marginHorizontal: spacing.md,
     marginTop: spacing.sm,
-    padding: spacing.md,
+    padding: spacing.sm,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.warning,
     backgroundColor: colors.warningBg,
-    gap: spacing.md,
+    gap: spacing.sm,
   },
   devContainer: {
-    padding: spacing.sm,
-    gap: spacing.sm,
     borderColor: colors.primary,
     backgroundColor: colors.primaryTint,
   },
-  devCopy: {
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  summaryCopy: {
+    flex: 1,
     gap: 2,
   },
-  devEyebrow: {
+  eyebrow: {
     ...typography.caption,
     fontFamily,
-    color: colors.primary,
+    color: colors.warning,
     fontWeight: '800',
     letterSpacing: 0.6,
   },
-  devTitle: {
+  devEyebrow: {
+    color: colors.primary,
+  },
+  title: {
     ...typography.bodyBold,
     fontFamily,
     color: colors.text,
   },
-  devMessage: {
+  waiting: {
     ...typography.caption,
     fontFamily,
+    color: colors.warning,
+  },
+  detailsButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  detailsButtonText: {
+    ...typography.caption,
+    fontFamily,
+    color: colors.primary,
+    fontWeight: '800',
+  },
+  compactAction: {
+    minHeight: 42,
+    paddingVertical: spacing.sm,
+  },
+  pressed: {
+    opacity: 0.76,
+  },
+  backdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: spacing.lg,
+    backgroundColor: 'rgba(15, 27, 45, 0.58)',
+  },
+  modalCard: {
+    maxHeight: '88%',
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.background,
+    gap: spacing.md,
+  },
+  modalTitle: {
+    ...typography.h3,
+    fontFamily,
+    color: colors.text,
+  },
+  modalSubtitle: {
+    ...typography.small,
+    fontFamily,
     color: colors.textMuted,
-    lineHeight: 17,
+  },
+  modalContent: {
+    gap: spacing.md,
   },
   confirmationBox: {
     padding: spacing.md,
@@ -310,10 +443,10 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     lineHeight: 17,
   },
-  copy: {
+  waitDetails: {
     gap: spacing.xs,
   },
-  title: {
+  waitDetailsTitle: {
     ...typography.bodyBold,
     fontFamily,
     color: colors.text,
@@ -327,11 +460,6 @@ const styles = StyleSheet.create({
     ...typography.small,
     fontFamily,
     color: colors.textMuted,
-  },
-  waiting: {
-    ...typography.caption,
-    fontFamily,
-    color: colors.warning,
   },
   error: {
     ...typography.caption,
