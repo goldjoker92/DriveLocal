@@ -1,13 +1,42 @@
 // AppButton
-// Pressable button with three variants:
-//   primary   - solid brand blue (default)
-//   secondary - light blue tint
-//   ghost     - transparent with border
+// Shared press feedback for DriveLocal actions.
+//
+// Enabled buttons receive a short scale animation and a light haptic by default.
+// Screens can select stronger feedback for primary or destructive actions without
+// duplicating animation code. Haptic failures never block the requested action.
 
-import { Pressable, Text } from 'react-native';
+import { useRef } from 'react';
+import { Animated, Pressable, Text } from 'react-native';
+import * as Haptics from 'expo-haptics';
+
 import { colors } from '../constants/colors';
 import { spacing, radius } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+async function triggerHaptic(type) {
+  if (!type) return;
+
+  if (type === 'selection') return Haptics.selectionAsync();
+  if (type === 'success') {
+    return Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
+  if (type === 'warning') {
+    return Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+  }
+  if (type === 'error') {
+    return Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+  }
+
+  const impact = type === 'heavy'
+    ? Haptics.ImpactFeedbackStyle.Heavy
+    : type === 'medium'
+      ? Haptics.ImpactFeedbackStyle.Medium
+      : Haptics.ImpactFeedbackStyle.Light;
+
+  return Haptics.impactAsync(impact);
+}
 
 export default function AppButton({
   title,
@@ -15,23 +44,60 @@ export default function AppButton({
   variant = 'primary',
   disabled = false,
   style,
+  haptic = 'light',
+  pressScale = true,
 }) {
-  const backgroundColor =
-    variant === 'primary'
-      ? colors.primary
-      : variant === 'secondary'
-        ? colors.primaryTint
+  const scale = useRef(new Animated.Value(1)).current;
+  const pressedOpacity = useRef(new Animated.Value(1)).current;
+
+  const backgroundColor = variant === 'primary'
+    ? colors.primary
+    : variant === 'secondary'
+      ? colors.primaryTint
+      : variant === 'danger'
+        ? colors.dangerBg
         : 'transparent';
 
-  const textColor = variant === 'primary' ? colors.white : colors.primary;
+  const textColor = variant === 'primary'
+    ? colors.white
+    : variant === 'danger'
+      ? colors.danger
+      : colors.primary;
+
+  const borderWidth = variant === 'ghost' || variant === 'danger' ? 1 : 0;
+  const borderColor = variant === 'danger' ? colors.danger : colors.border;
+
+  function animatePressed(pressed) {
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: pressScale && pressed ? 0.98 : 1,
+        useNativeDriver: true,
+        speed: 40,
+        bounciness: 0,
+      }),
+      Animated.timing(pressedOpacity, {
+        toValue: pressed ? 0.88 : 1,
+        duration: 80,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }
+
+  function handlePress() {
+    if (disabled) return;
+    triggerHaptic(haptic).catch(() => undefined);
+    if (onPress) onPress();
+  }
 
   return (
-    <Pressable
+    <AnimatedPressable
       accessibilityRole="button"
       accessibilityState={{ disabled }}
-      onPress={onPress}
+      onPress={handlePress}
+      onPressIn={() => animatePressed(true)}
+      onPressOut={() => animatePressed(false)}
       disabled={disabled}
-      style={({ pressed }) => [
+      style={[
         {
           minHeight: 48,
           backgroundColor,
@@ -40,9 +106,10 @@ export default function AppButton({
           borderRadius: radius.md,
           alignItems: 'center',
           justifyContent: 'center',
-          borderWidth: variant === 'ghost' ? 1 : 0,
-          borderColor: colors.border,
-          opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
+          borderWidth,
+          borderColor,
+          opacity: disabled ? 0.5 : pressedOpacity,
+          transform: [{ scale }],
         },
         style,
       ]}
@@ -60,6 +127,6 @@ export default function AppButton({
       >
         {title}
       </Text>
-    </Pressable>
+    </AnimatedPressable>
   );
 }
