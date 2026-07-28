@@ -5,7 +5,7 @@ function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-describe('real passenger dashboard and history contract', () => {
+describe('authenticated passenger dashboard and history contract', () => {
   it('keeps the active ride server-driven and visually prioritary', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
     const activeCard = source('src/components/PassengerActiveRideDashboardCard.jsx');
@@ -38,33 +38,78 @@ describe('real passenger dashboard and history contract', () => {
     expect(home).toContain("pathname: '/ride-completed'");
   });
 
-  it('submits the compact request with the chosen vehicle through the secure callable service', () => {
+  it('separates the account dashboard from the secure ride request flow', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
+    const request = source('src/app/(passenger)/request-ride.jsx');
 
-    expect(home).toContain('Olá 👋');
-    expect(home).toContain('Para onde vamos?');
-    expect(home).toContain('📍 Local de partida');
-    expect(home).toContain('🏁 Para onde?');
-    expect(home).toContain('VEHICLE_TYPES.map');
-    expect(home).toContain('resolveAddressToCoords');
-    expect(home).toContain('requestRide({');
-    expect(home).toContain('vehicleType,');
-    expect(home).toContain('idempotencyKeyRef');
-    expect(home).toContain("pathname: '/searching'");
-    expect(home).not.toContain("router.push('/request-ride')");
-    expect(home).not.toContain('estimatedFareCentavos: 1000');
+    expect(home).toContain('Olá, ${firstName} 👋');
+    expect(home).toContain('Pronto para sua próxima corrida?');
+    expect(home).toContain('PEDIR CORRIDA');
+    expect(home).toContain("router.push('/request-ride')");
+    expect(home).not.toContain('resolveAddressToCoords');
+    expect(home).not.toContain('requestRide({');
+
+    expect(request).toContain('Usar minha localização atual');
+    expect(request).toContain('getCurrentLocationWithAddress');
+    expect(request).toContain('resolveAddressToCoords');
+    expect(request).toContain('requestRide({');
+    expect(request).toContain("pathname: '/searching'");
   });
 
-  it('loads three recent rides and a paginated full history from the secure service', () => {
+  it('provides account, history, legal links and safe sign-out', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
+    const profile = source('src/app/(passenger)/passenger-profile.jsx');
+    const runtimeLinks = source('src/config/publicPolicyLinks.js');
+    const legalUrls = source('src/constants/legalUrls.js');
+
+    expect(home).toContain('MINHA CONTA');
+    expect(home).toContain('Meus dados');
+    expect(home).toContain("navigate('/passenger-profile', 'open_profile')");
+    expect(home).toContain('Histórico de corridas');
+    expect(home).toContain("navigate('/passenger-ride-history', 'open_history')");
+    expect(home).toContain('AJUDA E INFORMAÇÕES');
+    expect(home).toContain('Política de Privacidade');
+    expect(home).toContain('Termos de Uso');
+    expect(home).toContain('Excluir conta e dados');
+    expect(home).toContain("navigate('/privacy-center', 'open_account_deletion')");
+    expect(home).toContain('await logoutUser()');
+    expect(home).toContain('SAIR DA CONTA');
+
+    expect(profile).toContain('getPassenger(uid)');
+    expect(profile).toContain('Cidade de atendimento');
+    expect(profile).not.toContain('updateDoc(');
+    expect(profile).not.toContain('setDoc(');
+
+    expect(runtimeLinks).toContain('LEGAL_URLS.privacyPolicyUrl');
+    expect(runtimeLinks).toContain('LEGAL_URLS.termsOfUseUrl');
+    expect(runtimeLinks).toContain('LEGAL_URLS.accountDeletionWebUrl');
+    expect(legalUrls).toContain('https://rize-website-steel.vercel.app/drivelocal/privacy');
+    expect(legalUrls).toContain('https://rize-website-steel.vercel.app/terms');
+    expect(legalUrls).toContain('https://rize-website-steel.vercel.app/drivelocal/account-deletion');
+  });
+
+  it('keeps haptic and animated feedback reusable without duplicating button logic', () => {
+    const home = source('src/app/(passenger)/passenger-home.jsx');
+    const button = source('src/components/AppButton.jsx');
+    const request = source('src/app/(passenger)/request-ride.jsx');
+    const logger = source('src/utils/clientRideLog.js');
+
+    expect(button).toContain("import * as Haptics from 'expo-haptics'");
+    expect(button).toContain('Animated.spring(scale');
+    expect(button).toContain("haptic = 'light'");
+    expect(button).toContain('pressScale = true');
+    expect(home).toContain('haptic="medium"');
+    expect(home).toContain('haptic="warning"');
+    expect(request).toContain('<AppButton');
+    expect(request).toContain('Usar minha localização atual');
+    expect(logger).toContain('route: safeString(fields.route, 96)');
+  });
+
+  it('loads the paginated full history from the authenticated backend service', () => {
     const screen = source('src/app/(passenger)/passenger-ride-history.jsx');
     const service = source('src/services/passengerRideHistoryService.js');
     const row = source('src/components/PassengerRideHistoryRow.jsx');
 
-    expect(home).toContain('loadPassengerRideHistoryPage({ limit: 3 })');
-    expect(home).toContain('ÚLTIMAS 3 CORRIDAS');
-    expect(home).toContain('VER TODAS');
-    expect(home).toContain("router.push('/passenger-ride-history')");
     expect(screen).toContain('loadPassengerRideHistoryPage({ limit: 20 })');
     expect(screen).toContain('CARREGAR MAIS CORRIDAS');
     expect(row).toContain('item.driverFirstName');
