@@ -1,0 +1,54 @@
+name: Passenger dashboard final CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/(passenger)/**'
+      - 'src/components/AppButton.jsx'
+      - 'src/config/publicPolicyLinks.js'
+      - 'src/constants/legalUrls.js'
+      - 'src/services/__tests__/passengerDashboardContract.test.js'
+      - 'src/utils/clientRideLog.js'
+      - 'src/utils/passengerDashboardPolicy.js'
+      - 'src/utils/__tests__/passengerDashboardPolicy.test.js'
+      - '.env.example'
+      - 'eas.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/passenger-dashboard-final-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run passenger greeting policy test
+        run: npx jest src/utils/__tests__/passengerDashboardPolicy.test.js --ci --runInBand --verbose
+
+      - name: Run passenger dashboard contract test
+        run: npx jest src/services/__tests__/passengerDashboardContract.test.js --ci --runInBand --verbose
+
+      - name: Run full mobile Jest suite
+        run: npx jest --ci --runInBand --forceExit
+
+      - name: Check whitespace errors
+        run: git diff --check origin/${{ github.base_ref }}...HEAD
