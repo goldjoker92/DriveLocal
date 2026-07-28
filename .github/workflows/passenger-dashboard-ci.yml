@@ -1,0 +1,43 @@
+name: Passenger dashboard CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/(passenger)/**'
+      - 'src/components/AppButton.jsx'
+      - 'src/services/passengerService.js'
+      - 'src/services/__tests__/passengerDashboardContract.test.js'
+      - 'src/utils/clientRideLog.js'
+      - 'src/utils/passengerDashboardPolicy.js'
+      - 'src/utils/__tests__/passengerDashboardPolicy.test.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/passenger-dashboard-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run Jest
+        run: npm test
+
+      - name: Check whitespace errors
+        run: git diff --check origin/${{ github.base_ref }}...HEAD
