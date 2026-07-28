@@ -45,7 +45,7 @@ jobs:
         run: npx jest src/services/__tests__/passengerDashboardContract.test.js --ci --runInBand --verbose
 
       - name: Run full Jest suite
-        id: full-jest
+        id: full_jest
         continue-on-error: true
         run: npm test -- --json --outputFile=jest-results.json
 
@@ -63,5 +63,5 @@ jobs:
         run: git diff --check origin/${{ github.base_ref }}...HEAD
 
       - name: Enforce full Jest result
-        if: steps.full-jest.outcome != 'success'
+        if: ${{ steps.full_jest.outcome != 'success' }}
         run: exit 1
