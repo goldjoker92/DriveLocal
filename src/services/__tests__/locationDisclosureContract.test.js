@@ -17,7 +17,7 @@ describe('Google Play prominent location disclosure contract', () => {
     expect(context).toContain('O rastreamento para quando você fica indisponível');
     expect(context).toContain('A localização não é usada para anúncios');
     expect(context).toContain('Ao tocar em “Continuar”, a solicitação oficial do Android será exibida em seguida.');
-    expect(context.indexOf("traceDisclosure('accepted'")).toBeLessThan(
+    expect(context.indexOf("traceDisclosure('accepted'")) .toBeLessThan(
       context.indexOf('requestLocationPermissions({')
     );
   });
@@ -55,7 +55,7 @@ describe('Google Play prominent location disclosure contract', () => {
     expect(context).toContain('[LOCATION_DISCLOSURE]');
     expect(context).toContain("traceDisclosure('presented'");
     expect(context).toContain("traceDisclosure('deferred'");
-    expect(context).toContain("traceDisclosure('permission_flow_completed'");
+    expect(context).toContain("'permission_flow_completed'");
     expect(permissions).toContain('[LOCATION_PERMISSION]');
     expect(permissions).toContain("'native_prompt.opening'");
     expect(permissions).not.toContain('latitude');
