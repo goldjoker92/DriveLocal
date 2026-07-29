@@ -21,6 +21,23 @@ function extractOrderId(body, query) {
   return null;
 }
 
+// Mercado Pago's notification simulator can send a complete synthetic Point
+// order inside `data` (for example data.type="point", data.id="123456"). That
+// identifier is not a real Orders API resource and therefore cannot be fetched
+// from /v1/orders/{id}. Once the signed request has been authenticated, we only
+// acknowledge this simulator/Point payload. We never trust or apply its amount,
+// status or payment fields to DriveLocal.
+function isSignedSimulatorPointPayload(body) {
+  const data = body && body.data;
+  return Boolean(
+    data
+      && typeof data === 'object'
+      && data.type === 'point'
+      && data.transactions
+      && Array.isArray(data.transactions.payments)
+  );
+}
+
 /**
  * @param {{db:object, adapter:object, webhookSecret:string, clock:{now:()=>number},
  *          environment?:string, headers:object, query:object, body:object,
@@ -49,6 +66,18 @@ async function handleWebhook(args) {
     logWarning(context, 'payment.webhook.signature_invalid', { operation: 'webhook', providerOrderId: dataId });
     return { httpStatus: 401, body: { ok: false } };
   }
+
+  // The official simulator may send a synthetic Point order whose id cannot be
+  // retrieved from the Orders API. Acknowledge only after signature validation;
+  // do not mutate Firestore and do not trust the embedded transaction details.
+  if (isSignedSimulatorPointPayload(body)) {
+    logInfo(context, 'payment.webhook.simulator_acknowledged', {
+      operation: 'webhook',
+      providerOrderId: dataId,
+    });
+    return { httpStatus: 200, body: { ok: true, outcome: 'simulator_acknowledged' } };
+  }
+
   if (!dataId) {
     // Signed but nothing actionable — acknowledge to avoid infinite retries.
     return { httpStatus: 200, body: { ok: true } };
@@ -80,4 +109,4 @@ async function handleWebhook(args) {
   }
 }
 
-module.exports = { handleWebhook, extractOrderId };
+module.exports = { handleWebhook, extractOrderId, isSignedSimulatorPointPayload };
