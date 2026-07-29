@@ -17,6 +17,7 @@ import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
 import RideQuickMessagesGuard from '../components/RideQuickMessagesGuard';
 import AccountPrivacyShortcut from '../components/AccountPrivacyShortcut';
 import SupportShortcut from '../components/SupportShortcut';
+import { LocationDisclosureProvider } from '../contexts/LocationDisclosureContext';
 import { auth } from '../config/firebase';
 import { colors } from '../constants/colors';
 import { useRideNotifications } from '../hooks/useRideNotifications';
@@ -174,27 +175,29 @@ export default function RootLayout() {
     <AppErrorBoundary route={pathname}>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
-          <StatusBar style="dark" />
-          <View style={{ flex: 1, backgroundColor: colors.background }}>
-            {/* Never replays actions automatically; restores only an existing ride. */}
-            <NetworkRecoveryGuard route={pathname} />
-            {/* Silent when healthy; visible only on operational driver routes. */}
-            <DriverDeviceHealthGuard route={pathname} />
-            {/* Visible only after the driver has announced arrival at the pickup. */}
-            <DriverPassengerWaitGuard route={pathname} />
-            {/* Server-catalogued messages only; no free text or contact exposure. */}
-            <RideQuickMessagesGuard route={pathname} />
-            {/* Support is callable-only and automatically receives safe ride context. */}
-            <SupportShortcut route={pathname} />
-            {/* Temporary compact entry until the full cockpit redesign lands. */}
-            <AccountPrivacyShortcut route={pathname} />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.background },
-              }}
-            />
-          </View>
+          <LocationDisclosureProvider>
+            <StatusBar style="dark" />
+            <View style={{ flex: 1, backgroundColor: colors.background }}>
+              {/* Never replays actions automatically; restores only an existing ride. */}
+              <NetworkRecoveryGuard route={pathname} />
+              {/* Silent when healthy; visible only on operational driver routes. */}
+              <DriverDeviceHealthGuard route={pathname} />
+              {/* Visible only after the driver has announced arrival at the pickup. */}
+              <DriverPassengerWaitGuard route={pathname} />
+              {/* Server-catalogued messages only; no free text or contact exposure. */}
+              <RideQuickMessagesGuard route={pathname} />
+              {/* Support is callable-only and automatically receives safe ride context. */}
+              <SupportShortcut route={pathname} />
+              {/* Temporary compact entry until the full cockpit redesign lands. */}
+              <AccountPrivacyShortcut route={pathname} />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: colors.background },
+                }}
+              />
+            </View>
+          </LocationDisclosureProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </AppErrorBoundary>
