@@ -1,0 +1,44 @@
+name: Play location disclosure CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/(auth)/email-login.jsx'
+      - 'src/app/_layout.jsx'
+      - 'src/contexts/LocationDisclosureContext.jsx'
+      - 'src/services/locationPermissionService.js'
+      - 'src/services/__tests__/locationDisclosureContract.test.js'
+      - '.github/workflows/play-location-disclosure-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run location disclosure contract
+        run: npx jest src/services/__tests__/locationDisclosureContract.test.js --ci --runInBand --verbose
+
+      - name: Run full mobile Jest suite
+        run: npx jest --ci --runInBand --forceExit
+
+      - name: Check whitespace errors
+        run: git diff --check origin/${{ github.base_ref }}...HEAD

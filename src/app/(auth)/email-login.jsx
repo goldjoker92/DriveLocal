@@ -9,6 +9,7 @@ import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import { useLocationDisclosure } from '../../contexts/LocationDisclosureContext';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
@@ -18,9 +19,15 @@ import { useDriverRedirect } from '../../hooks/useDriverRedirect';
 import { showAppAlert } from '../../utils/alertUtils';
 import { loginErrorMessage } from '../../utils/authErrorMessage';
 
+function shouldRequestLocationAtLogin(result) {
+  if (result?.role === 'passenger') return true;
+  return result?.role === 'driver' && result?.driver?.verificationStatus === 'approved';
+}
+
 export default function EmailLogin() {
   const router = useRouter();
   const redirectDriver = useDriverRedirect();
+  const { requestLocationDisclosure } = useLocationDisclosure();
   const params = useLocalSearchParams();
 
   const isInternal = params.intent === 'internal';
@@ -46,6 +53,34 @@ export default function EmailLogin() {
     );
   }
 
+  async function runPostLoginLocationFlow(result) {
+    if (isInternal || !shouldRequestLocationAtLogin(result)) {
+      console.info('[AUTH_LOCATION] login_disclosure_skipped', {
+        scope: 'auth_location',
+        event: 'login_disclosure_skipped',
+        role: result?.role || 'unknown',
+        reason: isInternal ? 'internal_access' : 'role_or_driver_status_not_eligible',
+        atMs: Date.now(),
+      });
+      return { status: 'skipped' };
+    }
+
+    const locationResult = await requestLocationDisclosure({
+      role: result.role,
+      source: 'email_login',
+      trigger: 'post_authentication',
+    });
+
+    console.info('[AUTH_LOCATION] login_disclosure_completed', {
+      scope: 'auth_location',
+      event: 'login_disclosure_completed',
+      role: result.role,
+      status: locationResult?.status || 'unknown',
+      atMs: Date.now(),
+    });
+    return locationResult;
+  }
+
   async function handleLogin() {
     setError('');
     setInfo('');
@@ -63,6 +98,11 @@ export default function EmailLogin() {
         await denyInternal();
         return;
       }
+
+      // Google Play prominent disclosure: the custom DriveLocal modal is shown
+      // before Android's native location request. Passenger asks foreground only;
+      // an approved driver asks foreground + background for dispatch and tracking.
+      await runPostLoginLocationFlow(result);
 
       if (result.role === 'admin') {
         console.log('[ROLE_REDIRECT] admin -> /(admin)/admin-home');
