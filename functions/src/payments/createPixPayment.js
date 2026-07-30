@@ -3,14 +3,12 @@
 // Pix charge for a subscription or a wallet top-up.
 //
 // Security invariants:
-//   - the driver id ALWAYS comes from auth, never from the client payload;
-//   - subscription price is derived server-side from vehicleType (never client);
-//   - wallet presets use an allowlist and explicit custom amounts use a strict range;
-//   - launch grace blocks unnecessary subscription/wallet payments with stable,
-//     traceable reason codes;
-//   - creation is idempotent on the client idempotency key, and the SAME key is
-//     forwarded to the provider on retry;
-//   - only safe fields are returned; no provider payload or PII leaks.
+//   - driver identity and payer data come from Firebase Auth / the driver profile;
+//   - passenger data never enters this payment flow;
+//   - subscription price is derived server-side and wallet amounts are bounded;
+//   - creation is idempotent locally and at Mercado Pago;
+//   - CPF, email and device-session data are never logged or persisted here;
+//   - only safe payment fields are returned to the mobile app.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
@@ -31,17 +29,21 @@ const {
 const driverC = require('../drivers/constants');
 const { resolveCommercialPolicy } = require('../drivers/commercialPolicy');
 const { computeSubscriptionExtension } = require('../drivers/subscriptionDomain');
+const {
+  STATEMENT_DESCRIPTOR,
+  buildDriverPayer,
+  buildOrderItem,
+  buildAdditionalInfo,
+  normalizeDeviceSessionId,
+} = require('./orderQualityData');
 const C = require('./constants');
 
 const OPERATION_TYPE = 'create_pix_payment';
 
-// SHA-256 of the idempotency key for logs (never log the raw key material).
 function keyHash(key) {
   return fingerprintPayload({ k: key });
 }
 
-// Kept as a compatibility export for existing tests/callers. A paid subscription
-// alone does not block renewal; only the founder/free-ride launch grace does.
 function subscriptionAlreadyCovered(driver, nowMs) {
   return resolveCommercialPolicy(driver, nowMs).subscriptionPaymentBlockedByGrace;
 }
@@ -101,19 +103,20 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
 
   const payload = assertShape(request && request.data, {
     required: ['purpose', 'idempotencyKey'],
-    optional: ['amountCentavos', 'customAmount'],
+    optional: ['amountCentavos', 'customAmount', 'deviceSessionId'],
   });
   const purpose = validateEnum(payload.purpose, C.PURPOSES, 'purpose');
   const idempotencyKey = validateIdempotencyKey(payload.idempotencyKey);
+  const deviceSessionId = normalizeDeviceSessionId(payload.deviceSessionId);
   const nowMs = clock.now();
 
   logInfo(context, 'payment.create.started', {
     operation: OPERATION_TYPE,
     purpose,
     idempotencyKeyHash: keyHash(idempotencyKey),
+    deviceSessionIdProvided: Boolean(deviceSessionId),
   });
 
-  // Load the driver (server-authoritative source for vehicle type / commercial policy).
   const driverRef = db.collection(driverC.DRIVERS).doc(driverId);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists) {
@@ -142,8 +145,6 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     freeRidesRemaining: commercial.freeRidesRemaining,
   });
 
-  // Resolve the amount server-side per purpose (never trust a client amount for
-  // subscription; wallet amounts are either known presets or explicit bounded custom values).
   let amountCentavos;
   let customAmount = false;
   if (purpose === 'driver_subscription') {
@@ -164,11 +165,8 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
         },
       });
     }
-    const { priceCentavos } = computeSubscriptionExtension(driver, nowMs);
-    amountCentavos = priceCentavos;
+    amountCentavos = computeSubscriptionExtension(driver, nowMs).priceCentavos;
   } else {
-    // Wallet top-ups are unnecessary for every driver while commission is 0%.
-    // This guard runs before provider creation, so Mercado Pago is never called.
     if (commercial.freePeriodActive) {
       logInfo(context, 'payment.create.not_required', {
         operation: OPERATION_TYPE,
@@ -186,7 +184,6 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     customAmount = validatedTopup.customAmount;
   }
 
-  // Idempotency: same key + same logical request -> replay stored safe result.
   const acq = await acquireOperation(
     db,
     {
@@ -213,7 +210,30 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     });
   }
 
-  // Immutable local id BEFORE calling the provider — used as external_reference.
+  // Build provider enrichment only after local idempotency acquisition. Completed
+  // replays therefore return the stored safe result without re-reading/sending PII.
+  const payer = buildDriverPayer({
+    driver,
+    authToken: request && request.auth ? request.auth.token : null,
+  });
+  const item = buildOrderItem({
+    purpose,
+    vehicleType: driver.vehicleType,
+    amountCentavos,
+  });
+  const additionalInfo = buildAdditionalInfo(driver);
+
+  logInfo(context, 'payment.create.provider_payload_prepared', {
+    operation: OPERATION_TYPE,
+    purpose,
+    payerEmailConfigured: Boolean(payer.email),
+    payerFirstNameConfigured: Boolean(payer.first_name),
+    payerLastNameConfigured: Boolean(payer.last_name),
+    payerCpfConfigured: Boolean(payer.identification && payer.identification.number),
+    deviceSessionIdProvided: Boolean(deviceSessionId),
+    itemCategoryId: item.category_id,
+  });
+
   const paymentRef = db.collection(C.PAYMENT_REQUESTS).doc();
   const localPaymentId = paymentRef.id;
 
@@ -222,9 +242,14 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     order = await adapter.createPixOrder({
       localPaymentId,
       amountCentavos,
-      idempotencyKey, // same provider idempotency key on retry
+      idempotencyKey,
       purpose,
       description: purpose === 'driver_subscription' ? 'DriveLocal assinatura' : 'DriveLocal saldo',
+      payer,
+      items: [item],
+      additionalInfo,
+      statementDescriptor: STATEMENT_DESCRIPTOR,
+      deviceSessionId,
     });
   } catch (err) {
     const appErr = AppError.from(err);
@@ -275,7 +300,6 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
     idempotencyKeyHash: keyHash(idempotencyKey),
   });
 
-  // Only safe information is returned to the app.
   const safeResult = {
     localPaymentId,
     status: C.STATUS.PENDING,
