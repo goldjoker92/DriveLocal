@@ -89,7 +89,7 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(runtimeLinks).toContain('LEGAL_URLS.termsOfUseUrl');
     expect(runtimeLinks).toContain('LEGAL_URLS.accountDeletionWebUrl');
     expect(legalUrls).toContain('https://rize-website-steel.vercel.app/drivelocal/privacy');
-    expect(legalUrls).toContain('https://rize-website-steel.vercel.app/terms');
+    expect(legalUrls).toContain('https://rize-website-steel.vercel.app/drivelocal/terms');
     expect(legalUrls).toContain('https://rize-website-steel.vercel.app/drivelocal/account-deletion');
   });
 
