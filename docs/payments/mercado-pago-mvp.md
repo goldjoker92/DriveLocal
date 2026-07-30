@@ -39,22 +39,38 @@ A Cloud Function cria uma única order digital com:
 - `payer.first_name` e `payer.last_name`: derivados do nome do perfil, quando disponíveis;
 - `payer.identification`: CPF do motorista somente quando o valor do perfil tem 11 dígitos e checksum válido;
 - `additional_info.payer.registration_date`: data de criação do perfil, quando disponível;
-- `payment_method.statement_descriptor`: `DRIVELOCAL`;
 - `X-Idempotency-Key`: mesma chave segura em toda tentativa da mesma operação;
-- `X-meli-session-id`: somente quando gerado pelo SDK/dispositivo oficial do Mercado Pago.
+- `X-meli-session-id`: somente quando gerado pelas ferramentas oficiais do Mercado Pago.
 
 Não são enviados endereço, CEP ou dados de entrega porque o produto é digital.
+
+## Nome para extratos
+
+A documentação da Orders API mostra `statement_descriptor` nos meios de pagamento com cartão. O payload Pix oficial usa apenas:
+
+```json
+{
+  "id": "pix",
+  "type": "bank_transfer"
+}
+```
+
+Por isso, o backend não injeta um campo de cartão em uma transação Pix. Para cumprir o controle de qualidade **Descrição - Fatura do cartão**, configurar no painel da conta Mercado Pago:
+
+```text
+Nome para extratos: DRIVELOCAL
+```
 
 ## Device ID
 
 O backend já aceita `deviceSessionId`, valida formato/tamanho e encaminha no header `X-meli-session-id`. O valor:
 
-- deve ser gerado pelo SDK oficial de dispositivos do Mercado Pago;
+- deve ser gerado pelas ferramentas oficiais de segurança do Mercado Pago;
 - não é salvo em Firestore;
 - não aparece nos logs;
 - não pode ser substituído por Firebase UID, Android ID, IMEI ou UUID próprio.
 
-A captura nativa ainda exige uma integração Expo/Android específica com o SDK oficial. Até ela existir, o app deve omitir o campo em vez de enviar um identificador falso.
+A documentação nativa do Mercado Pago fornece um SDK Android que exige integração nativa. Até existir uma implementação Expo/Android aprovada, o app deve omitir o campo em vez de enviar um identificador falso.
 
 ## Webhook
 
