@@ -47,6 +47,18 @@ function geometryBoundingBox(geometry) {
 
 function normalizeTestDocument(collectionName, docId, value) {
   const out = { ...(value || {}) };
+
+  // Real driver documents are created with an authenticated email. Older unit
+  // fixtures predate that required field, so provide a deterministic test-only
+  // value when the fixture omitted it. Explicit null/invalid values remain
+  // untouched, allowing dedicated validation tests to exercise failure paths.
+  if (
+    collectionName === 'drivers'
+    && !Object.prototype.hasOwnProperty.call(out, 'email')
+  ) {
+    out.email = `${docId}@test.drivelocal.local`;
+  }
+
   if (collectionName !== 'cityPublicConfig') return out;
 
   // An explicit boundaryGeoJson value (including null) is intentional and must
