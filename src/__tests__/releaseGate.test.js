@@ -18,13 +18,13 @@ const {
 } = require('../../scripts/release/production-source-audit');
 
 describe('production release gate', () => {
-  it('exposes one non-mutating command with Android versionCode 1', () => {
+  it('exposes one non-mutating command with Android versionCode 2', () => {
     const packageJson = JSON.parse(source('package.json'));
     const appJson = JSON.parse(source('app.json'));
 
     expect(packageJson.scripts['release:check']).toBe('node scripts/release/release-check.js');
     expect(appJson.expo.version).toBe(packageJson.version);
-    expect(appJson.expo.android.versionCode).toBe(1);
+    expect(appJson.expo.android.versionCode).toBe(2);
   });
 
   it('uses only the two requested manual confirmations', () => {
