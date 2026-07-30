@@ -4,6 +4,6 @@
 
 export const LEGAL_URLS = Object.freeze({
   privacyPolicyUrl: 'https://rize-website-steel.vercel.app/drivelocal/privacy',
-  termsOfUseUrl: 'https://rize-website-steel.vercel.app/terms',
+  termsOfUseUrl: 'https://rize-website-steel.vercel.app/drivelocal/terms',
   accountDeletionWebUrl: 'https://rize-website-steel.vercel.app/drivelocal/account-deletion',
 });
