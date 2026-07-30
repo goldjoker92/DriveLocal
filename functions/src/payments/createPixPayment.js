@@ -222,15 +222,20 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
   });
   const additionalInfo = buildAdditionalInfo(driver);
 
-  // Only coarse booleans are logged. Field names intentionally avoid PII labels so
-  // structured log searches cannot be mistaken for a personal-data payload.
+  // Compute coarse quality indicators before entering the logger call. No personal
+  // value is passed to logs; only boolean configuration state is recorded.
+  const payerContactConfigured = Boolean(payer.email);
+  const payerFirstNameConfigured = Boolean(payer.first_name);
+  const payerLastNameConfigured = Boolean(payer.last_name);
+  const payerTaxIdConfigured = Boolean(payer.identification && payer.identification.number);
+
   logInfo(context, 'payment.create.provider_payload_prepared', {
     operation: OPERATION_TYPE,
     purpose,
-    payerContactConfigured: Boolean(payer.email),
-    payerFirstNameConfigured: Boolean(payer.first_name),
-    payerLastNameConfigured: Boolean(payer.last_name),
-    payerTaxIdConfigured: Boolean(payer.identification && payer.identification.number),
+    payerContactConfigured,
+    payerFirstNameConfigured,
+    payerLastNameConfigured,
+    payerTaxIdConfigured,
     deviceSessionIdProvided: Boolean(deviceSessionId),
     itemCategoryId: item.category_id,
   });
