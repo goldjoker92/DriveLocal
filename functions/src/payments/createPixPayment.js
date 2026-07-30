@@ -30,7 +30,6 @@ const driverC = require('../drivers/constants');
 const { resolveCommercialPolicy } = require('../drivers/commercialPolicy');
 const { computeSubscriptionExtension } = require('../drivers/subscriptionDomain');
 const {
-  STATEMENT_DESCRIPTOR,
   buildDriverPayer,
   buildOrderItem,
   buildAdditionalInfo,
@@ -248,7 +247,6 @@ async function createDriverPixPayment({ db, request, context, clock, adapter }) 
       payer,
       items: [item],
       additionalInfo,
-      statementDescriptor: STATEMENT_DESCRIPTOR,
       deviceSessionId,
     });
   } catch (err) {
