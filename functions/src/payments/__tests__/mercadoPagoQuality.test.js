@@ -1,5 +1,4 @@
 const {
-  STATEMENT_DESCRIPTOR,
   normalizeCpf,
   buildDriverPayer,
   buildOrderItem,
@@ -131,7 +130,6 @@ describe('Mercado Pago Orders API request', () => {
       additionalInfo: {
         payer: { registration_date: '2026-07-01T12:00:00.000Z' },
       },
-      statementDescriptor: STATEMENT_DESCRIPTOR,
       deviceSessionId: 'device-session_123',
     });
 
@@ -150,7 +148,10 @@ describe('Mercado Pago Orders API request', () => {
       category_id: 'services',
     });
     expect(body.payer.identification).toEqual({ type: 'CPF', number: '52998224725' });
-    expect(body.transactions.payments[0].payment_method.statement_descriptor).toBe('DRIVELOCAL');
+    expect(body.transactions.payments[0].payment_method).toEqual({
+      id: 'pix',
+      type: 'bank_transfer',
+    });
     expect(body.additional_info.payer.registration_date).toBe('2026-07-01T12:00:00.000Z');
     expect(body.metadata).toEqual({
       purpose: 'wallet_topup',
@@ -190,7 +191,6 @@ describe('Mercado Pago Orders API request', () => {
         unit_price: '9.90',
         external_code: 'driver_subscription_moto',
       }],
-      statementDescriptor: 'DRIVELOCAL',
       deviceSessionId: null,
     });
     expect(headers['X-meli-session-id']).toBeUndefined();
