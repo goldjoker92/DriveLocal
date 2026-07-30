@@ -9,7 +9,6 @@
 const { AppError, ERROR_CODES } = require('../errors/appError');
 
 const ITEM_CATEGORY_ID = 'services';
-const STATEMENT_DESCRIPTOR = 'DRIVELOCAL';
 const DEVICE_SESSION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,256}$/;
 
 function compactString(value, maxLength = 255) {
@@ -157,7 +156,7 @@ function buildAdditionalInfo(driver = {}) {
 }
 
 /**
- * The value must come from Mercado Pago's official device SDK/security script.
+ * The value must come from Mercado Pago's official security tooling.
  * Never replace it with Firebase UID, Android ID, IMEI or an app-generated UUID.
  */
 function normalizeDeviceSessionId(value) {
@@ -173,7 +172,6 @@ function normalizeDeviceSessionId(value) {
 
 module.exports = {
   ITEM_CATEGORY_ID,
-  STATEMENT_DESCRIPTOR,
   normalizeEmail,
   normalizeCpf,
   splitFullName,
