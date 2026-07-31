@@ -65,8 +65,11 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-prod-service-account.json" >> "$GITHUB_ENV"
           echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.prod.json" >> "$GITHUB_ENV"
 
-      - name: Validate application and Functions
+      - name: Validate application, Functions and release scripts
         run: |
+          node --check scripts/release/googleServiceAccountAuth.js
+          node --check scripts/release/ensure-prod-email-auth.js
+          node --check scripts/release/prod-auth-smoke.js
           npm test
           npm --prefix functions test
 
