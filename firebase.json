@@ -6,6 +6,11 @@
   "storage": {
     "rules": "backend/firebase/rules/storage.rules"
   },
+  "auth": {
+    "providers": {
+      "emailPassword": true
+    }
+  },
   "functions": {
     "source": "functions",
     "ignore": [
