@@ -4,6 +4,8 @@
 // DriveLocal closed-test app. This is deliberately PROD-only and requires an
 // explicit confirmation plus a drivelocal-prod service account.
 
+const { spawnSync } = require('child_process');
+
 const { loadFirebaseBuildConfig } = require('../build/firebaseBuildConfig');
 const { getServiceAccountAccessToken } = require('./googleServiceAccountAuth');
 
@@ -43,6 +45,30 @@ function isReady(config) {
     && config?.client?.permissions?.disabledUserSignup !== true;
 }
 
+function deployVersionedAuthConfig(projectId) {
+  const firebaseCommand = process.platform === 'win32' ? 'firebase.cmd' : 'firebase';
+  console.log('[PROD_AUTH_CONFIG] deploying versioned Firebase Auth provider configuration');
+
+  const result = spawnSync(firebaseCommand, [
+    'deploy',
+    '--only',
+    'auth',
+    '--project',
+    projectId,
+    '--non-interactive',
+  ], {
+    env: process.env,
+    stdio: 'inherit',
+  });
+
+  if (result.error) {
+    throw new Error(`Firebase CLI could not start: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`Firebase Auth configuration deploy failed with exit code ${result.status}`);
+  }
+}
+
 async function main() {
   if (process.env.CONFIRM_PRODUCTION_AUTH_CONFIG !== REQUIRED_CONFIRMATION) {
     throw new Error(
@@ -58,6 +84,10 @@ async function main() {
     throw new Error(`refusing project ${build.firebaseProjectId}; expected ${EXPECTED_PROJECT_ID}`);
   }
 
+  // The Firebase CLI creates the Authentication configuration when it does not
+  // exist yet and applies the provider settings declared in firebase.json.
+  deployVersionedAuthConfig(EXPECTED_PROJECT_ID);
+
   const accessToken = await getServiceAccountAccessToken({ expectedProjectId: EXPECTED_PROJECT_ID });
   const before = await getConfig(EXPECTED_PROJECT_ID, accessToken);
   if (isReady(before)) {
@@ -65,7 +95,7 @@ async function main() {
     return;
   }
 
-  console.log('[PROD_AUTH_CONFIG] repairing email/password and end-user signup settings');
+  console.log('[PROD_AUTH_CONFIG] repairing password and end-user signup settings');
   const updateMask = [
     'signIn.email.enabled',
     'signIn.email.passwordRequired',
@@ -97,7 +127,7 @@ async function main() {
 
   const after = await getConfig(EXPECTED_PROJECT_ID, accessToken);
   if (!isReady(after)) {
-    throw new Error('email/password Auth configuration is still not ready after PATCH');
+    throw new Error('email/password Auth configuration is still not ready after deployment and PATCH');
   }
 
   console.log('[PROD_AUTH_CONFIG] project=drivelocal-prod email_password=enabled signup=enabled REPAIRED');
