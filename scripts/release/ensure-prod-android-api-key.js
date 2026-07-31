@@ -1,9 +1,10 @@
 'use strict';
 
-// Configures the Firebase Android API key in drivelocal-prod so every Google
-// Play app-signing certificate accepted for DriveLocal can call Firebase Auth.
-// Existing API target restrictions are preserved. A conflicting browser, iOS,
-// or server client restriction causes a fail-closed error instead of overwrite.
+// Configures the Firebase Android API key and Android app registration in
+// drivelocal-prod so every Google Play app-signing certificate accepted for
+// DriveLocal can call Firebase services. Existing API target restrictions are
+// preserved. A conflicting browser, iOS, or server client restriction causes a
+// fail-closed error instead of an unsafe overwrite.
 
 const {
   loadFirebaseBuildConfig,
@@ -11,6 +12,7 @@ const {
 } = require('../build/firebaseBuildConfig');
 const { getServiceAccountAccessToken } = require('./googleServiceAccountAuth');
 const {
+  normalizeSha1,
   parseSha1Fingerprints,
   parseExpectedSigningCertCount,
 } = require('./prod-auth-smoke');
@@ -19,6 +21,7 @@ const REQUIRED_CONFIRMATION = 'DRIVELOCAL_PRODUCTION';
 const EXPECTED_PROJECT_ID = 'drivelocal-prod';
 const ANDROID_PACKAGE = 'com.drivelocal.app';
 const API_KEYS_BASE_URL = 'https://apikeys.googleapis.com/v2';
+const FIREBASE_MANAGEMENT_BASE_URL = 'https://firebase.googleapis.com/v1beta1';
 
 function required(name) {
   const value = String(process.env[name] || '').trim();
@@ -114,6 +117,57 @@ function assertExactApplications(actualApplications, expectedApplications) {
   }
 }
 
+function normalizedFirebaseSha1Set(certificates = []) {
+  const values = [];
+  for (const certificate of certificates) {
+    if (certificate?.certType !== 'SHA_1' || !certificate?.shaHash) continue;
+    try {
+      values.push(normalizeSha1(certificate.shaHash));
+    } catch (_error) {
+      // Ignore malformed unrelated records and verify our required certificates below.
+    }
+  }
+  return new Set(values);
+}
+
+async function ensureFirebaseAndroidShaCertificates({
+  projectId,
+  appId,
+  fingerprints,
+  accessToken,
+}) {
+  const parent = `projects/${projectId}/androidApps/${encodeURIComponent(appId)}`;
+  const listUrl = `${FIREBASE_MANAGEMENT_BASE_URL}/${parent}/sha`;
+  const existing = await authorizedRequest(listUrl, accessToken);
+  const existingSha1s = normalizedFirebaseSha1Set(existing.certificates);
+
+  for (const fingerprint of fingerprints) {
+    if (existingSha1s.has(fingerprint)) continue;
+
+    await authorizedRequest(listUrl, accessToken, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: '',
+        shaHash: fingerprint,
+        certType: 'SHA_1',
+      }),
+    });
+  }
+
+  const verified = await authorizedRequest(listUrl, accessToken);
+  const verifiedSha1s = normalizedFirebaseSha1Set(verified.certificates);
+  const missing = fingerprints.filter((fingerprint) => !verifiedSha1s.has(fingerprint));
+
+  if (missing.length) {
+    throw new Error(`Firebase Android app is missing ${missing.length} Play SHA-1 certificates`);
+  }
+
+  return {
+    registeredRequiredCount: fingerprints.length,
+    totalFirebaseSha1Count: verifiedSha1s.size,
+  };
+}
+
 async function main() {
   if (process.env.CONFIRM_PRODUCTION_API_KEY_CONFIG !== REQUIRED_CONFIRMATION) {
     throw new Error(
@@ -206,10 +260,18 @@ async function main() {
     applications
   );
 
+  const firebaseShaResult = await ensureFirebaseAndroidShaCertificates({
+    projectId: EXPECTED_PROJECT_ID,
+    appId: build.firebaseConfig.appId,
+    fingerprints,
+    accessToken,
+  });
+
   const preservedTargets = verifiedKey?.restrictions?.apiTargets?.length || 0;
   console.log(
     `[PROD_API_KEY] ✅ package + ${applications.length} Play signing certificates allowed; `
-    + `apiTargets=${preservedTargets}`
+    + `apiTargets=${preservedTargets}; `
+    + `firebaseSha1=${firebaseShaResult.registeredRequiredCount}`
   );
 }
 
@@ -226,4 +288,5 @@ module.exports = {
   assertNoConflictingClientRestriction,
   restrictionsWithAndroidApplications,
   assertExactApplications,
+  normalizedFirebaseSha1Set,
 };
