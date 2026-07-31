@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - fix/closed-test-prod-auth-parity
+      - fix/prod-play-signing-and-closed-test-gate
 
 permissions:
   contents: read
@@ -37,6 +38,7 @@ jobs:
         run: |
           node --check scripts/release/googleServiceAccountAuth.js
           node --check scripts/release/ensure-prod-email-auth.js
+          node --check scripts/release/ensure-prod-android-api-key.js
           node --check scripts/release/prod-auth-smoke.js
 
       - name: Run application tests
