@@ -93,10 +93,6 @@ function nullValue() {
   return { nullValue: null };
 }
 
-function boolValue(value) {
-  return { booleanValue: Boolean(value) };
-}
-
 function timestampValue() {
   return { timestampValue: new Date().toISOString() };
 }
@@ -130,7 +126,6 @@ function roleProfile(role, uid, email) {
     availabilityUpdatedAt: timestampValue(),
     createdAt: timestampValue(),
     updatedAt: timestampValue(),
-    smokeTest: boolValue(true),
   };
 }
 
