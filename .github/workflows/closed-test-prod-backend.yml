@@ -54,9 +54,11 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DRIVELOCAL_PROD }}
           GOOGLE_SERVICES_JSON_CONTENT: ${{ secrets.GOOGLE_SERVICES_JSON_DRIVELOCAL_PROD }}
+          PLAY_SIGNING_SHA1: ${{ secrets.ANDROID_APP_SIGNING_SHA1 }}
         run: |
           test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || { echo "Missing FIREBASE_SERVICE_ACCOUNT_DRIVELOCAL_PROD"; exit 1; }
           test -n "$GOOGLE_SERVICES_JSON_CONTENT" || { echo "Missing GOOGLE_SERVICES_JSON_DRIVELOCAL_PROD"; exit 1; }
+          test -n "$PLAY_SIGNING_SHA1" || { echo "Missing ANDROID_APP_SIGNING_SHA1"; exit 1; }
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/firebase-prod-service-account.json"
           printf '%s' "$GOOGLE_SERVICES_JSON_CONTENT" > "$RUNNER_TEMP/google-services.prod.json"
           chmod 600 "$RUNNER_TEMP/firebase-prod-service-account.json" "$RUNNER_TEMP/google-services.prod.json"
@@ -70,6 +72,11 @@ jobs:
 
       - name: Validate the PROD target before mutation
         run: npm run validate:env:prod
+
+      - name: Ensure PROD email and password access is enabled
+        env:
+          CONFIRM_PRODUCTION_AUTH_CONFIG: DRIVELOCAL_PRODUCTION
+        run: npm run release:ensure-prod-email-auth
 
       - name: Deploy the exact committed backend to PROD
         env:
@@ -87,6 +94,7 @@ jobs:
       - name: Prove new passenger and driver access in PROD
         env:
           CONFIRM_PRODUCTION_AUTH_SMOKE: DRIVELOCAL_PRODUCTION
+          ANDROID_APP_SIGNING_SHA1: ${{ secrets.ANDROID_APP_SIGNING_SHA1 }}
           PROD_AUTH_SMOKE_EMAIL_TEMPLATE: ${{ secrets.PROD_AUTH_SMOKE_EMAIL_TEMPLATE }}
           PROD_AUTH_SMOKE_PASSWORD: ${{ secrets.PROD_AUTH_SMOKE_PASSWORD }}
           PROD_AUTH_SMOKE_ROLES: passenger,driver
@@ -96,6 +104,8 @@ jobs:
         run: |
           echo "### Firebase PROD closed-test gate: GREEN" >> "$GITHUB_STEP_SUMMARY"
           echo "- Project: drivelocal-prod" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Email/password Auth and end-user signup enabled" >> "$GITHUB_STEP_SUMMARY"
           echo "- Rules, indexes, Storage and Functions deployed from this commit" >> "$GITHUB_STEP_SUMMARY"
           echo "- Horizonte canonical config seeded without resetting counters or operational data" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Google Play package/SHA-1 accepted by the production API key" >> "$GITHUB_STEP_SUMMARY"
           echo "- Fresh passenger and driver Auth + Firestore profiles created, read and cleaned" >> "$GITHUB_STEP_SUMMARY"
