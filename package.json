@@ -29,7 +29,7 @@
     "expo-symbols": "~56.0.6",
     "expo-system-ui": "~56.0.5",
     "expo-task-manager": "~56.0.22",
-    "expo-web-browser": "~56.0.17",
+    "expo-web-browser": "~56.0.15",
     "firebase": "^12.15.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
