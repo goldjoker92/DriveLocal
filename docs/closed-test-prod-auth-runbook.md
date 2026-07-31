@@ -4,15 +4,19 @@ This runbook is the mandatory path before publishing a new DriveLocal closed-tes
 
 ## What the guarded workflow changes
 
-The workflow `.github/workflows/closed-test-prod-backend.yml` deploys the exact committed versions of:
+The workflow `.github/workflows/closed-test-prod-backend.yml`:
 
-- Firebase Functions
-- Firestore rules
-- Firestore indexes
-- Storage rules
-- canonical Horizonte public configuration
-
-It then creates fresh passenger and driver email/password accounts in `drivelocal-prod`, writes and reads their exact Firestore role profiles, and cleans the temporary documents and Auth users.
+- verifies that every credential targets `drivelocal-prod`;
+- enables Email/Password authentication when it is disabled;
+- enables end-user signup when it is disabled;
+- deploys the exact committed Firebase Functions;
+- deploys the exact committed Firestore rules and indexes;
+- deploys the exact committed Storage rules;
+- seeds the canonical Horizonte public configuration without resetting operational data;
+- proves that the Google Play package and app-signing SHA-1 are accepted by the production API key;
+- creates fresh passenger and driver accounts through the public Auth API;
+- writes and reads the exact role profiles under production Firestore rules;
+- deletes the temporary profiles and Auth users with the protected service account.
 
 It does **not** copy DEV users, rides, wallets, payments, counters or secrets into PROD.
 
@@ -22,8 +26,11 @@ Configure these in the protected GitHub environment named `production`:
 
 - `FIREBASE_SERVICE_ACCOUNT_DRIVELOCAL_PROD`
 - `GOOGLE_SERVICES_JSON_DRIVELOCAL_PROD`
+- `ANDROID_APP_SIGNING_SHA1`
 - `PROD_AUTH_SMOKE_EMAIL_TEMPLATE`
 - `PROD_AUTH_SMOKE_PASSWORD`
+
+`ANDROID_APP_SIGNING_SHA1` must be the SHA-1 from **Google Play Console → App integrity → App signing key certificate**, not the local upload-key SHA-1.
 
 `PROD_AUTH_SMOKE_EMAIL_TEMPLATE` must contain `{{RUN_ID}}`, for example:
 
@@ -33,9 +40,16 @@ qa+drivelocal-{{RUN_ID}}@your-test-domain.example
 
 The test mailbox/domain must accept unique addresses generated from that template.
 
-## Firebase console prerequisite
+## Required service-account permissions
 
-In project `drivelocal-prod`, Firebase Authentication must have **Email/Password** enabled. The smoke gate fails with `EMAIL_PASSWORD_PROVIDER_DISABLED` when it is disabled.
+The production service account must be allowed to:
+
+- read and update Firebase Auth project configuration;
+- delete the temporary Firebase Auth users;
+- deploy Firebase Functions, Firestore rules/indexes and Storage rules;
+- seed and delete the temporary Firestore documents.
+
+The workflow stops before publishing anything when these permissions or secrets are missing.
 
 ## How to run
 
