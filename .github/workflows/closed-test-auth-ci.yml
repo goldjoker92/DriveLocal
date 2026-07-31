@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19.4'
           cache: npm
 
       - name: Install application dependencies
@@ -40,10 +40,10 @@ jobs:
           node --check scripts/release/prod-auth-smoke.js
 
       - name: Run application tests
-        run: npm test
+        run: npx jest --ci --runInBand --forceExit
 
       - name: Run Firebase Functions tests
-        run: npm --prefix functions test
+        run: npm --prefix functions test -- --forceExit
 
       - name: Validate DEV and PROD project mapping
         run: |
