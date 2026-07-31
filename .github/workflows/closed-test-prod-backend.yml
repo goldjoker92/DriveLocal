@@ -1,0 +1,114 @@
+name: Closed test - deploy Firebase PROD
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DRIVELOCAL_PRODUCTION to deploy drivelocal-prod'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: drivelocal-prod-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-smoke:
+    name: Deploy PROD backend and prove access
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Refuse an accidental production run
+        shell: bash
+        run: |
+          if [ "${{ inputs.confirmation }}" != "DRIVELOCAL_PRODUCTION" ]; then
+            echo "Wrong confirmation. Production was not changed."
+            exit 1
+          fi
+
+      - name: Checkout selected main commit
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install application dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Prepare protected PROD credentials
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DRIVELOCAL_PROD }}
+          GOOGLE_SERVICES_JSON_CONTENT: ${{ secrets.GOOGLE_SERVICES_JSON_DRIVELOCAL_PROD }}
+          PLAY_SIGNING_SHA1: ${{ secrets.ANDROID_APP_SIGNING_SHA1 }}
+        run: |
+          test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || { echo "Missing FIREBASE_SERVICE_ACCOUNT_DRIVELOCAL_PROD"; exit 1; }
+          test -n "$GOOGLE_SERVICES_JSON_CONTENT" || { echo "Missing GOOGLE_SERVICES_JSON_DRIVELOCAL_PROD"; exit 1; }
+          test -n "$PLAY_SIGNING_SHA1" || { echo "Missing ANDROID_APP_SIGNING_SHA1"; exit 1; }
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/firebase-prod-service-account.json"
+          printf '%s' "$GOOGLE_SERVICES_JSON_CONTENT" > "$RUNNER_TEMP/google-services.prod.json"
+          chmod 600 "$RUNNER_TEMP/firebase-prod-service-account.json" "$RUNNER_TEMP/google-services.prod.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-prod-service-account.json" >> "$GITHUB_ENV"
+          echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.prod.json" >> "$GITHUB_ENV"
+
+      - name: Validate application, Functions and release scripts
+        run: |
+          node --check scripts/release/googleServiceAccountAuth.js
+          node --check scripts/release/ensure-prod-email-auth.js
+          node --check scripts/release/prod-auth-smoke.js
+          npm test
+          npm --prefix functions test
+
+      - name: Validate the PROD target before mutation
+        run: npm run validate:env:prod
+
+      - name: Ensure PROD email and password access is enabled
+        env:
+          CONFIRM_PRODUCTION_AUTH_CONFIG: DRIVELOCAL_PRODUCTION
+        run: npm run release:ensure-prod-email-auth
+
+      - name: Deploy the exact committed backend to PROD
+        env:
+          CONFIRM_PRODUCTION_DEPLOY: DRIVELOCAL_PRODUCTION
+        run: npm run deploy:firebase:prod -- --non-interactive
+
+      - name: Seed canonical Horizonte configuration without resetting operations
+        env:
+          CONFIRM_PRODUCTION_DEPLOY: DRIVELOCAL_PRODUCTION
+        run: npm run seed:service-area:prod
+
+      - name: Verify deployed Functions
+        run: npm run verify:firebase:prod
+
+      - name: Prove new passenger and driver access in PROD
+        env:
+          CONFIRM_PRODUCTION_AUTH_SMOKE: DRIVELOCAL_PRODUCTION
+          ANDROID_APP_SIGNING_SHA1: ${{ secrets.ANDROID_APP_SIGNING_SHA1 }}
+          PROD_AUTH_SMOKE_EMAIL_TEMPLATE: ${{ secrets.PROD_AUTH_SMOKE_EMAIL_TEMPLATE }}
+          PROD_AUTH_SMOKE_PASSWORD: ${{ secrets.PROD_AUTH_SMOKE_PASSWORD }}
+          PROD_AUTH_SMOKE_ROLES: passenger,driver
+        run: npm run release:prod-auth-smoke
+
+      - name: Production result
+        run: |
+          echo "### Firebase PROD closed-test gate: GREEN" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Project: drivelocal-prod" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Email/password Auth and end-user signup enabled" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Rules, indexes, Storage and Functions deployed from this commit" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Horizonte canonical config seeded without resetting counters or operational data" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Google Play package/SHA-1 accepted by the production API key" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Fresh passenger and driver Auth + Firestore profiles created, read and cleaned" >> "$GITHUB_STEP_SUMMARY"

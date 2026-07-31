@@ -4,6 +4,14 @@ const ROLE_LABELS = {
   passenger: 'passageiro',
 };
 
+const AUTH_CONFIGURATION_CODES = new Set([
+  'auth/operation-not-allowed',
+  'auth/configuration-not-found',
+  'auth/app-not-authorized',
+  'auth/invalid-api-key',
+  'auth/api-key-not-valid.-please-pass-a-valid-api-key.',
+]);
+
 function isCredentialError(code) {
   return (
     code === 'auth/invalid-credential' ||
@@ -12,11 +20,29 @@ function isCredentialError(code) {
   );
 }
 
+function isNetworkError(code) {
+  return (
+    code === 'auth/network-request-failed' ||
+    code === 'unavailable' ||
+    code === 'firestore/unavailable' ||
+    code === 'deadline-exceeded' ||
+    code === 'firestore/deadline-exceeded'
+  );
+}
+
+function isAuthConfigurationError(code) {
+  return AUTH_CONFIGURATION_CODES.has(code);
+}
+
 export function registrationErrorMessage(error) {
   const code = error?.code || '';
 
   if (code === 'auth/invalid-email') {
     return 'Informe um e-mail válido.';
+  }
+
+  if (code === 'auth/missing-password') {
+    return 'Informe uma senha.';
   }
 
   if (code === 'auth/weak-password') {
@@ -31,20 +57,32 @@ export function registrationErrorMessage(error) {
     return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente novamente.';
   }
 
+  if (code === 'auth/email-already-in-use') {
+    return 'Este e-mail já possui uma conta. Use a opção Entrar.';
+  }
+
   if (code === 'auth/account-role-conflict') {
     const existingRole = ROLE_LABELS[error?.existingRole] || 'outro tipo';
     return `Este e-mail já está vinculado a uma conta de ${existingRole}. Entre com essa conta ou use outro e-mail.`;
   }
 
-  if (code === 'permission-denied' || code === 'firestore/permission-denied') {
-    return 'A conta foi autenticada, mas o perfil não pôde ser salvo. Tente novamente.';
+  if (isAuthConfigurationError(code)) {
+    return 'O acesso por e-mail está temporariamente indisponível. Código: AUTH-PROD-CONFIG.';
   }
 
-  if (code === 'auth/network-request-failed' || code === 'unavailable') {
+  if (code === 'permission-denied' || code === 'firestore/permission-denied') {
+    return 'A conta foi autenticada, mas o perfil não pôde ser salvo. Código: PROFILE-PERMISSION.';
+  }
+
+  if (isNetworkError(code)) {
     return 'Sem conexão com o servidor. Verifique sua internet e tente novamente.';
   }
 
-  return 'Não foi possível concluir o acesso. Verifique o e-mail e a senha e tente novamente.';
+  if (code === 'auth/internal-error' || code === 'internal') {
+    return 'O servidor de acesso encontrou um erro temporário. Código: AUTH-INTERNAL.';
+  }
+
+  return 'Não foi possível concluir o acesso agora. Código: AUTH-UNKNOWN.';
 }
 
 export function loginErrorMessage(error) {
@@ -62,9 +100,23 @@ export function loginErrorMessage(error) {
     return 'Muitas tentativas seguidas. Aguarde alguns minutos e tente novamente.';
   }
 
-  if (code === 'auth/network-request-failed' || code === 'unavailable') {
+  if (isAuthConfigurationError(code)) {
+    return 'O acesso por e-mail está temporariamente indisponível. Código: AUTH-PROD-CONFIG.';
+  }
+
+  if (isNetworkError(code)) {
     return 'Sem conexão com o servidor. Verifique sua internet e tente novamente.';
   }
 
-  return 'Não foi possível entrar agora. Tente novamente.';
+  if (code === 'auth/internal-error' || code === 'internal') {
+    return 'O servidor de acesso encontrou um erro temporário. Código: AUTH-INTERNAL.';
+  }
+
+  return 'Não foi possível entrar agora. Código: AUTH-UNKNOWN.';
 }
+
+export const __authErrorMessageInternals = {
+  isCredentialError,
+  isNetworkError,
+  isAuthConfigurationError,
+};
