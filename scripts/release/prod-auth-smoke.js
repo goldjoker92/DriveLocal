@@ -10,13 +10,14 @@
 // Required environment variables:
 //   GOOGLE_SERVICES_JSON=/secure/path/google-services.prod.json
 //   GOOGLE_APPLICATION_CREDENTIALS=/secure/path/service-account.prod.json
-//   ANDROID_APP_SIGNING_SHA1=<Google Play app-signing SHA-1>
+//   ANDROID_APP_SIGNING_SHA1S=<comma/newline separated Google Play SHA-1 values>
 //   PROD_AUTH_SMOKE_EMAIL_TEMPLATE=qa+drivelocal-{{RUN_ID}}@example.com
 //   PROD_AUTH_SMOKE_PASSWORD=<strong test password>
 //   CONFIRM_PRODUCTION_AUTH_SMOKE=DRIVELOCAL_PRODUCTION
 //
 // Optional:
 //   PROD_AUTH_SMOKE_ROLES=passenger,driver
+//   PROD_EXPECTED_SIGNING_CERT_COUNT=3
 
 const { loadFirebaseBuildConfig } = require('../build/firebaseBuildConfig');
 const { getServiceAccountAccessToken } = require('./googleServiceAccountAuth');
@@ -25,6 +26,7 @@ const REQUIRED_CONFIRMATION = 'DRIVELOCAL_PRODUCTION';
 const EXPECTED_PROJECT_ID = 'drivelocal-prod';
 const ANDROID_PACKAGE = 'com.drivelocal.app';
 const DEFAULT_ROLES = Object.freeze(['passenger', 'driver']);
+const DEFAULT_EXPECTED_SIGNING_CERT_COUNT = 3;
 
 function required(name) {
   const value = String(process.env[name] || '').trim();
@@ -35,29 +37,52 @@ function required(name) {
 function normalizeSha1(value) {
   const normalized = String(value || '').replace(/:/g, '').trim().toUpperCase();
   if (!/^[A-F0-9]{40}$/.test(normalized)) {
-    throw new Error('ANDROID_APP_SIGNING_SHA1 must be a valid SHA-1 fingerprint');
+    throw new Error('ANDROID_APP_SIGNING_SHA1S contains an invalid SHA-1 fingerprint');
   }
   return normalized;
 }
 
-function assertSafeConfiguration() {
-  if (process.env.CONFIRM_PRODUCTION_AUTH_SMOKE !== REQUIRED_CONFIRMATION) {
+function parseSha1Fingerprints(value) {
+  const tokens = String(value || '')
+    .split(/[\s,;]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (!tokens.length) {
+    throw new Error('missing ANDROID_APP_SIGNING_SHA1S');
+  }
+
+  return [...new Set(tokens.map(normalizeSha1))];
+}
+
+function parseExpectedSigningCertCount(value) {
+  const parsed = Number.parseInt(String(value || DEFAULT_EXPECTED_SIGNING_CERT_COUNT), 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
+    throw new Error('PROD_EXPECTED_SIGNING_CERT_COUNT must be an integer between 1 and 10');
+  }
+  return parsed;
+}
+
+function assertSafeConfiguration(env = process.env) {
+  if (env.CONFIRM_PRODUCTION_AUTH_SMOKE !== REQUIRED_CONFIRMATION) {
     throw new Error(
       `production smoke requires CONFIRM_PRODUCTION_AUTH_SMOKE=${REQUIRED_CONFIRMATION}`
     );
   }
 
-  const emailTemplate = required('PROD_AUTH_SMOKE_EMAIL_TEMPLATE');
+  const emailTemplate = String(env.PROD_AUTH_SMOKE_EMAIL_TEMPLATE || '').trim();
+  if (!emailTemplate) throw new Error('missing PROD_AUTH_SMOKE_EMAIL_TEMPLATE');
   if (!emailTemplate.includes('{{RUN_ID}}')) {
     throw new Error('PROD_AUTH_SMOKE_EMAIL_TEMPLATE must contain {{RUN_ID}}');
   }
 
-  const password = required('PROD_AUTH_SMOKE_PASSWORD');
+  const password = String(env.PROD_AUTH_SMOKE_PASSWORD || '').trim();
+  if (!password) throw new Error('missing PROD_AUTH_SMOKE_PASSWORD');
   if (password.length < 12) {
     throw new Error('PROD_AUTH_SMOKE_PASSWORD must contain at least 12 characters');
   }
 
-  const roles = String(process.env.PROD_AUTH_SMOKE_ROLES || DEFAULT_ROLES.join(','))
+  const roles = String(env.PROD_AUTH_SMOKE_ROLES || DEFAULT_ROLES.join(','))
     .split(',')
     .map((role) => role.trim())
     .filter(Boolean);
@@ -66,11 +91,24 @@ function assertSafeConfiguration() {
     throw new Error('PROD_AUTH_SMOKE_ROLES may contain only passenger and driver');
   }
 
+  const androidSigningSha1s = parseSha1Fingerprints(env.ANDROID_APP_SIGNING_SHA1S);
+  const expectedSigningCertCount = parseExpectedSigningCertCount(
+    env.PROD_EXPECTED_SIGNING_CERT_COUNT
+  );
+
+  if (androidSigningSha1s.length !== expectedSigningCertCount) {
+    throw new Error(
+      `expected ${expectedSigningCertCount} unique Play signing SHA-1 fingerprints; `
+      + `received ${androidSigningSha1s.length}`
+    );
+  }
+
   return {
     emailTemplate,
     password,
     roles,
-    androidSigningSha1: normalizeSha1(required('ANDROID_APP_SIGNING_SHA1')),
+    androidSigningSha1s,
+    expectedSigningCertCount,
   };
 }
 
@@ -236,16 +274,18 @@ async function runRoleSmoke({
   firebaseConfig,
   androidSigningSha1,
   adminAccessToken,
+  certIndex,
 }) {
   const projectId = firebaseConfig.projectId;
   const collectionName = role === 'passenger' ? 'passengers' : 'drivers';
+  const certLabel = `${certIndex + 1}`;
   let idToken = null;
   let uid = null;
   let profileCreated = false;
   let primaryError = null;
   const cleanupErrors = [];
 
-  console.log(`[PROD_AUTH_SMOKE] role=${role} stage=auth_create started`);
+  console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=auth_create started`);
 
   try {
     const authResult = await firebaseSignUp({
@@ -258,26 +298,26 @@ async function runRoleSmoke({
     idToken = authResult.idToken;
     uid = authResult.localId;
     if (!idToken || !uid) throw new Error('AUTH_RESPONSE_MISSING_TOKEN_OR_UID');
-    console.log(`[PROD_AUTH_SMOKE] role=${role} stage=auth_create OK`);
+    console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=auth_create OK`);
 
-    console.log(`[PROD_AUTH_SMOKE] role=${role} stage=profile_write started`);
+    console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=profile_write started`);
     await createProfileUnderRules({ projectId, collectionName, uid, idToken, role, email });
     profileCreated = true;
-    console.log(`[PROD_AUTH_SMOKE] role=${role} stage=profile_write OK`);
+    console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=profile_write OK`);
 
-    console.log(`[PROD_AUTH_SMOKE] role=${role} stage=profile_read started`);
+    console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=profile_read started`);
     const readBack = await readProfileUnderRules({ projectId, collectionName, uid, idToken });
     if (!readBack?.fields?.uid || readBack.fields.uid.stringValue !== uid) {
       throw new Error('PROFILE_READBACK_UID_MISMATCH');
     }
-    console.log(`[PROD_AUTH_SMOKE] role=${role} stage=profile_read OK`);
+    console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=profile_read OK`);
   } catch (error) {
     primaryError = error;
   } finally {
     if (uid && profileCreated) {
       try {
         await deleteProfileAsAdmin({ projectId, collectionName, uid, accessToken: adminAccessToken });
-        console.log(`[PROD_AUTH_SMOKE] role=${role} stage=profile_cleanup OK`);
+        console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=profile_cleanup OK`);
       } catch (error) {
         cleanupErrors.push(`PROFILE_CLEANUP_${sanitizedApiError(error)}`);
       }
@@ -286,7 +326,7 @@ async function runRoleSmoke({
     if (uid) {
       try {
         await deleteAuthUserAsAdmin({ projectId, uid, accessToken: adminAccessToken });
-        console.log(`[PROD_AUTH_SMOKE] role=${role} stage=auth_cleanup OK`);
+        console.log(`[PROD_AUTH_SMOKE] cert=${certLabel} role=${role} stage=auth_cleanup OK`);
       } catch (error) {
         cleanupErrors.push(`AUTH_CLEANUP_${sanitizedApiError(error)}`);
       }
@@ -298,7 +338,13 @@ async function runRoleSmoke({
 }
 
 async function main() {
-  const { emailTemplate, password, roles, androidSigningSha1 } = assertSafeConfiguration();
+  const {
+    emailTemplate,
+    password,
+    roles,
+    androidSigningSha1s,
+  } = assertSafeConfiguration();
+
   const build = loadFirebaseBuildConfig({
     env: { ...process.env, APP_ENV: 'prod', EAS_BUILD: '1' },
     packageName: ANDROID_PACKAGE,
@@ -313,33 +359,56 @@ async function main() {
   });
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   console.log(
-    `[PROD_AUTH_SMOKE] project=${build.firebaseProjectId} roles=${roles.join(',')} started`
+    `[PROD_AUTH_SMOKE] project=${build.firebaseProjectId} roles=${roles.join(',')}`
+    + ` signingCerts=${androidSigningSha1s.length} started`
   );
 
-  for (const role of roles) {
-    const email = emailTemplate.replace('{{RUN_ID}}', `${role}-${runId}`);
-    try {
-      await runRoleSmoke({
-        role,
-        email,
-        password,
-        firebaseConfig: build.firebaseConfig,
-        androidSigningSha1,
-        adminAccessToken,
-      });
-    } catch (error) {
-      console.error(
-        `[PROD_AUTH_SMOKE] role=${role} FAILED code=${sanitizedApiError(error)}`
+  for (let certIndex = 0; certIndex < androidSigningSha1s.length; certIndex += 1) {
+    const androidSigningSha1 = androidSigningSha1s[certIndex];
+
+    for (const role of roles) {
+      const email = emailTemplate.replace(
+        '{{RUN_ID}}',
+        `cert${certIndex + 1}-${role}-${runId}`
       );
-      process.exitCode = 1;
-      return;
+
+      try {
+        await runRoleSmoke({
+          role,
+          email,
+          password,
+          firebaseConfig: build.firebaseConfig,
+          androidSigningSha1,
+          adminAccessToken,
+          certIndex,
+        });
+      } catch (error) {
+        console.error(
+          `[PROD_AUTH_SMOKE] cert=${certIndex + 1} role=${role}`
+          + ` FAILED code=${sanitizedApiError(error)}`
+        );
+        process.exitCode = 1;
+        return;
+      }
     }
   }
 
-  console.log('[PROD_AUTH_SMOKE] ✅ PROD email/password + Firestore role profiles OK');
+  console.log(
+    `[PROD_AUTH_SMOKE] ✅ PROD Auth + Firestore OK for ${androidSigningSha1s.length}`
+    + ' Google Play signing certificates'
+  );
 }
 
-main().catch((error) => {
-  console.error(`[PROD_AUTH_SMOKE] BLOCKED code=${sanitizedApiError(error)}`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`[PROD_AUTH_SMOKE] BLOCKED code=${sanitizedApiError(error)}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  normalizeSha1,
+  parseSha1Fingerprints,
+  parseExpectedSigningCertCount,
+  assertSafeConfiguration,
+};
