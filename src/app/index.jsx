@@ -149,7 +149,7 @@ export default function Landing() {
 
       <View style={{ gap: 6 }}>
         <Text style={{ fontSize: 26, fontWeight: '800', color: C.brandNavy, lineHeight: 32 }}>
-          Corridas locais em Horizonte
+          Corridas mais acessíveis em Horizonte
         </Text>
         <Text style={{ fontSize: 14, fontWeight: '600', color: C.muted }}>
           Rápido. Local. Pago por Pix.
@@ -176,9 +176,9 @@ export default function Landing() {
 
           {/* Trust chips */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2 }}>
-            <TrustChip label="Motoristas locais" />
-            <TrustChip label="Pix direto" />
-            <TrustChip label="Sem dinheiro" />
+            <TrustChip label="Mais acessível" />
+            <TrustChip label="Exclusivo em Horizonte" />
+            <TrustChip label="Pix direto ao motorista" />
           </View>
         </View>
       </View>
@@ -187,7 +187,7 @@ export default function Landing() {
       <View style={[card, { gap: 12 }]}>
         <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>Sou motorista?</Text>
         <Text style={{ fontSize: 14, color: C.muted, lineHeight: 20 }}>
-          Ganhe corridas locais com menos comissão e mais controle.
+          Ganhe corridas locais com menos comissão da plataforma e receba direto no seu Pix.
         </Text>
 
         {/* Founder offer — visible but calm */}
@@ -205,7 +205,7 @@ export default function Landing() {
             <Text style={{ fontSize: 11.5, fontWeight: '800', color: C.brandNavy }}>Motorista fundador</Text>
           </View>
           <Text style={{ fontSize: 14, fontWeight: '600', color: C.text, lineHeight: 20 }}>
-            0% comissão por 60 dias para os 100 primeiros aprovados.
+            100 primeiros aprovados: 0% de comissão e sem assinatura por 60 dias. A partir do 101º: 0% de comissão por 60 dias e até 5 corridas sem assinatura. Prazo contado a partir da aprovação da plataforma.
           </Text>
         </View>
 
