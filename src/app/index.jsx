@@ -2,9 +2,6 @@
 // Passenger-first: keep the existing Uber-like map/card visual, but organize
 // content as ride-intent first, then a clear motorista entry, then an existing-
 // account login, and finally a discreet internal ("Área interna") link.
-//
-// The passenger ride flow is NOT implemented yet, so the ride CTA shows a clean
-// "Em breve" message instead of navigating into mock ride data.
 // No backend calls here; auth/role routing lives in the auth screens.
 
 import { useState } from 'react';
@@ -118,9 +115,8 @@ export default function Landing() {
   const [origem, setOrigem] = useState('');
   const [destino, setDestino] = useState('');
 
-  // Passenger ride flow (Iteration 3A). Signed-in passengers go straight to the
-  // ride-request form; new passengers create an account first. The typed
-  // origin/destination are forwarded so nothing the passenger wrote is lost.
+  // Signed-in passengers go straight to the ride-request form; new passengers
+  // create an account first. Typed origin/destination are forwarded unchanged.
   function onRequestRide() {
     const signedIn = !!(auth.currentUser && auth.currentUser.uid);
     console.log('[LANDING] ride CTA pressed signedIn=', signedIn);
@@ -149,7 +145,7 @@ export default function Landing() {
 
       <View style={{ gap: 6 }}>
         <Text style={{ fontSize: 26, fontWeight: '800', color: C.brandNavy, lineHeight: 32 }}>
-          Corridas locais em Horizonte
+          Corridas mais acessíveis em Horizonte
         </Text>
         <Text style={{ fontSize: 14, fontWeight: '600', color: C.muted }}>
           Rápido. Local. Pago por Pix.
@@ -174,11 +170,11 @@ export default function Landing() {
 
           <Text style={{ fontSize: 13, color: C.muted }}>Pagamento direto por Pix ao motorista.</Text>
 
-          {/* Trust chips */}
+          {/* Trust chips — wording only; existing layout is unchanged. */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 2 }}>
-            <TrustChip label="Motoristas locais" />
-            <TrustChip label="Pix direto" />
-            <TrustChip label="Sem dinheiro" />
+            <TrustChip label="Corridas mais acessíveis" />
+            <TrustChip label="Exclusivo em Horizonte" />
+            <TrustChip label="Pix direto ao motorista" />
           </View>
         </View>
       </View>
@@ -187,10 +183,10 @@ export default function Landing() {
       <View style={[card, { gap: 12 }]}>
         <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>Sou motorista?</Text>
         <Text style={{ fontSize: 14, color: C.muted, lineHeight: 20 }}>
-          Ganhe corridas locais com menos comissão e mais controle.
+          Ganhe corridas locais com menos comissão da plataforma e receba direto no seu Pix.
         </Text>
 
-        {/* Founder offer — visible but calm */}
+        {/* Commercial-policy wording only; card structure and styling stay unchanged. */}
         <View
           style={{
             backgroundColor: C.softAmber,
@@ -205,7 +201,7 @@ export default function Landing() {
             <Text style={{ fontSize: 11.5, fontWeight: '800', color: C.brandNavy }}>Motorista fundador</Text>
           </View>
           <Text style={{ fontSize: 14, fontWeight: '600', color: C.text, lineHeight: 20 }}>
-            0% comissão por 60 dias para os 100 primeiros aprovados.
+            {'🏅 100 primeiros aprovados:\n0% de comissão da plataforma e sem assinatura por 60 dias, a partir da aprovação da plataforma.\n\n👥 A partir do nº 101:\n0% de comissão da plataforma por 60 dias e até 5 corridas concluídas sem assinatura, a partir da aprovação da plataforma.'}
           </Text>
         </View>
 
