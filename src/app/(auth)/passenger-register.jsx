@@ -12,8 +12,23 @@ import AppButton from '../../components/AppButton';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
+import { auth } from '../../config/firebase';
 import { registerPassenger } from '../../services/authService';
 import { registrationErrorMessage } from '../../utils/authErrorMessage';
+
+function validEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function authTrace(stage, details = {}) {
+  console.log('[AUTH_FLOW]', {
+    scope: 'passenger_registration',
+    stage,
+    projectId: auth?.app?.options?.projectId || 'unknown',
+    atMs: Date.now(),
+    ...details,
+  });
+}
 
 export default function PassengerRegister() {
   const router = useRouter();
@@ -27,19 +42,30 @@ export default function PassengerRegister() {
 
   async function handleRegister() {
     setError('');
+
     if (!fullName.trim() || !whatsApp.trim()) {
       setError('Informe seu nome e WhatsApp.');
       return;
     }
 
+    if (!validEmail(email)) {
+      setError('Informe um e-mail válido.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('A senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
     setLoading(true);
     try {
-      console.log('[AUTH_FLOW] registerPassenger');
+      authTrace('register_started');
       const result = await registerPassenger(email, password, {
         fullName: fullName.trim(),
         whatsApp: whatsApp.trim(),
       });
-      console.log('[AUTH_FLOW] registerPassenger accountState=', result.accountState);
+      authTrace('register_completed', { accountState: result.accountState || 'unknown' });
 
       // New, existing and repaired accounts all continue into the requested ride.
       router.replace({
@@ -50,7 +76,10 @@ export default function PassengerRegister() {
         },
       });
     } catch (e) {
-      console.log('[AUTH_FLOW] passenger register error', e.code || e.message);
+      authTrace('register_failed', {
+        code: e?.code || 'unknown',
+        name: e?.name || 'Error',
+      });
       setError(registrationErrorMessage(e));
     } finally {
       setLoading(false);
