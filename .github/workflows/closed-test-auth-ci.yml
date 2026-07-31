@@ -1,0 +1,51 @@
+name: Closed test auth CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - fix/closed-test-prod-auth-parity
+
+permissions:
+  contents: read
+
+concurrency:
+  group: closed-test-auth-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install application dependencies
+        run: npm ci
+
+      - name: Install Functions dependencies
+        run: npm --prefix functions ci
+
+      - name: Validate release scripts
+        run: |
+          node --check scripts/release/googleServiceAccountAuth.js
+          node --check scripts/release/ensure-prod-email-auth.js
+          node --check scripts/release/prod-auth-smoke.js
+
+      - name: Run application tests
+        run: npm test
+
+      - name: Run Firebase Functions tests
+        run: npm --prefix functions test
+
+      - name: Validate DEV and PROD project mapping
+        run: |
+          npm run validate:env:dev
+          npm run validate:env:prod
