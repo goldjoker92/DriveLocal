@@ -29,7 +29,7 @@ describe('keyboard-safe form contract', () => {
     const appConfig = JSON.parse(read('app.json'));
 
     expect(rootLayout).toContain('KeyboardAvoidingView');
-    expect(rootLayout).toContain("Platform.OS === 'ios' ? 'padding' : undefined");
+    expect(rootLayout).toContain("Platform.OS === 'ios' ? 'padding' : 'height'");
     expect(appConfig.expo.android.softwareKeyboardLayoutMode).toBe('resize');
   });
 
