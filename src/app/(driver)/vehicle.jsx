@@ -18,6 +18,7 @@ import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { getDriver, updateVehicleInfo } from '../../services/driverService';
 import { validatePlate, validateVehicleYear } from '../../utils/validation';
+import { goBackOrReplace } from '../../utils/navigation';
 import { VEHICLE_MOTO, VEHICLE_CAR, VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 
 function FieldHint({ message, tone = 'danger' }) {
@@ -145,9 +146,13 @@ export default function Vehicle() {
     }
   }
 
+  function goBackToProfile() {
+    goBackOrReplace(router, '/(driver)/profile');
+  }
+
   return (
     <KeyboardSafeScreen>
-      <Header title="Seu veículo" subtitle="Etapa 2 de 3" onBack={() => router.back()} />
+      <Header title="Seu veículo" subtitle="Etapa 2 de 3" onBack={goBackToProfile} />
       <AppCard>
         {loading ? (
           <Text style={[{ fontFamily, color: colors.textMuted }, typography.body]}>Carregando...</Text>
@@ -192,7 +197,7 @@ export default function Vehicle() {
               onPress={handleSave}
               disabled={saving}
             />
-            <AppButton title="Voltar" variant="ghost" onPress={() => router.back()} />
+            <AppButton title="Voltar" variant="ghost" onPress={goBackToProfile} />
           </>
         )}
       </AppCard>
