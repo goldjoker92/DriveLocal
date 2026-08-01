@@ -13,16 +13,16 @@ const RIDE_STATUS = Object.freeze({
   awaiting_payment: { label: 'Aguardando Pix', tone: 'warning' },
   payment_marked_sent: { label: 'Pix informado', tone: 'warning' },
   completed: { label: 'Concluída', tone: 'success' },
-  cancelled: { label: 'Cancelada', tone: 'danger' },
-  disputed: { label: 'Em análise', tone: 'warning' },
+  cancelled: { label: 'Cancelada', tone: 'muted' },
+  disputed: { label: 'Em análise', tone: 'danger' },
 });
 
 const PIX_STATUS = Object.freeze({
   not_started: { label: 'Pix ainda não iniciado', tone: 'muted' },
-  awaiting_payment: { label: 'Aguardando pagamento', tone: 'warning' },
-  sent_by_passenger: { label: 'Envio informado', tone: 'warning' },
-  received: { label: 'Pix confirmado', tone: 'success' },
-  disputed: { label: 'Pagamento em análise', tone: 'warning' },
+  awaiting_payment: { label: 'AGUARDANDO PIX', tone: 'warning' },
+  sent_by_passenger: { label: 'CONFIRMAÇÃO PENDENTE', tone: 'warning' },
+  received: { label: '✓ PAGO', tone: 'success' },
+  disputed: { label: 'PAGAMENTO CONTESTADO', tone: 'danger' },
   not_applicable: { label: 'Pix não aplicável', tone: 'muted' },
 });
 
