@@ -2,16 +2,17 @@
 // This is the authenticated dashboard, not the ride form. It keeps active-ride
 // recovery server-driven and sends a new request to the dedicated /request-ride flow.
 
-import { useEffect, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import PassengerActiveRideDashboardCard from '../../components/PassengerActiveRideDashboardCard';
+import PassengerRideHistoryRow from '../../components/PassengerRideHistoryRow';
 import PassengerRideRequestCta from '../../components/PassengerRideRequestCta';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
@@ -20,9 +21,11 @@ import { auth } from '../../config/firebase';
 import { PUBLIC_POLICY_LINKS } from '../../config/publicPolicyLinks';
 import { logoutUser } from '../../services/authService';
 import { listenToPassenger } from '../../services/passengerService';
+import { loadPassengerRideHistoryPage } from '../../services/passengerRideHistoryService';
 import { listenToRide, listenToRideLocation } from '../../services/ridesService';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { getPassengerFirstName } from '../../utils/passengerDashboardPolicy';
+import { normalizePassengerHistoryPage } from '../../utils/passengerRideHistory';
 
 function activeRideRoute(ride) {
   const rideId = ride?.rideId;
@@ -87,6 +90,9 @@ export default function PassengerHome() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [activeRide, setActiveRide] = useState(null);
   const [driverLocation, setDriverLocation] = useState(null);
+  const [recentHistory, setRecentHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState('');
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState('');
 
@@ -172,6 +178,51 @@ export default function PassengerHome() {
       () => setDriverLocation(null)
     );
   }, [activeRideId]);
+
+  const loadRecentHistory = useCallback(async ({ silent = false } = {}) => {
+    if (!auth.currentUser?.uid) return;
+
+    if (!silent) setHistoryLoading(true);
+    const startedAt = Date.now();
+    logRideClientEvent('ride.passenger_home.recent_history_started', {
+      route: '/passenger-home',
+      action: 'getPassengerRideHistorySecure',
+    });
+
+    try {
+      const snapshot = await loadPassengerRideHistoryPage({ limit: 3 });
+      const page = normalizePassengerHistoryPage(snapshot);
+      setRecentHistory(page.items.slice(0, 3));
+      setHistoryError('');
+      logRideClientEvent('ride.passenger_home.recent_history_succeeded', {
+        route: '/passenger-home',
+        action: 'getPassengerRideHistorySecure',
+        itemCount: page.items.length,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (loadError) {
+      setHistoryError('Não foi possível carregar suas últimas corridas.');
+      logRideClientEvent('ride.passenger_home.recent_history_failed', {
+        route: '/passenger-home',
+        action: 'getPassengerRideHistorySecure',
+        durationMs: Date.now() - startedAt,
+        error: loadError,
+      }, 'error');
+    } finally {
+      if (!silent) setHistoryLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadRecentHistory();
+    }, [loadRecentHistory])
+  );
+
+  useEffect(() => {
+    if (activeRide?.status !== 'completed') return;
+    loadRecentHistory({ silent: true });
+  }, [activeRide?.status, loadRecentHistory]);
 
   function navigate(route, action) {
     setError('');
@@ -355,6 +406,41 @@ export default function PassengerHome() {
           />
         )}
 
+        <AppCard style={styles.recentRidesCard}>
+          <Text style={styles.sectionLabel}>ÚLTIMAS CORRIDAS</Text>
+
+          {historyLoading ? (
+            <Text style={styles.mutedText}>Carregando suas últimas corridas…</Text>
+          ) : historyError ? (
+            <View style={styles.recentRidesError}>
+              <Text style={styles.errorText}>{historyError}</Text>
+              <AppButton
+                title="TENTAR NOVAMENTE"
+                variant="ghost"
+                haptic="selection"
+                onPress={() => loadRecentHistory()}
+              />
+            </View>
+          ) : recentHistory.length > 0 ? (
+            <View style={styles.recentRidesList}>
+              {recentHistory.map((item) => (
+                <PassengerRideHistoryRow key={item.rideId} item={item} compact />
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.mutedText}>
+              Suas primeiras corridas aparecerão aqui com trajeto, motorista, valor e pagamento.
+            </Text>
+          )}
+
+          <AppButton
+            title="VER HISTÓRICO COMPLETO"
+            variant="ghost"
+            haptic="selection"
+            onPress={() => navigate('/passenger-ride-history', 'open_full_history_from_recent')}
+          />
+        </AppCard>
+
         <DashboardSection title="MINHA CONTA">
           <DashboardRow
             label="Meus dados"
@@ -436,6 +522,15 @@ const styles = StyleSheet.create({
     fontFamily,
     color: colors.text,
     ...typography.bodyBold,
+  },
+  recentRidesCard: {
+    gap: spacing.md,
+  },
+  recentRidesList: {
+    gap: spacing.sm,
+  },
+  recentRidesError: {
+    gap: spacing.sm,
   },
   sectionCard: {
     gap: 0,
