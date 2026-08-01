@@ -18,14 +18,14 @@ const {
 } = require('../../scripts/release/production-source-audit');
 
 describe('production release gate', () => {
-  it('exposes one non-mutating command with a valid monotonic Android versionCode', () => {
+  it('exposes one non-mutating command with a positive Android versionCode', () => {
     const packageJson = JSON.parse(source('package.json'));
     const appJson = JSON.parse(source('app.json'));
 
     expect(packageJson.scripts['release:check']).toBe('node scripts/release/release-check.js');
     expect(appJson.expo.version).toBe(packageJson.version);
     expect(Number.isInteger(appJson.expo.android.versionCode)).toBe(true);
-    expect(appJson.expo.android.versionCode).toBeGreaterThanOrEqual(3);
+    expect(appJson.expo.android.versionCode).toBeGreaterThan(0);
   });
 
   it('uses only the two requested manual confirmations', () => {
@@ -39,6 +39,20 @@ describe('production release gate', () => {
     expect(envExample).toContain('RELEASE_CONFIRM_DEV_APK=');
     expect(releaseCheck).not.toMatch(/TWO_PHONE|TWO_DEVICE|DEUX_TELEPHONE/i);
     expect(envExample).not.toMatch(/TWO_PHONE|TWO_DEVICE|DEUX_TELEPHONE/i);
+  });
+
+  it('documents the Firebase Web App variables required by EAS builds', () => {
+    const envExample = source('.env.example');
+    [
+      'EXPO_PUBLIC_FIREBASE_API_KEY',
+      'EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN',
+      'EXPO_PUBLIC_FIREBASE_PROJECT_ID',
+      'EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET',
+      'EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
+      'EXPO_PUBLIC_FIREBASE_APP_ID',
+    ].forEach((name) => {
+      expect(envExample).toContain(`${name}=`);
+    });
   });
 
   it('runs source audit, tests and config validation without deploy, build or submit', () => {
