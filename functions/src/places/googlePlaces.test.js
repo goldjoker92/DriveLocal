@@ -94,6 +94,11 @@ describe('Google Places server adapter', () => {
   });
 
   test('fails closed when the secret is missing', () => {
-    expect(() => createGooglePlacesAdapter({ apiKey: '' })).toThrow('CONFIGURATION_MISSING');
+    try {
+      createGooglePlacesAdapter({ apiKey: '' });
+      throw new Error('expected missing secret rejection');
+    } catch (error) {
+      expect(error.code).toBe('CONFIGURATION_MISSING');
+    }
   });
 });
