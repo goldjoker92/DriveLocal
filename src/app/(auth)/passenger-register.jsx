@@ -14,6 +14,7 @@ import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { registerPassenger } from '../../services/authService';
 import { registrationErrorMessage } from '../../utils/authErrorMessage';
+import { goBackOrReplace } from '../../utils/navigation';
 
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
@@ -92,7 +93,7 @@ export default function PassengerRegister() {
       <Header
         title="Criar conta de passageiro"
         subtitle="Peça corridas locais em Horizonte"
-        onBack={() => router.back()}
+        onBack={() => goBackOrReplace(router, '/')}
       />
       <AppCard>
         <AppInput
