@@ -1,6 +1,9 @@
 const appJson = require('./app.json');
 const { loadFirebaseBuildConfig } = require('./scripts/build/firebaseBuildConfig');
 const { loadPublicPolicyConfig } = require('./scripts/build/publicPolicyConfig');
+const {
+  ensureDriverArrivalNotificationSound,
+} = require('./scripts/build/ensureNotificationSounds');
 
 function writeConfigDiagnostic(message) {
   // Expo/EAS commands may evaluate app.config.js through a child process whose
@@ -10,6 +13,9 @@ function writeConfigDiagnostic(message) {
 }
 
 const expoConfig = appJson.expo ?? {};
+const driverArrivalNotificationSound = ensureDriverArrivalNotificationSound({
+  cwd: __dirname,
+});
 const packageName = expoConfig.android?.package || 'com.drivelocal.app';
 const firebaseBuild = loadFirebaseBuildConfig({
   env: process.env,
@@ -71,7 +77,8 @@ writeConfigDiagnostic(
   `[app.config] Firebase androidProject=${androidFirebaseProjectId} `
   + `webProject=${firebaseProjectId} environment=${appEnvironment} `
   + `source=${firebaseConfigSource} webValidated=${firebaseWebConfigValidated} `
-  + `easBuild=${easBuildActive} publicPolicyConfigured=${publicPolicy.configured}`
+  + `easBuild=${easBuildActive} publicPolicyConfigured=${publicPolicy.configured} `
+  + 'driverArrivalSoundConfigured=true'
 );
 
 const devRideSimulatorEnabled = appEnvironment === 'development'
@@ -132,6 +139,7 @@ module.exports = ({ config }) => ({
         defaultChannel: 'drivelocal-ride-status',
         icon: './assets/images/notification-icon.png',
         color: '#2563EB',
+        sounds: [driverArrivalNotificationSound],
       },
     ],
 
