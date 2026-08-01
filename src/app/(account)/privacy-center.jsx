@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { Alert, Linking, ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRef, useState } from 'react';
+import { Alert, Linking, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
@@ -16,6 +16,7 @@ import {
   requestAccountDeletion,
 } from '../../services/accountDeletionService';
 import { logoutUser } from '../../services/authService';
+import { goBackOrReplace } from '../../utils/navigation';
 
 function Copy({ children, tone = 'muted' }) {
   const color = tone === 'danger'
@@ -45,6 +46,7 @@ async function openPublicLink(url, label, setError) {
 
 export default function PrivacyCenter() {
   const router = useRouter();
+  const passwordRef = useRef(null);
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -104,91 +106,97 @@ export default function PrivacyCenter() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header
-          title="Privacidade e conta"
-          subtitle="Seus dados e seus controles"
-          onBack={() => router.back()}
+    <KeyboardSafeScreen
+      scrollViewProps={{ contentContainerStyle: { paddingBottom: spacing.xxl * 2 } }}
+    >
+      <Header
+        title="Privacidade e conta"
+        subtitle="Seus dados e seus controles"
+        onBack={() => goBackOrReplace(router, '/')}
+      />
+
+      <AppCard>
+        <SectionTitle>SEUS DIREITOS E INFORMAÇÕES</SectionTitle>
+        <Copy>
+          Consulte como o DriveLocal utiliza localização, identidade, documentos, pagamentos e dados das corridas.
+        </Copy>
+        <Copy>
+          Você pode solicitar acesso, correção, informação sobre compartilhamento e exclusão ou anonimização quando aplicável.
+        </Copy>
+        <AppButton
+          title="POLÍTICA DE PRIVACIDADE"
+          variant="secondary"
+          onPress={() => openPublicLink(PUBLIC_POLICY_LINKS.privacyPolicyUrl, 'Política de privacidade', setError)}
+        />
+        <AppButton
+          title="TERMOS DE USO"
+          variant="ghost"
+          onPress={() => openPublicLink(PUBLIC_POLICY_LINKS.termsOfUseUrl, 'Termos de uso', setError)}
+        />
+        <AppButton
+          title="EXCLUSÃO FORA DO APLICATIVO"
+          variant="ghost"
+          onPress={() => openPublicLink(PUBLIC_POLICY_LINKS.accountDeletionWebUrl, 'Página de exclusão de conta', setError)}
+        />
+      </AppCard>
+
+      <AppCard>
+        <SectionTitle>EXCLUIR MINHA CONTA</SectionTitle>
+        <Copy tone="text">
+          Você não pode excluir a conta durante uma corrida ativa ou enquanto uma disputa estiver aberta.
+        </Copy>
+        <Copy>
+          Fotos, documentos, tokens de notificação, dados de perfil e outros dados pessoais diretos serão removidos. Corridas e registros financeiros indispensáveis serão minimizados e desvinculados da sua identidade.
+        </Copy>
+
+        <View
+          style={{
+            backgroundColor: colors.dangerBg,
+            borderColor: colors.danger,
+            borderWidth: 1,
+            borderRadius: radius.md,
+            padding: spacing.md,
+            gap: spacing.xs,
+          }}
+        >
+          <Text style={[{ fontFamily, color: colors.danger }, typography.bodyBold]}>
+            Esta ação não pode ser desfeita.
+          </Text>
+          <Copy tone="text">Digite EXCLUIR e confirme sua senha atual.</Copy>
+        </View>
+
+        <AppInput
+          label="Confirmação"
+          value={confirmation}
+          onChangeText={setConfirmation}
+          placeholder="EXCLUIR"
+          autoCapitalize="characters"
+          editable={!submitting}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => passwordRef.current?.focus()}
+        />
+        <AppInput
+          ref={passwordRef}
+          label="Senha atual"
+          value={password}
+          onChangeText={setPassword}
+          placeholder="••••••••"
+          secureTextEntry
+          editable={!submitting}
+          returnKeyType="done"
+          onSubmitEditing={confirmDeletion}
         />
 
-        <AppCard>
-          <SectionTitle>SEUS DIREITOS E INFORMAÇÕES</SectionTitle>
-          <Copy>
-            Consulte como o DriveLocal utiliza localização, identidade, documentos, pagamentos e dados das corridas.
-          </Copy>
-          <Copy>
-            Você pode solicitar acesso, correção, informação sobre compartilhamento e exclusão ou anonimização quando aplicável.
-          </Copy>
-          <AppButton
-            title="POLÍTICA DE PRIVACIDADE"
-            variant="secondary"
-            onPress={() => openPublicLink(PUBLIC_POLICY_LINKS.privacyPolicyUrl, 'Política de privacidade', setError)}
-          />
-          <AppButton
-            title="TERMOS DE USO"
-            variant="ghost"
-            onPress={() => openPublicLink(PUBLIC_POLICY_LINKS.termsOfUseUrl, 'Termos de uso', setError)}
-          />
-          <AppButton
-            title="EXCLUSÃO FORA DO APLICATIVO"
-            variant="ghost"
-            onPress={() => openPublicLink(PUBLIC_POLICY_LINKS.accountDeletionWebUrl, 'Página de exclusão de conta', setError)}
-          />
-        </AppCard>
+        <AppButton
+          title={submitting ? 'REGISTRANDO EXCLUSÃO…' : 'EXCLUIR MINHA CONTA'}
+          onPress={confirmDeletion}
+          disabled={submitting || !confirmationValid || !password.trim()}
+          style={{ backgroundColor: colors.danger }}
+        />
+      </AppCard>
 
-        <AppCard>
-          <SectionTitle>EXCLUIR MINHA CONTA</SectionTitle>
-          <Copy tone="text">
-            Você não pode excluir a conta durante uma corrida ativa ou enquanto uma disputa estiver aberta.
-          </Copy>
-          <Copy>
-            Fotos, documentos, tokens de notificação, dados de perfil e outros dados pessoais diretos serão removidos. Corridas e registros financeiros indispensáveis serão minimizados e desvinculados da sua identidade.
-          </Copy>
-
-          <View
-            style={{
-              backgroundColor: colors.dangerBg,
-              borderColor: colors.danger,
-              borderWidth: 1,
-              borderRadius: radius.md,
-              padding: spacing.md,
-              gap: spacing.xs,
-            }}
-          >
-            <Text style={[{ fontFamily, color: colors.danger }, typography.bodyBold]}>
-              Esta ação não pode ser desfeita.
-            </Text>
-            <Copy tone="text">Digite EXCLUIR e confirme sua senha atual.</Copy>
-          </View>
-
-          <AppInput
-            label="Confirmação"
-            value={confirmation}
-            onChangeText={setConfirmation}
-            placeholder="EXCLUIR"
-            autoCapitalize="characters"
-            editable={!submitting}
-          />
-          <AppInput
-            label="Senha atual"
-            value={password}
-            onChangeText={setPassword}
-            placeholder="••••••••"
-            secureTextEntry
-            editable={!submitting}
-          />
-
-          <AppButton
-            title={submitting ? 'REGISTRANDO EXCLUSÃO…' : 'EXCLUIR MINHA CONTA'}
-            onPress={confirmDeletion}
-            disabled={submitting || !confirmationValid || !password.trim()}
-            style={{ backgroundColor: colors.danger }}
-          />
-        </AppCard>
-
-        {error ? <Copy tone="danger">{error}</Copy> : null}
-      </ScrollView>
-    </SafeAreaView>
+      {error ? <Copy tone="danger">{error}</Copy> : null}
+    </KeyboardSafeScreen>
   );
 }
