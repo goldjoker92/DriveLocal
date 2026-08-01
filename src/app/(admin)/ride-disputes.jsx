@@ -4,20 +4,21 @@
 // the secure callable resolveRideDisputeSecure — never a client status write.
 // Firestore is the source of truth; reads are admin-gated and bounded.
 
-import { useEffect, useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRef, useState, useEffect } from 'react';
+import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import AdminTableRow from '../../components/AdminTableRow';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { fontFamily, typography } from '../../constants/typography';
 import { formatBRL } from '../../utils/format';
 import { showConfirmAlert } from '../../utils/alertUtils';
+import { goBackOrReplace } from '../../utils/navigation';
 import { getRideById, listDisputedRides, resolveRideDispute } from '../../services/adminService';
 
 // Never expose a full uid in the admin UI.
@@ -31,6 +32,8 @@ const OUTCOMES = [
 
 export default function RideDisputes() {
   const router = useRouter();
+  const reasonRef = useRef(null);
+  const noteRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [list, setList] = useState([]);
   const [rideIdInput, setRideIdInput] = useState('');
@@ -103,61 +106,89 @@ export default function RideDisputes() {
   const canResolve = selected && selected.status === 'disputed';
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Disputas de corrida" onBack={() => router.back()} />
+    <KeyboardSafeScreen
+      scrollViewProps={{ contentContainerStyle: { paddingBottom: spacing.xxl * 2 } }}
+    >
+      <Header
+        title="Disputas de corrida"
+        onBack={() => goBackOrReplace(router, '/(admin)/admin-home')}
+      />
 
+      <AppCard>
+        <AppInput
+          label="Buscar por ID da corrida"
+          value={rideIdInput}
+          onChangeText={setRideIdInput}
+          placeholder="rideId"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          onSubmitEditing={handleSearch}
+        />
+        <AppButton title="Buscar" variant="secondary" onPress={handleSearch} />
+      </AppCard>
+
+      {error ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text> : null}
+      {success ? <Text style={[{ fontFamily, color: colors.success }, typography.small]}>{success}</Text> : null}
+
+      {selected ? (
         <AppCard>
-          <AppInput label="Buscar por ID da corrida" value={rideIdInput} onChangeText={setRideIdInput} placeholder="rideId" />
-          <AppButton title="Buscar" variant="secondary" onPress={handleSearch} />
-        </AppCard>
+          <AdminTableRow label="Corrida" value={mask(selected.rideId)} />
+          <AdminTableRow label="Status" value={selected.status || '—'} />
+          <AdminTableRow label="Passageiro" value={mask(selected.passengerId)} />
+          <AdminTableRow label="Motorista" value={mask(selected.acceptedDriverId)} />
+          <AdminTableRow label="Valor" value={formatBRL(selected.finalFareCentavos || selected.estimatedFareCentavos || 0)} />
+          <AdminTableRow label="Reserva (hold)" value={formatBRL(selected.commissionHoldCentavos || 0)} />
+          <AdminTableRow label="Comissão capturada" value={formatBRL(selected.commissionCapturedCentavos || 0)} />
+          <AdminTableRow label="Motivo disputa" value={selected.disputeReasonCode || '—'} />
+          {selected.disputeResolution ? (
+            <AdminTableRow label="Resolução" value={selected.disputeResolution.outcome} />
+          ) : null}
 
-        {error ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text> : null}
-        {success ? <Text style={[{ fontFamily, color: colors.success }, typography.small]}>{success}</Text> : null}
-
-        {selected ? (
-          <AppCard>
-            <AdminTableRow label="Corrida" value={mask(selected.rideId)} />
-            <AdminTableRow label="Status" value={selected.status || '—'} />
-            <AdminTableRow label="Passageiro" value={mask(selected.passengerId)} />
-            <AdminTableRow label="Motorista" value={mask(selected.acceptedDriverId)} />
-            <AdminTableRow label="Valor" value={formatBRL(selected.finalFareCentavos || selected.estimatedFareCentavos || 0)} />
-            <AdminTableRow label="Reserva (hold)" value={formatBRL(selected.commissionHoldCentavos || 0)} />
-            <AdminTableRow label="Comissão capturada" value={formatBRL(selected.commissionCapturedCentavos || 0)} />
-            <AdminTableRow label="Motivo disputa" value={selected.disputeReasonCode || '—'} />
-            {selected.disputeResolution ? (
-              <AdminTableRow label="Resolução" value={selected.disputeResolution.outcome} />
-            ) : null}
-
-            {canResolve ? (
-              <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
-                <AppInput label="Motivo (obrigatório)" value={reason} onChangeText={setReason} placeholder="Motivo da resolução" />
-                <AppInput label="Nota (opcional)" value={note} onChangeText={setNote} placeholder="Observação do admin" />
-                {OUTCOMES.map((o) => (
-                  <AppButton key={o.key} title={submitting ? 'Processando…' : o.title} variant={o.variant} onPress={() => handleResolve(o.key)} disabled={submitting} />
-                ))}
-              </View>
-            ) : (
-              <Text style={[{ fontFamily, color: colors.textMuted, marginTop: spacing.sm }, typography.small]}>
-                Esta corrida não está em disputa aberta.
-              </Text>
-            )}
-          </AppCard>
-        ) : null}
-
-        <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Disputas abertas</Text>
-        <AppCard>
-          {loading ? (
-            <AdminTableRow label="Carregando…" />
-          ) : list.length === 0 ? (
-            <AdminTableRow label="Nenhuma disputa aberta" />
+          {canResolve ? (
+            <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+              <AppInput
+                ref={reasonRef}
+                label="Motivo (obrigatório)"
+                value={reason}
+                onChangeText={setReason}
+                placeholder="Motivo da resolução"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => noteRef.current?.focus()}
+              />
+              <AppInput
+                ref={noteRef}
+                label="Nota (opcional)"
+                value={note}
+                onChangeText={setNote}
+                placeholder="Observação do admin"
+                returnKeyType="done"
+              />
+              {OUTCOMES.map((o) => (
+                <AppButton key={o.key} title={submitting ? 'Processando…' : o.title} variant={o.variant} onPress={() => handleResolve(o.key)} disabled={submitting} />
+              ))}
+            </View>
           ) : (
-            list.map((r) => (
-              <AdminTableRow key={r.rideId} label={`${mask(r.rideId)} — ${formatBRL(r.finalFareCentavos || r.estimatedFareCentavos || 0)}`} right={<AppButton title="Abrir" variant="ghost" onPress={() => { setSelected(r); setError(''); setSuccess(''); }} />} />
-            ))
+            <Text style={[{ fontFamily, color: colors.textMuted, marginTop: spacing.sm }, typography.small]}>
+              Esta corrida não está em disputa aberta.
+            </Text>
           )}
         </AppCard>
-      </ScrollView>
-    </SafeAreaView>
+      ) : null}
+
+      <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Disputas abertas</Text>
+      <AppCard>
+        {loading ? (
+          <AdminTableRow label="Carregando…" />
+        ) : list.length === 0 ? (
+          <AdminTableRow label="Nenhuma disputa aberta" />
+        ) : (
+          list.map((r) => (
+            <AdminTableRow key={r.rideId} label={`${mask(r.rideId)} — ${formatBRL(r.finalFareCentavos || r.estimatedFareCentavos || 0)}`} right={<AppButton title="Abrir" variant="ghost" onPress={() => { setSelected(r); setError(''); setSuccess(''); }} />} />
+          ))
+        )}
+      </AppCard>
+    </KeyboardSafeScreen>
   );
 }
