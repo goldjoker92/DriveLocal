@@ -60,7 +60,7 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(request).toContain("pathname: '/searching'");
   });
 
-  it('provides account, history, legal links and safe sign-out', () => {
+  it('keeps account data, privacy and safe sign-out together in Meus dados', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
     const profile = source('src/app/(passenger)/passenger-profile.jsx');
     const runtimeLinks = source('src/config/publicPolicyLinks.js');
@@ -69,19 +69,21 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(home).toContain('MINHA CONTA');
     expect(home).toContain('Meus dados');
     expect(home).toContain("navigate('/passenger-profile', 'open_profile')");
-    expect(home).toContain('Histórico de corridas');
-    expect(home).toContain("navigate('/passenger-ride-history', 'open_history')");
     expect(home).toContain('AJUDA E INFORMAÇÕES');
     expect(home).toContain("params: { source: 'passenger_home' }");
     expect(home).toContain('Política de Privacidade');
     expect(home).toContain('Termos de Uso');
     expect(home).toContain('Excluir conta e dados');
     expect(home).toContain("router.push('/privacy-center')");
-    expect(home).toContain('await logoutUser()');
-    expect(home).toContain('SAIR DA CONTA');
+    expect(home).not.toContain('await logoutUser()');
+    expect(home).not.toContain('SAIR DA CONTA');
 
     expect(profile).toContain('getPassenger(uid)');
     expect(profile).toContain('Cidade de atendimento');
+    expect(profile).toContain('await logoutUser()');
+    expect(profile).toContain('SAIR DA CONTA');
+    expect(profile).toContain('Corrida em andamento');
+    expect(profile).toContain('haptic="warning"');
     expect(profile).not.toContain('updateDoc(');
     expect(profile).not.toContain('setDoc(');
 
@@ -106,7 +108,7 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(button).toContain("haptic = 'light'");
     expect(button).toContain('pressScale = true');
     expect(home).toContain('haptic="medium"');
-    expect(home).toContain('haptic="warning"');
+    expect(home).toContain('haptic="selection"');
     expect(rideCta).toContain('AnimatedPressable');
     expect(rideCta).toContain('Haptics.ImpactFeedbackStyle.Medium');
     expect(request).toContain('<AppButton');
@@ -118,11 +120,19 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(logger).toContain('route: safeString(fields.route, 96)');
   });
 
-  it('loads the paginated full history from the authenticated backend service', () => {
+  it('loads three recent rides on focus and keeps the full paginated history', () => {
+    const home = source('src/app/(passenger)/passenger-home.jsx');
     const screen = source('src/app/(passenger)/passenger-ride-history.jsx');
     const service = source('src/services/passengerRideHistoryService.js');
     const row = source('src/components/PassengerRideHistoryRow.jsx');
+    const presentation = source('src/utils/passengerRideHistory.js');
 
+    expect(home).toContain('useFocusEffect(');
+    expect(home).toContain('loadPassengerRideHistoryPage({ limit: 3 })');
+    expect(home).toContain('page.items.slice(0, 3)');
+    expect(home).toContain('ÚLTIMAS CORRIDAS');
+    expect(home).toContain('VER HISTÓRICO COMPLETO');
+    expect(home).toContain('onPress={() => navigate');
     expect(screen).toContain('loadPassengerRideHistoryPage({ limit: 20 })');
     expect(screen).toContain('CARREGAR MAIS CORRIDAS');
     expect(row).toContain('item.driverFirstName');
@@ -132,6 +142,10 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(row).toContain('item.amountLabel');
     expect(row).toContain('item.rideStatusLabel');
     expect(row).toContain('item.pixStatusLabel');
+    expect(row).toContain('accessibilityRole="button"');
+    expect(presentation).toContain("received: { label: '✓ PAGO', tone: 'success' }");
+    expect(presentation).toContain("disputed: { label: 'PAGAMENTO CONTESTADO', tone: 'danger' }");
+    expect(presentation).toContain("cancelled: { label: 'Cancelada', tone: 'muted' }");
     expect(service).toContain("httpsCallable(functions, 'getPassengerRideHistorySecure')");
     expect(service).not.toContain("collection(db, 'rideRequests'");
     expect(screen).not.toContain("collection(db, 'rideRequests'");
