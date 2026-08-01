@@ -9,19 +9,20 @@
 // (react-native-maps is not installed). A free-text field without RESOLVED
 // coordinates cannot continue — coordinates are never invented from text.
 
-import { useState } from 'react';
-import { ScrollView, View, Text } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRef, useState } from 'react';
+import { View, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { getCurrentLocationWithAddress, resolveAddressToCoords } from '../../services/locationService';
+import { goBackOrReplace } from '../../utils/navigation';
 
 // Map selection is not implemented yet (react-native-maps absent), so the
 // fallback must not promise map adjustment.
@@ -30,6 +31,7 @@ const GPS_DENIED_MSG =
 
 export default function SelectRoute() {
   const router = useRouter();
+  const destinationRef = useRef(null);
   const [vehicleType, setVehicleType] = useState('moto');
 
   const [pickupText, setPickupText] = useState('');
@@ -45,8 +47,6 @@ export default function SelectRoute() {
     const res = await getCurrentLocationWithAddress();
     setBusy('');
     if (res.status !== 'ok') {
-      // Permission denied / lookup error: keep address search available; do not
-      // re-prompt automatically.
       setNotice(GPS_DENIED_MSG);
       return;
     }
@@ -72,7 +72,6 @@ export default function SelectRoute() {
     else setDestination(point);
   }
 
-  // A request is allowed only when BOTH endpoints have RESOLVED coordinates.
   const canContinue = !!pickup && !!destination;
 
   function goToPrice() {
@@ -92,63 +91,72 @@ export default function SelectRoute() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Para onde vamos?" onBack={() => router.back()} />
+    <KeyboardSafeScreen
+      scrollViewProps={{ contentContainerStyle: { paddingBottom: spacing.xxl * 2 } }}
+    >
+      <Header
+        title="Para onde vamos?"
+        onBack={() => goBackOrReplace(router, '/passenger-home')}
+      />
 
-        <AppCard>
-          <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Veículo</Text>
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            {['moto', 'car'].map((v) => (
-              <AppButton
-                key={v}
-                title={VEHICLE_LABELS_PT_BR[v]}
-                variant={vehicleType === v ? 'primary' : 'ghost'}
-                onPress={() => setVehicleType(v)}
-              />
-            ))}
-          </View>
-        </AppCard>
+      <AppCard>
+        <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>Veículo</Text>
+        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+          {['moto', 'car'].map((v) => (
+            <AppButton
+              key={v}
+              title={VEHICLE_LABELS_PT_BR[v]}
+              variant={vehicleType === v ? 'primary' : 'ghost'}
+              onPress={() => setVehicleType(v)}
+            />
+          ))}
+        </View>
+      </AppCard>
 
-        <AppCard>
-          <AppInput
-            label="Origem"
-            value={pickupText}
-            onChangeText={(t) => { setPickupText(t); setPickup(null); }}
-            placeholder="Endereço de partida"
-          />
-          <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-            <AppButton title="Usar minha localização" onPress={useMyLocation} disabled={busy === 'gps'} />
-            <AppButton title={busy === 'pickup' ? 'Buscando…' : 'Buscar'} variant="ghost" onPress={() => resolve('pickup')} />
-          </View>
-          {pickup ? (
-            <Text style={[{ fontFamily, color: colors.success || colors.textMuted }, typography.caption]}>
-              Origem confirmada: {pickup.label}
-            </Text>
-          ) : null}
-        </AppCard>
-
-        <AppCard>
-          <AppInput
-            label="Destino"
-            value={destText}
-            onChangeText={(t) => { setDestText(t); setDestination(null); }}
-            placeholder="Endereço de destino"
-          />
-          <AppButton title={busy === 'destination' ? 'Buscando…' : 'Buscar'} variant="ghost" onPress={() => resolve('destination')} />
-          {destination ? (
-            <Text style={[{ fontFamily, color: colors.success || colors.textMuted }, typography.caption]}>
-              Destino confirmado: {destination.label}
-            </Text>
-          ) : null}
-        </AppCard>
-
-        {notice ? (
-          <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{notice}</Text>
+      <AppCard>
+        <AppInput
+          label="Origem"
+          value={pickupText}
+          onChangeText={(t) => { setPickupText(t); setPickup(null); }}
+          placeholder="Endereço de partida"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => destinationRef.current?.focus()}
+        />
+        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+          <AppButton title="Usar minha localização" onPress={useMyLocation} disabled={busy === 'gps'} />
+          <AppButton title={busy === 'pickup' ? 'Buscando…' : 'Buscar'} variant="ghost" onPress={() => resolve('pickup')} />
+        </View>
+        {pickup ? (
+          <Text style={[{ fontFamily, color: colors.success || colors.textMuted }, typography.caption]}>
+            Origem confirmada: {pickup.label}
+          </Text>
         ) : null}
+      </AppCard>
 
-        <AppButton title="Ver preço" onPress={goToPrice} disabled={!canContinue} />
-      </ScrollView>
-    </SafeAreaView>
+      <AppCard>
+        <AppInput
+          ref={destinationRef}
+          label="Destino"
+          value={destText}
+          onChangeText={(t) => { setDestText(t); setDestination(null); }}
+          placeholder="Endereço de destino"
+          returnKeyType="search"
+          onSubmitEditing={() => resolve('destination')}
+        />
+        <AppButton title={busy === 'destination' ? 'Buscando…' : 'Buscar'} variant="ghost" onPress={() => resolve('destination')} />
+        {destination ? (
+          <Text style={[{ fontFamily, color: colors.success || colors.textMuted }, typography.caption]}>
+            Destino confirmado: {destination.label}
+          </Text>
+        ) : null}
+      </AppCard>
+
+      {notice ? (
+        <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{notice}</Text>
+      ) : null}
+
+      <AppButton title="Ver preço" onPress={goToPrice} disabled={!canContinue} />
+    </KeyboardSafeScreen>
   );
 }
