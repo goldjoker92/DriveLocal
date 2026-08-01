@@ -424,7 +424,12 @@ export default function PassengerHome() {
           ) : recentHistory.length > 0 ? (
             <View style={styles.recentRidesList}>
               {recentHistory.map((item) => (
-                <PassengerRideHistoryRow key={item.rideId} item={item} compact />
+                <PassengerRideHistoryRow
+                  key={item.rideId}
+                  item={item}
+                  compact
+                  onPress={() => navigate('/passenger-ride-history', 'open_recent_ride')}
+                />
               ))}
             </View>
           ) : (
