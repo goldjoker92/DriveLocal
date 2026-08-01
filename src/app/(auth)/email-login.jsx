@@ -1,17 +1,16 @@
 // Email login shared by admin, driver and passenger entry points.
 // Existing accounts reconnect normally and are redirected by their stored role.
 
-import { useState } from 'react';
-import { ScrollView, Text } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRef, useState } from 'react';
+import { Text } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { useLocationDisclosure } from '../../contexts/LocationDisclosureContext';
 import { colors } from '../../constants/colors';
-import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { loginUser, logoutUser } from '../../services/authService';
 import { requestPasswordReset } from '../../services/passwordResetService';
@@ -29,6 +28,7 @@ export default function EmailLogin() {
   const redirectDriver = useDriverRedirect();
   const { requestLocationDisclosure } = useLocationDisclosure();
   const params = useLocalSearchParams();
+  const passwordRef = useRef(null);
 
   const isInternal = params.intent === 'internal';
   const roleIntent = typeof params.roleIntent === 'string' ? params.roleIntent : null;
@@ -99,9 +99,6 @@ export default function EmailLogin() {
         return;
       }
 
-      // Google Play prominent disclosure: the custom DriveLocal modal is shown
-      // before Android's native location request. Passenger asks foreground only;
-      // an approved driver asks foreground + background for dispatch and tracking.
       await runPostLoginLocationFlow(result);
 
       if (result.role === 'admin') {
@@ -170,58 +167,66 @@ export default function EmailLogin() {
   const busy = loading || resetLoading;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header
-          title={isInternal ? 'Área interna' : 'Entrar com e-mail'}
-          subtitle={isInternal ? 'Acesso reservado à equipe DriveLocal' : undefined}
-          onBack={() => router.back()}
+    <KeyboardSafeScreen>
+      <Header
+        title={isInternal ? 'Área interna' : 'Entrar com e-mail'}
+        subtitle={isInternal ? 'Acesso reservado à equipe DriveLocal' : undefined}
+        onBack={() => router.back()}
+      />
+      <AppCard>
+        <AppInput
+          label="E-mail"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="voce@email.com"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => passwordRef.current?.focus()}
         />
-        <AppCard>
-          <AppInput
-            label="E-mail"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="voce@email.com"
-            keyboardType="email-address"
-          />
-          <AppInput
-            label="Senha"
-            value={password}
-            onChangeText={setPassword}
-            placeholder="••••••••"
-            secureTextEntry
-          />
-          {error ? (
-            <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
-          ) : null}
-          {info ? (
-            <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{info}</Text>
-          ) : null}
+        <AppInput
+          ref={passwordRef}
+          label="Senha"
+          value={password}
+          onChangeText={setPassword}
+          placeholder="••••••••"
+          secureTextEntry
+          textContentType="password"
+          returnKeyType="done"
+          onSubmitEditing={handleLogin}
+        />
+        {error ? (
+          <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
+        ) : null}
+        {info ? (
+          <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>{info}</Text>
+        ) : null}
+        <AppButton
+          title={loading ? 'Entrando...' : 'Entrar'}
+          onPress={handleLogin}
+          disabled={busy}
+        />
+      </AppCard>
+
+      {!isInternal ? (
+        <>
           <AppButton
-            title={loading ? 'Entrando...' : 'Entrar'}
-            onPress={handleLogin}
+            title={resetLoading ? 'Enviando...' : 'Esqueci minha senha'}
+            variant="ghost"
+            onPress={handlePasswordReset}
             disabled={busy}
           />
-        </AppCard>
-
-        {!isInternal ? (
-          <>
-            <AppButton
-              title={resetLoading ? 'Enviando...' : 'Esqueci minha senha'}
-              variant="ghost"
-              onPress={handlePasswordReset}
-              disabled={busy}
-            />
-            <AppButton
-              title={passengerIntent ? 'Criar conta de passageiro' : 'Criar cadastro de motorista'}
-              variant="ghost"
-              onPress={openRegistration}
-              disabled={busy}
-            />
-          </>
-        ) : null}
-      </ScrollView>
-    </SafeAreaView>
+          <AppButton
+            title={passengerIntent ? 'Criar conta de passageiro' : 'Criar cadastro de motorista'}
+            variant="ghost"
+            onPress={openRegistration}
+            disabled={busy}
+          />
+        </>
+      ) : null}
+    </KeyboardSafeScreen>
   );
 }
