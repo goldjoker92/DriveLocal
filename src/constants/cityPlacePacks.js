@@ -53,6 +53,15 @@ const HORIZONTE_PLACES = Object.freeze([
     priority: 74,
   },
   {
+    id: 'comercio-centro-horizonte',
+    category: 'comercio',
+    label: 'Comércio do Centro de Horizonte',
+    secondaryLabel: 'Av. Presidente Castelo Branco · Centro',
+    queryText: 'Avenida Presidente Castelo Branco, Centro, Horizonte, Ceará, Brasil',
+    aliases: ['comercio', 'lojas', 'bancos', 'centro comercial', 'compras no centro'],
+    priority: 82,
+  },
+  {
     id: 'bairro-centro',
     category: 'bairro',
     label: 'Centro de Horizonte',
