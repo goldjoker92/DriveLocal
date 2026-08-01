@@ -17,6 +17,7 @@ import { requestPasswordReset } from '../../services/passwordResetService';
 import { useDriverRedirect } from '../../hooks/useDriverRedirect';
 import { showAppAlert } from '../../utils/alertUtils';
 import { loginErrorMessage } from '../../utils/authErrorMessage';
+import { goBackOrReplace } from '../../utils/navigation';
 
 function shouldRequestLocationAtLogin(result) {
   if (result?.role === 'passenger') return true;
@@ -171,7 +172,7 @@ export default function EmailLogin() {
       <Header
         title={isInternal ? 'Área interna' : 'Entrar com e-mail'}
         subtitle={isInternal ? 'Acesso reservado à equipe DriveLocal' : undefined}
-        onBack={() => router.back()}
+        onBack={() => goBackOrReplace(router, '/')}
       />
       <AppCard>
         <AppInput
