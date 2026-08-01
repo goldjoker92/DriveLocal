@@ -14,6 +14,7 @@
       "package": "com.drivelocal.app",
       "googleServicesFile": "./google-services.json",
       "versionCode": 3,
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
