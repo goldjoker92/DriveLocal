@@ -16,6 +16,7 @@ jest.mock('react-native', () => ({
 
 jest.mock('expo-notifications', () => ({
   AndroidImportance: { MAX: 5, HIGH: 4 },
+  AndroidNotificationVisibility: { PUBLIC: 1 },
   setNotificationChannelAsync: jest.fn(async () => undefined),
   getPermissionsAsync: jest.fn(),
   requestPermissionsAsync: jest.fn(),
@@ -32,6 +33,12 @@ const AsyncStorage = require('@react-native-async-storage/async-storage');
 const Notifications = require('expo-notifications');
 const { httpsCallable } = require('firebase/functions');
 const {
+  DRIVER_ARRIVAL_VIBRATION_PATTERN,
+  NOTIFICATION_CHANNELS,
+  NOTIFICATION_SOUNDS,
+} = require('../../constants/notificationChannels');
+const {
+  ensureAndroidChannels,
   getPushNotificationDiagnosticState,
   registerForPushNotifications,
 } = require('../notificationsService');
@@ -63,6 +70,23 @@ describe('notification readiness diagnostics', () => {
       type: 'fcm',
       data: 'SECRET_FCM_TOKEN_MUST_NOT_BE_PERSISTED',
     });
+  });
+
+  it('creates a dedicated MAX arrival channel with independent sound and vibration', async () => {
+    await ensureAndroidChannels();
+
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledTimes(3);
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+      NOTIFICATION_CHANNELS.DRIVER_ARRIVAL,
+      expect.objectContaining({
+        name: 'Motorista chegou',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: NOTIFICATION_SOUNDS.DRIVER_ARRIVAL,
+        vibrationPattern: [...DRIVER_ARRIVAL_VIBRATION_PATTERN],
+        enableVibrate: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      }),
+    );
   });
 
   it('persists only a safe registration receipt, never the FCM token', async () => {

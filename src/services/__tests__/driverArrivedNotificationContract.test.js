@@ -31,14 +31,19 @@ describe('driver arrived notification product contract', () => {
     expect(test).toContain('status: C.NOTIFICATION_STATUS.SENT');
   });
 
-  it('uses the exact high-priority Android push copy and the safe passenger route', () => {
+  it('uses the dedicated strong Android arrival alert and the safe passenger route', () => {
     const processor = source('functions/src/notifications/processEvent.js');
+    const constants = source('functions/src/rides/constants.js');
     const navigation = source('src/utils/notificationNavigation.js');
 
-    expect(processor).toContain("title: 'Motorista chegou'");
-    expect(processor).toContain("body: 'Seu motorista chegou ao local de embarque.'");
+    expect(processor).toContain("title: '🚗 Seu motorista chegou!'");
+    expect(processor).toContain("body: 'Ele está esperando no local de embarque.'");
     expect(processor).toContain("priority: 'high'");
-    expect(processor).toContain('C.NOTIFICATION_CHANNELS.RIDE_STATUS');
+    expect(processor).toContain('C.NOTIFICATION_CHANNELS.DRIVER_ARRIVAL');
+    expect(processor).toContain('C.NOTIFICATION_SOUNDS.DRIVER_ARRIVAL');
+    expect(processor).toContain('C.DRIVER_ARRIVAL_VIBRATION_PATTERN');
+    expect(constants).toContain("DRIVER_ARRIVAL: 'drivelocal-driver-arrival-v1'");
+    expect(constants).toContain("DRIVER_ARRIVAL: 'drivelocal_driver_arrived.wav'");
     expect(navigation).toContain("'/driver-accepted'");
     expect(navigation).toContain('ROUTES_REQUIRING_RIDE_ID');
   });
@@ -53,7 +58,10 @@ describe('driver arrived notification product contract', () => {
     expect(hook).toContain('addNotificationResponseReceivedListener');
     expect(hook).toContain('getLastNotificationResponseAsync');
     expect(hook).toContain('pendingTarget.current');
-    expect(notificationService).toContain('Notifications.AndroidImportance.HIGH');
+    expect(notificationService).toContain('Notifications.AndroidImportance.MAX');
+    expect(notificationService).toContain('NOTIFICATION_CHANNELS.DRIVER_ARRIVAL');
+    expect(notificationService).toContain('NOTIFICATION_SOUNDS.DRIVER_ARRIVAL');
+    expect(notificationService).toContain('DRIVER_ARRIVAL_VIBRATION_PATTERN');
     expect(notificationService).toContain('getDevicePushTokenAsync');
   });
 

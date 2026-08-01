@@ -28,8 +28,8 @@ const PRESENTATION = Object.freeze({
     body: 'Seu motorista está a caminho do embarque.',
   },
   [C.NOTIFICATION_EVENT.RIDE_ARRIVED]: {
-    title: 'Motorista chegou',
-    body: 'Seu motorista chegou ao local de embarque.',
+    title: '🚗 Seu motorista chegou!',
+    body: 'Ele está esperando no local de embarque.',
   },
   [C.NOTIFICATION_EVENT.RIDE_STARTED]: {
     title: 'Corrida iniciada',
@@ -92,11 +92,40 @@ function safeCollapseKey(event) {
     .slice(0, 64);
 }
 
+function androidNotificationForEvent(event) {
+  const isOffer = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED;
+  const isDriverArrival = event.eventType === C.NOTIFICATION_EVENT.RIDE_ARRIVED;
+  const channelId = isDriverArrival
+    ? C.NOTIFICATION_CHANNELS.DRIVER_ARRIVAL
+    : isOffer
+      ? C.NOTIFICATION_CHANNELS.RIDE_OFFERS
+      : C.NOTIFICATION_CHANNELS.RIDE_STATUS;
+
+  const common = {
+    channelId,
+    tag: safeAndroidTag(event),
+  };
+
+  if (!isDriverArrival) {
+    return {
+      ...common,
+      sound: 'default',
+      defaultVibrateTimings: true,
+    };
+  }
+
+  return {
+    ...common,
+    sound: C.NOTIFICATION_SOUNDS.DRIVER_ARRIVAL,
+    defaultVibrateTimings: false,
+    vibrateTimingsMillis: [...C.DRIVER_ARRIVAL_VIBRATION_PATTERN],
+    priority: 'max',
+    visibility: 'public',
+  };
+}
+
 function buildMulticastMessage(event, tokens) {
   const presentation = presentationForEvent(event);
-  const channelId = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED
-    ? C.NOTIFICATION_CHANNELS.RIDE_OFFERS
-    : C.NOTIFICATION_CHANNELS.RIDE_STATUS;
 
   return {
     tokens,
@@ -106,12 +135,7 @@ function buildMulticastMessage(event, tokens) {
       priority: 'high',
       ttl: 10 * 60 * 1000,
       collapseKey: safeCollapseKey(event),
-      notification: {
-        channelId,
-        sound: 'default',
-        defaultVibrateTimings: true,
-        tag: safeAndroidTag(event),
-      },
+      notification: androidNotificationForEvent(event),
     },
   };
 }
@@ -146,8 +170,7 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
       attemptCount: (event.attemptCount || 0) + 1,
     }, { merge: true });
     logWarning(context, 'notification.failed', {
-      operation: 'notify',
-      notificationId: event.notificationId,
+      operation: 'notify', notificationId: event.notificationId,
       reasonCode: 'no_active_tokens',
     });
     return { status: C.NOTIFICATION_STATUS.FAILED, successCount: 0, failureCount: 0 };
@@ -206,6 +229,7 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
 module.exports = {
   processRideNotificationEvent,
   buildMulticastMessage,
+  androidNotificationForEvent,
   presentationForEvent,
   dataPayload,
   safeAndroidTag,

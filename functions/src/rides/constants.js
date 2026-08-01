@@ -39,7 +39,21 @@ module.exports = Object.freeze({
   NOTIFICATION_CHANNELS: Object.freeze({
     RIDE_OFFERS: 'drivelocal-ride-offers',
     RIDE_STATUS: 'drivelocal-ride-status',
+    DRIVER_ARRIVAL: 'drivelocal-driver-arrival-v1',
   }),
+
+  NOTIFICATION_SOUNDS: Object.freeze({
+    DRIVER_ARRIVAL: 'drivelocal_driver_arrived.wav',
+  }),
+
+  DRIVER_ARRIVAL_VIBRATION_PATTERN: Object.freeze([
+    0,
+    400,
+    150,
+    650,
+    150,
+    400,
+  ]),
 
   NOTIFICATION_EVENT: Object.freeze({
     OFFER_CREATED: 'offer_created',
