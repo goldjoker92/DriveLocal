@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
@@ -11,9 +11,9 @@ function statusColor(tone) {
   return colors.textMuted;
 }
 
-export default function PassengerRideHistoryRow({ item, compact = false }) {
+function RowContent({ item, compact }) {
   return (
-    <View style={[styles.card, compact && styles.compactCard]}>
+    <>
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text style={styles.driverName}>{item.driverFirstName}</Text>
@@ -40,7 +40,30 @@ export default function PassengerRideHistoryRow({ item, compact = false }) {
           {item.pixStatusLabel}
         </Text>
       </View>
-    </View>
+    </>
+  );
+}
+
+export default function PassengerRideHistoryRow({ item, compact = false, onPress = null }) {
+  const cardStyle = [styles.card, compact && styles.compactCard];
+
+  if (!onPress) {
+    return (
+      <View style={cardStyle}>
+        <RowContent item={item} compact={compact} />
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Corrida com ${item.driverFirstName}, ${item.dateLabel}`}
+      onPress={onPress}
+      style={({ pressed }) => [cardStyle, pressed && styles.cardPressed]}
+    >
+      <RowContent item={item} compact={compact} />
+    </Pressable>
   );
 }
 
@@ -54,6 +77,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   compactCard: { padding: spacing.sm },
+  cardPressed: { opacity: 0.72 },
   header: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
   headerCopy: { flex: 1, gap: 2 },
   driverName: { fontFamily, color: colors.text, ...typography.bodyBold },

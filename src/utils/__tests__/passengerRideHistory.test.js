@@ -7,7 +7,7 @@ import {
 } from '../passengerRideHistory';
 
 describe('passenger ride history presentation', () => {
-  it('normalizes a completed ride with real driver and payment copy', () => {
+  it('normalizes a completed ride with real driver and confirmed payment copy', () => {
     const item = normalizePassengerHistoryItem({
       rideId: 'ride_001',
       createdAtMs: new Date('2026-07-27T12:00:00.000Z').getTime(),
@@ -30,7 +30,8 @@ describe('passenger ride history presentation', () => {
       amountLabel: 'R$ 12,50',
       amountDetail: 'valor final',
       rideStatusLabel: 'Concluída',
-      pixStatusLabel: 'Pix confirmado',
+      pixStatusLabel: '✓ PAGO',
+      pixStatusTone: 'success',
     });
   });
 
@@ -53,6 +54,31 @@ describe('passenger ride history presentation', () => {
       amountDetail: null,
       rideStatusLabel: 'Nenhum motorista disponível',
       pixStatusLabel: 'Pix ainda não iniciado',
+    });
+  });
+
+  it('keeps cancelled neutral and disputed payment visibly critical', () => {
+    expect(normalizePassengerHistoryItem({
+      rideId: 'ride_cancelled',
+      createdAtMs: 1000,
+      rideStatus: 'cancelled',
+      pixStatus: 'not_applicable',
+    })).toMatchObject({
+      rideStatusLabel: 'Cancelada',
+      rideStatusTone: 'muted',
+      pixStatusTone: 'muted',
+    });
+
+    expect(normalizePassengerHistoryItem({
+      rideId: 'ride_disputed',
+      createdAtMs: 2000,
+      rideStatus: 'disputed',
+      pixStatus: 'disputed',
+    })).toMatchObject({
+      rideStatusLabel: 'Em análise',
+      rideStatusTone: 'danger',
+      pixStatusLabel: 'PAGAMENTO CONTESTADO',
+      pixStatusTone: 'danger',
     });
   });
 
