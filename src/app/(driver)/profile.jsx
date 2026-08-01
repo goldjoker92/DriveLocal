@@ -18,6 +18,7 @@ import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { getDriver, updateDriverProfile } from '../../services/driverService';
 import { validateCPF } from '../../utils/validation';
+import { goBackOrReplace } from '../../utils/navigation';
 
 const PIX_KEY_TYPES = ['CPF', 'Telefone', 'E-mail', 'Chave aleatória'];
 
@@ -149,7 +150,11 @@ export default function Profile() {
 
   return (
     <KeyboardSafeScreen>
-      <Header title="Seu perfil" subtitle="Etapa 1 de 3" onBack={() => router.back()} />
+      <Header
+        title="Seu perfil"
+        subtitle="Etapa 1 de 3"
+        onBack={() => goBackOrReplace(router, '/(driver)/onboarding')}
+      />
       <AppCard>
         {loading ? (
           <Text style={[{ fontFamily, color: colors.textMuted }, typography.body]}>Carregando...</Text>
