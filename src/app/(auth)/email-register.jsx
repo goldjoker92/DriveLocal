@@ -14,6 +14,7 @@ import { typography, fontFamily } from '../../constants/typography';
 import { registerDriver } from '../../services/authService';
 import { useDriverRedirect } from '../../hooks/useDriverRedirect';
 import { registrationErrorMessage } from '../../utils/authErrorMessage';
+import { goBackOrReplace } from '../../utils/navigation';
 
 export default function EmailRegister() {
   const router = useRouter();
@@ -49,7 +50,7 @@ export default function EmailRegister() {
 
   return (
     <KeyboardSafeScreen>
-      <Header title="Criar conta" onBack={() => router.back()} />
+      <Header title="Criar conta" onBack={() => goBackOrReplace(router, '/')} />
       <AppCard>
         <AppInput
           label="E-mail"
