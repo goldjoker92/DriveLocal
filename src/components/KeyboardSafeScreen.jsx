@@ -1,8 +1,9 @@
 // Shared form screen wrapper.
-// Keeps focused fields and actions reachable while the software keyboard is open.
+// RootLayout handles the keyboard viewport globally. This wrapper adds the
+// scroll, focus-tap and bottom-spacing behavior required by long forms.
 
 import { forwardRef } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { Platform, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
 import { spacing } from '../constants/spacing';
@@ -13,7 +14,6 @@ const KeyboardSafeScreen = forwardRef(function KeyboardSafeScreen(
     contentContainerStyle,
     style,
     edges = ['top', 'bottom'],
-    keyboardVerticalOffset = 0,
     backgroundColor = colors.background,
     scrollViewProps = {},
   },
@@ -31,32 +31,27 @@ const KeyboardSafeScreen = forwardRef(function KeyboardSafeScreen(
       style={[{ flex: 1, backgroundColor }, style]}
       edges={edges}
     >
-      <KeyboardAvoidingView
+      <ScrollView
+        ref={ref}
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={keyboardVerticalOffset}
+        keyboardShouldPersistTaps={keyboardShouldPersistTaps}
+        keyboardDismissMode={keyboardDismissMode}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[
+          {
+            padding: spacing.lg,
+            paddingBottom: spacing.xxl,
+            gap: spacing.md,
+            flexGrow: 1,
+          },
+          contentContainerStyle,
+          scrollContentContainerStyle,
+        ]}
+        {...restScrollViewProps}
       >
-        <ScrollView
-          ref={ref}
-          keyboardShouldPersistTaps={keyboardShouldPersistTaps}
-          keyboardDismissMode={keyboardDismissMode}
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-          contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={[
-            {
-              padding: spacing.lg,
-              paddingBottom: spacing.xxl,
-              gap: spacing.md,
-              flexGrow: 1,
-            },
-            contentContainerStyle,
-            scrollContentContainerStyle,
-          ]}
-          {...restScrollViewProps}
-        >
-          {children}
-        </ScrollView>
-      </KeyboardAvoidingView>
+        {children}
+      </ScrollView>
     </SafeAreaView>
   );
 });
