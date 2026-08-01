@@ -29,19 +29,19 @@ function arrivedEvent(overrides = {}) {
 describe('driver arrived passenger notification', () => {
   it('uses the exact passenger-facing arrival copy', () => {
     expect(presentationForEvent(arrivedEvent())).toEqual({
-      title: 'Motorista chegou',
-      body: 'Seu motorista chegou ao local de embarque.',
+      title: '🚗 Seu motorista chegou!',
+      body: 'Ele está esperando no local de embarque.',
     });
   });
 
-  it('uses the high-priority ride-status Android channel and safe route data', () => {
+  it('uses the dedicated strong Android arrival channel and safe route data', () => {
     const message = buildMulticastMessage(arrivedEvent(), ['token-1']);
 
     expect(message).toMatchObject({
       tokens: ['token-1'],
       notification: {
-        title: 'Motorista chegou',
-        body: 'Seu motorista chegou ao local de embarque.',
+        title: '🚗 Seu motorista chegou!',
+        body: 'Ele está esperando no local de embarque.',
       },
       data: {
         notificationId: 'ride-1_ride_arrived_passenger',
@@ -53,9 +53,12 @@ describe('driver arrived passenger notification', () => {
       android: {
         priority: 'high',
         notification: {
-          channelId: C.NOTIFICATION_CHANNELS.RIDE_STATUS,
-          sound: 'default',
-          defaultVibrateTimings: true,
+          channelId: C.NOTIFICATION_CHANNELS.DRIVER_ARRIVAL,
+          sound: C.NOTIFICATION_SOUNDS.DRIVER_ARRIVAL,
+          defaultVibrateTimings: false,
+          vibrateTimingsMillis: [...C.DRIVER_ARRIVAL_VIBRATION_PATTERN],
+          priority: 'max',
+          visibility: 'public',
         },
       },
     });
