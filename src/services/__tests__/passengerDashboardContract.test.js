@@ -82,6 +82,9 @@ describe('authenticated passenger dashboard and history contract', () => {
 
     expect(profile).toContain('getPassenger(uid)');
     expect(profile).toContain('Cidade de atendimento');
+    expect(profile).toContain('await logoutUser()');
+    expect(profile).toContain('SAIR DA CONTA');
+    expect(profile).toContain('Finalize ou cancele a corrida antes de sair da conta.');
     expect(profile).not.toContain('updateDoc(');
     expect(profile).not.toContain('setDoc(');
 
@@ -118,10 +121,22 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(logger).toContain('route: safeString(fields.route, 96)');
   });
 
-  it('loads the paginated full history from the authenticated backend service', () => {
+  it('loads the three recent rides on home and the paginated full history from the authenticated backend service', () => {
+    const home = source('src/app/(passenger)/passenger-home.jsx');
     const screen = source('src/app/(passenger)/passenger-ride-history.jsx');
     const service = source('src/services/passengerRideHistoryService.js');
     const row = source('src/components/PassengerRideHistoryRow.jsx');
+
+    expect(home).toContain('useFocusEffect(');
+    expect(home).toContain('loadPassengerRideHistoryPage({ limit: 3 })');
+    expect(home).toContain('normalizePassengerHistoryPage(snapshot)');
+    expect(home).toContain('page.items.slice(0, 3)');
+    expect(home).toContain('ÚLTIMAS CORRIDAS');
+    expect(home).toContain('VER HISTÓRICO COMPLETO');
+    expect(home).toContain('<PassengerRideHistoryRow');
+    expect(home).toContain("onPress={() => navigate('/passenger-ride-history', 'open_recent_ride')}");
+    expect(home).toContain("activeRide?.status !== 'completed'");
+    expect(home).toContain("navigate('/passenger-ride-history', 'open_full_history_from_recent')");
 
     expect(screen).toContain('loadPassengerRideHistoryPage({ limit: 20 })');
     expect(screen).toContain('CARREGAR MAIS CORRIDAS');
@@ -132,9 +147,13 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(row).toContain('item.amountLabel');
     expect(row).toContain('item.rideStatusLabel');
     expect(row).toContain('item.pixStatusLabel');
+    expect(row).toContain("item.pixStatus === 'received'");
+    expect(row).toContain('✓ PAGO');
+    expect(row).toContain('disabled={!onPress}');
     expect(service).toContain("httpsCallable(functions, 'getPassengerRideHistorySecure')");
     expect(service).not.toContain("collection(db, 'rideRequests'");
     expect(screen).not.toContain("collection(db, 'rideRequests'");
+    expect(home).not.toContain("collection(db, 'rideRequests'");
   });
 
   it('exports a closed authenticated backend history and its required index', () => {

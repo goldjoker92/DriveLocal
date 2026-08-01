@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
@@ -11,9 +11,23 @@ function statusColor(tone) {
   return colors.textMuted;
 }
 
-export default function PassengerRideHistoryRow({ item, compact = false }) {
+export default function PassengerRideHistoryRow({ item, compact = false, onPress = null }) {
+  const pixStatusLabel = compact && item.pixStatus === 'received'
+    ? '✓ PAGO'
+    : item.pixStatusLabel;
+
   return (
-    <View style={[styles.card, compact && styles.compactCard]}>
+    <Pressable
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? `Abrir corrida de ${item.dateLabel}` : undefined}
+      onPress={onPress || undefined}
+      style={({ pressed }) => [
+        styles.card,
+        compact && styles.compactCard,
+        pressed && onPress && styles.cardPressed,
+      ]}
+    >
       <View style={styles.header}>
         <View style={styles.headerCopy}>
           <Text style={styles.driverName}>{item.driverFirstName}</Text>
@@ -37,10 +51,10 @@ export default function PassengerRideHistoryRow({ item, compact = false }) {
           {item.rideStatusLabel}
         </Text>
         <Text style={[styles.status, { color: statusColor(item.pixStatusTone) }]}>
-          {item.pixStatusLabel}
+          {pixStatusLabel}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -54,6 +68,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   compactCard: { padding: spacing.sm },
+  cardPressed: { opacity: 0.68 },
   header: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
   headerCopy: { flex: 1, gap: 2 },
   driverName: { fontFamily, color: colors.text, ...typography.bodyBold },
