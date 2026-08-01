@@ -190,23 +190,47 @@ export default function Landing() {
           Ganhe corridas locais com menos comissão da plataforma e receba direto no seu Pix.
         </Text>
 
-        {/* Founder offer — visible but calm */}
+        {/* Founder offer — same wording, friendlier visual rhythm */}
         <View
           style={{
             backgroundColor: C.softAmber,
             borderRadius: 18,
             borderWidth: 1,
             borderColor: '#F6E0B5',
-            padding: 14,
-            gap: 8,
+            paddingHorizontal: 14,
+            paddingVertical: 13,
+            gap: 10,
           }}
         >
-          <View style={{ alignSelf: 'flex-start', backgroundColor: C.amber, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 }}>
-            <Text style={{ fontSize: 11.5, fontWeight: '800', color: C.brandNavy }}>Motorista fundador</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ fontSize: 16 }}>⭐</Text>
+            <View style={{ backgroundColor: C.amber, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 }}>
+              <Text style={{ fontSize: 11.5, fontWeight: '800', color: C.brandNavy }}>Motorista fundador</Text>
+            </View>
           </View>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: C.text, lineHeight: 20 }}>
-            100 primeiros aprovados: 0% de comissão e sem assinatura por 60 dias. A partir do 101º: 0% de comissão por 60 dias e até 5 corridas sem assinatura. Prazo contado a partir da aprovação da plataforma.
-          </Text>
+
+          <View style={{ gap: 7 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
+              <Text style={{ fontSize: 15, lineHeight: 19 }}>🏆</Text>
+              <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
+                100 primeiros aprovados: 0% de comissão e sem assinatura por 60 dias.
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
+              <Text style={{ fontSize: 15, lineHeight: 19 }}>🚗</Text>
+              <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
+                A partir do 101º: 0% de comissão por 60 dias e até 5 corridas sem assinatura.
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
+              <Text style={{ fontSize: 15, lineHeight: 19 }}>⏱️</Text>
+              <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
+                Prazo contado a partir da aprovação da plataforma.
+              </Text>
+            </View>
+          </View>
         </View>
 
         <CtaButton
