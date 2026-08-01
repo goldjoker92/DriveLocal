@@ -12,13 +12,13 @@
 // mock participates in the request decision.
 
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, View, Text, Pressable } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, Pressable } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import LocationActionButton from '../../components/LocationActionButton';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
@@ -32,6 +32,7 @@ import {
 import { requestRide } from '../../services/ridesService';
 import { showAppAlert } from '../../utils/alertUtils';
 import { logRideClientEvent } from '../../utils/clientRideLog';
+import { goBackOrReplace } from '../../utils/navigation';
 import { VEHICLE_TYPES, VEHICLE_LABELS_PT_BR, VEHICLE_MOTO } from '../../constants/vehicleTypes';
 
 const OUT_OF_AREA_MSG =
@@ -96,6 +97,8 @@ export default function RequestRide() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const idempotencyKeyRef = useRef(null);
+  const originReferenceRef = useRef(null);
+  const destinationRef = useRef(null);
 
   const [passenger, setPassenger] = useState(null);
 
@@ -146,6 +149,14 @@ export default function RequestRide() {
     // A new input combination must receive a new idempotency key. Network retries
     // without input changes keep the existing key and cannot create duplicates.
     idempotencyKeyRef.current = null;
+  }
+
+  function openPassengerProfile() {
+    logRideClientEvent('ride.request.profile_selected', {
+      route: '/passenger-profile',
+      action: 'router.push',
+    });
+    router.push('/passenger-profile');
   }
 
   async function handleUseMyLocation() {
@@ -347,97 +358,121 @@ export default function RequestRide() {
     createSecureRide();
   }
 
-  function goBackSafely() {
-    if (router.canGoBack()) router.back();
-    else router.replace('/passenger-home');
-  }
-
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header
-          title="Pedir corrida"
-          subtitle="Embarque e destino em Horizonte / CE"
-          onBack={goBackSafely}
-        />
-
-        <AppCard>
-          <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Origem</Text>
-          <LocationActionButton
-            loading={loadingLocation}
-            found={gpsFound}
-            onPress={handleUseMyLocation}
-            disabled={submitting}
-          />
-          {gpsFound ? (
-            <Text style={[{ fontFamily, color: colors.success }, typography.small]}>
-              Localização encontrada. Confira o endereço antes de pedir a corrida.
+    <KeyboardSafeScreen
+      scrollViewProps={{
+        contentContainerStyle: { paddingBottom: spacing.xxl * 2 },
+      }}
+    >
+      <Header
+        title="Pedir corrida"
+        subtitle="Embarque e destino em Horizonte / CE"
+        onBack={() => goBackOrReplace(router, '/passenger-home')}
+        right={
+          <Pressable
+            onPress={openPassengerProfile}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Abrir meu perfil"
+            style={{
+              minHeight: 44,
+              paddingHorizontal: spacing.sm,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={[{ fontFamily, color: colors.primary }, typography.bodyBold]}>
+              👤 Perfil
             </Text>
-          ) : null}
-          <AppInput
-            label="Rua, bairro ou ponto de referência"
-            value={originText}
-            onChangeText={(text) => {
-              setOriginText(text);
-              setOriginSource('manual');
-              setOriginLat(null);
-              setOriginLng(null);
-              setGpsFound(false);
-              resetRequestAttempt();
-            }}
-            placeholder="Ex: Rua José de Alencar, Centro"
-          />
-          <AppInput
-            label="Complemento / referência"
-            value={originReferenceText}
-            onChangeText={(text) => {
-              setOriginReferenceText(text);
-              resetRequestAttempt();
-            }}
-            placeholder="Ex: em frente à farmácia, portão azul"
-          />
-        </AppCard>
+          </Pressable>
+        }
+      />
 
-        <AppCard>
-          <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Destino</Text>
-          <AppInput
-            label="Para onde você vai?"
-            value={destinationText}
-            onChangeText={(text) => {
-              setDestinationText(text);
-              resetRequestAttempt();
-            }}
-            placeholder="Ex: Rua Presidente Castelo Branco, Centro"
-          />
-        </AppCard>
-
-        <AppCard>
-          <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Tipo de veículo</Text>
-          <View style={{ marginTop: spacing.sm }}>
-            <VehiclePicker
-              value={vehicleType}
-              onChange={(type) => {
-                setVehicleType(type);
-                resetRequestAttempt();
-              }}
-            />
-          </View>
-        </AppCard>
-
-        {error ? (
-          <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
-        ) : null}
-
-        <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
-          O preço é calculado pelo servidor antes da busca. Pagamento direto por Pix ao motorista.
-        </Text>
-
-        <AppButton
-          title={submitting ? 'Calculando preço e buscando...' : 'Pedir corrida'}
-          onPress={validateAndSubmit}
-          disabled={submitting || !passenger}
+      <AppCard>
+        <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Origem</Text>
+        <LocationActionButton
+          loading={loadingLocation}
+          found={gpsFound}
+          onPress={handleUseMyLocation}
+          disabled={submitting}
         />
-      </ScrollView>
-    </SafeAreaView>
+        {gpsFound ? (
+          <Text style={[{ fontFamily, color: colors.success }, typography.small]}>
+            Localização encontrada. Confira o endereço antes de pedir a corrida.
+          </Text>
+        ) : null}
+        <AppInput
+          label="Rua, bairro ou ponto de referência"
+          value={originText}
+          onChangeText={(text) => {
+            setOriginText(text);
+            setOriginSource('manual');
+            setOriginLat(null);
+            setOriginLng(null);
+            setGpsFound(false);
+            resetRequestAttempt();
+          }}
+          placeholder="Ex: Rua José de Alencar, Centro"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => originReferenceRef.current?.focus()}
+        />
+        <AppInput
+          ref={originReferenceRef}
+          label="Complemento / referência"
+          value={originReferenceText}
+          onChangeText={(text) => {
+            setOriginReferenceText(text);
+            resetRequestAttempt();
+          }}
+          placeholder="Ex: em frente à farmácia, portão azul"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => destinationRef.current?.focus()}
+        />
+      </AppCard>
+
+      <AppCard>
+        <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Destino</Text>
+        <AppInput
+          ref={destinationRef}
+          label="Para onde você vai?"
+          value={destinationText}
+          onChangeText={(text) => {
+            setDestinationText(text);
+            resetRequestAttempt();
+          }}
+          placeholder="Ex: Rua Presidente Castelo Branco, Centro"
+          returnKeyType="done"
+        />
+      </AppCard>
+
+      <AppCard>
+        <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Tipo de veículo</Text>
+        <View style={{ marginTop: spacing.sm }}>
+          <VehiclePicker
+            value={vehicleType}
+            onChange={(type) => {
+              setVehicleType(type);
+              resetRequestAttempt();
+            }}
+          />
+        </View>
+      </AppCard>
+
+      {error ? (
+        <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
+      ) : null}
+
+      <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+        O preço é calculado pelo servidor antes da busca. Pagamento direto por Pix ao motorista.
+      </Text>
+
+      <AppButton
+        title={submitting ? 'Calculando preço e buscando...' : 'Pedir corrida'}
+        onPress={validateAndSubmit}
+        disabled={submitting || !passenger}
+      />
+    </KeyboardSafeScreen>
   );
 }
