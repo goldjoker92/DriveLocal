@@ -179,7 +179,7 @@ export default function RootLayout() {
             <StatusBar style="dark" />
             <KeyboardAvoidingView
               style={{ flex: 1, backgroundColor: colors.background }}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             >
               {/* Never replays actions automatically; restores only an existing ride. */}
               <NetworkRecoveryGuard route={pathname} />
