@@ -21,8 +21,10 @@ const {
   appEnvironment,
   easBuildActive,
   expectedProjectId,
+  androidFirebaseProjectId,
   firebaseConfig,
   firebaseProjectId,
+  firebaseWebConfigValidated,
   googleServicesFile,
   source: firebaseConfigSource,
 } = firebaseBuild;
@@ -45,12 +47,11 @@ if (!googleMapsAndroidApiKey) {
   writeConfigDiagnostic(message);
 }
 
-if (!easBuildActive && firebaseProjectId !== expectedProjectId) {
-  // Local commands intentionally remain usable with the checked-in DEV file even
-  // when APP_ENV is absent and UI behavior fails closed to production. EAS builds
-  // can never use this exception; scripts/build/firebaseBuildConfig.js blocks it.
+if (!easBuildActive && androidFirebaseProjectId !== expectedProjectId) {
+  // Local commands intentionally remain usable with the checked-in DEV Android
+  // file when APP_ENV is absent. EAS builds can never use this exception.
   writeConfigDiagnostic(
-    `[app.config] Local Firebase fallback selected ${firebaseProjectId} while `
+    `[app.config] Local Firebase Android fallback selected ${androidFirebaseProjectId} while `
     + `APP_ENV resolves to ${appEnvironment}. EAS builds remain strict.`
   );
 }
@@ -64,12 +65,13 @@ if (!publicPolicy.configured) {
   );
 }
 
-// Safe build trace: project identifiers and boolean configuration states only.
+// Safe build trace: public project identifiers and boolean states only.
 // Never log API keys, app IDs, policy URLs, file contents or secret-file paths.
 writeConfigDiagnostic(
-  `[app.config] Firebase project=${firebaseProjectId} environment=${appEnvironment} `
-  + `source=${firebaseConfigSource} easBuild=${easBuildActive} `
-  + `publicPolicyConfigured=${publicPolicy.configured}`
+  `[app.config] Firebase androidProject=${androidFirebaseProjectId} `
+  + `webProject=${firebaseProjectId} environment=${appEnvironment} `
+  + `source=${firebaseConfigSource} webValidated=${firebaseWebConfigValidated} `
+  + `easBuild=${easBuildActive} publicPolicyConfigured=${publicPolicy.configured}`
 );
 
 const devRideSimulatorEnabled = appEnvironment === 'development'
@@ -150,8 +152,8 @@ module.exports = ({ config }) => ({
 
   android: {
     ...(expoConfig.android ?? {}),
-    // The exact same file is parsed above to configure the Firebase JS SDK.
-    // This prevents native Firebase and JS Firebase from targeting different projects.
+    // Native Android Firebase always uses the Android application file.
+    // Firebase JS receives the separately validated Web App config below.
     googleServicesFile,
   },
 
@@ -161,10 +163,11 @@ module.exports = ({ config }) => ({
     appEnvironment,
     devRideSimulatorEnabled,
     easBuildActive,
-    firebaseBuildValidated: true,
-    firebaseConfig,
+    firebaseBuildValidated: !easBuildActive || firebaseWebConfigValidated,
+    ...(firebaseConfig ? { firebaseConfig } : {}),
     firebaseProjectId,
     firebaseConfigSource,
+    firebaseWebConfigValidated,
     publicPolicyConfigured: publicPolicy.configured,
     publicPolicyLinks: publicPolicy.links,
   },
