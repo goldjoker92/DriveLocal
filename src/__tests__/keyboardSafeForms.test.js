@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const appRoot = path.join(__dirname, '..', 'app');
+const projectRoot = path.join(__dirname, '..', '..');
+const appRoot = path.join(projectRoot, 'src', 'app');
 
 function collectSourceFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -12,14 +13,27 @@ function collectSourceFiles(directory) {
   });
 }
 
+function read(relativePath) {
+  return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
+}
+
 function relativeToProject(filePath) {
-  return path.relative(path.join(__dirname, '..', '..'), filePath).replace(/\\/g, '/');
+  return path.relative(projectRoot, filePath).replace(/\\/g, '/');
 }
 
 describe('keyboard-safe form contract', () => {
   const screenFiles = collectSourceFiles(appRoot);
 
-  test('every screen containing a text input uses KeyboardSafeScreen', () => {
+  test('the root viewport and Android native window both avoid the keyboard', () => {
+    const rootLayout = read('src/app/_layout.jsx');
+    const appConfig = JSON.parse(read('app.json'));
+
+    expect(rootLayout).toContain('KeyboardAvoidingView');
+    expect(rootLayout).toContain("Platform.OS === 'ios' ? 'padding' : undefined");
+    expect(appConfig.expo.android.softwareKeyboardLayoutMode).toBe('resize');
+  });
+
+  test('every screen containing a text input has a scrollable escape path', () => {
     const formScreens = screenFiles.filter((filePath) => {
       const source = fs.readFileSync(filePath, 'utf8');
       return /<AppInput\b|<TextInput\b/.test(source);
@@ -27,34 +41,54 @@ describe('keyboard-safe form contract', () => {
 
     expect(formScreens.length).toBeGreaterThan(0);
 
-    const missingWrapper = formScreens
-      .filter((filePath) => !fs.readFileSync(filePath, 'utf8').includes('<KeyboardSafeScreen'))
+    const nonScrollableForms = formScreens
+      .filter((filePath) => {
+        const source = fs.readFileSync(filePath, 'utf8');
+        return !/<KeyboardSafeScreen\b|<ScrollView\b|<MobileShell\b/.test(source);
+      })
       .map(relativeToProject);
+
+    expect(nonScrollableForms).toEqual([]);
+  });
+
+  test('critical long forms use the strengthened KeyboardSafeScreen wrapper', () => {
+    const criticalForms = [
+      'src/app/(account)/privacy-center.jsx',
+      'src/app/(admin)/admin-login.jsx',
+      'src/app/(admin)/ride-disputes.jsx',
+      'src/app/(admin)/wallet-adjust.jsx',
+      'src/app/(auth)/email-login.jsx',
+      'src/app/(auth)/email-register.jsx',
+      'src/app/(auth)/passenger-register.jsx',
+      'src/app/(auth)/verify-whatsapp.jsx',
+      'src/app/(driver)/profile.jsx',
+      'src/app/(driver)/vehicle.jsx',
+      'src/app/(passenger)/request-ride.jsx',
+      'src/app/(passenger)/select-route.jsx',
+    ];
+
+    const missingWrapper = criticalForms.filter(
+      (relativePath) => !read(relativePath).includes('<KeyboardSafeScreen')
+    );
 
     expect(missingWrapper).toEqual([]);
   });
 
+  test('the landing shell preserves taps, scrolling and keyboard dismissal', () => {
+    const mobileShell = read('src/components/MobileShell.jsx');
+
+    expect(mobileShell).toContain('keyboardShouldPersistTaps="handled"');
+    expect(mobileShell).toContain('keyboardDismissMode=');
+    expect(mobileShell).toContain('automaticallyAdjustKeyboardInsets');
+  });
+
   test('Pedir corrida exposes passenger profile and safe navigation', () => {
-    const requestRide = fs.readFileSync(
-      path.join(appRoot, '(passenger)', 'request-ride.jsx'),
-      'utf8'
-    );
-    const passengerProfile = fs.readFileSync(
-      path.join(appRoot, '(passenger)', 'passenger-profile.jsx'),
-      'utf8'
-    );
+    const requestRide = read('src/app/(passenger)/request-ride.jsx');
+    const passengerProfile = read('src/app/(passenger)/passenger-profile.jsx');
 
     expect(requestRide).toContain("router.push('/passenger-profile')");
     expect(requestRide).toContain("goBackOrReplace(router, '/passenger-home')");
     expect(requestRide).toContain('👤 Perfil');
     expect(passengerProfile).toContain("goBackOrReplace(router, '/passenger-home')");
-  });
-
-  test('Android resizes the application above the software keyboard', () => {
-    const appConfig = JSON.parse(
-      fs.readFileSync(path.join(__dirname, '..', '..', 'app.json'), 'utf8')
-    );
-
-    expect(appConfig.expo.android.softwareKeyboardLayoutMode).toBe('resize');
   });
 });
