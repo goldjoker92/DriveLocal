@@ -21,7 +21,11 @@ import { httpsCallable } from "firebase/functions";
 import { Platform } from "react-native";
 
 import { functions } from "../config/firebase";
-import { NOTIFICATION_CHANNELS } from "../constants/notificationChannels";
+import {
+  DRIVER_ARRIVAL_VIBRATION_PATTERN,
+  NOTIFICATION_CHANNELS,
+  NOTIFICATION_SOUNDS,
+} from "../constants/notificationChannels";
 
 const INSTALLATION_ID_KEY = "drivelocal.installationId";
 const NOTIFICATION_STATUS_KEY = "drivelocal.notificationRegistrationStatus.v1";
@@ -113,11 +117,12 @@ async function getInstallationId() {
  * Android notification channels must exist before notifications are delivered.
  *
  * - Ride offers use MAX importance because they are time-sensitive.
- * - Ride status updates use HIGH importance.
- * - Both channels use vibration.
+ * - Driver arrival has its own MAX channel, bundled sound and strong vibration.
+ * - Other ride status updates remain on the existing HIGH channel.
  *
- * Do not set `sound: 'default'` here. In the current Expo notifications
- * implementation it can be interpreted as a custom native sound file name.
+ * The dedicated arrival channel uses a new immutable id. Android only lets an
+ * application change a channel's name and description after the channel exists;
+ * its sound and vibration remain under the user's system settings.
  */
 export async function ensureAndroidChannels() {
   if (Platform.OS !== "android") return;
@@ -139,6 +144,22 @@ export async function ensureAndroidChannels() {
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       enableVibrate: true,
+    },
+  );
+
+  await Notifications.setNotificationChannelAsync(
+    NOTIFICATION_CHANNELS.DRIVER_ARRIVAL,
+    {
+      name: "Motorista chegou",
+      description: "Alerta prioritário quando o motorista chega ao embarque.",
+      importance: Notifications.AndroidImportance.MAX,
+      sound: NOTIFICATION_SOUNDS.DRIVER_ARRIVAL,
+      vibrationPattern: [...DRIVER_ARRIVAL_VIBRATION_PATTERN],
+      enableVibrate: true,
+      enableLights: true,
+      lightColor: "#2563EB",
+      showBadge: true,
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     },
   );
 }
