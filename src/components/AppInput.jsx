@@ -1,21 +1,25 @@
 // AppInput
 // Labeled text input. Keep styling here so all forms look consistent.
 
+import { forwardRef } from 'react';
 import { View, Text, TextInput } from 'react-native';
 import { colors } from '../constants/colors';
 import { spacing, radius } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
 
-export default function AppInput({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  keyboardType = 'default',
-  secureTextEntry = false,
-  style,
-  ...textInputProps
-}) {
+const AppInput = forwardRef(function AppInput(
+  {
+    label,
+    value,
+    onChangeText,
+    placeholder,
+    keyboardType = 'default',
+    secureTextEntry = false,
+    style,
+    ...textInputProps
+  },
+  ref
+) {
   return (
     <View style={[{ gap: spacing.xs }, style]}>
       {label ? (
@@ -25,6 +29,7 @@ export default function AppInput({
       ) : null}
       <TextInput
         {...textInputProps}
+        ref={ref}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -48,4 +53,6 @@ export default function AppInput({
       />
     </View>
   );
-}
+});
+
+export default AppInput;

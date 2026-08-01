@@ -4,20 +4,21 @@
 // The client never writes wallet fields or ledger entries directly. Amounts are
 // entered in BRL and converted to integer centavos before the call.
 
-import { useState } from 'react';
-import { ScrollView, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRef, useState } from 'react';
+import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
 import AppInput from '../../components/AppInput';
 import AdminTableRow from '../../components/AdminTableRow';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { fontFamily, typography } from '../../constants/typography';
 import { formatBRL } from '../../utils/format';
 import { showConfirmAlert } from '../../utils/alertUtils';
+import { goBackOrReplace } from '../../utils/navigation';
 import { adjustDriverWallet } from '../../services/adminService';
 
 // "12,50" / "12.50" -> 1250 centavos. Returns null on invalid input.
@@ -36,6 +37,10 @@ const OPERATIONS = [
 
 export default function WalletAdjust() {
   const router = useRouter();
+  const amountRef = useRef(null);
+  const reasonRef = useRef(null);
+  const noteRef = useRef(null);
+  const originalLedgerRef = useRef(null);
   const [driverId, setDriverId] = useState('');
   const [operation, setOperation] = useState('credit');
   const [amount, setAmount] = useState('');
@@ -48,6 +53,11 @@ export default function WalletAdjust() {
   const [submitting, setSubmitting] = useState(false);
 
   const needsAmount = operation !== 'reversal';
+
+  function focusOperationValue() {
+    if (needsAmount) amountRef.current?.focus();
+    else originalLedgerRef.current?.focus();
+  }
 
   function handleSubmit() {
     setError('');
@@ -93,52 +103,105 @@ export default function WalletAdjust() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Ajuste de saldo" onBack={() => router.back()} />
+    <KeyboardSafeScreen
+      scrollViewProps={{ contentContainerStyle: { paddingBottom: spacing.xxl * 2 } }}
+    >
+      <Header
+        title="Ajuste de saldo"
+        onBack={() => goBackOrReplace(router, '/(admin)/admin-home')}
+      />
 
-        <AppCard>
-          <AppInput label="ID do motorista" value={driverId} onChangeText={setDriverId} placeholder="driverId" />
+      <AppCard>
+        <AppInput
+          label="ID do motorista"
+          value={driverId}
+          onChangeText={setDriverId}
+          placeholder="driverId"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={focusOperationValue}
+        />
 
-          <Text style={[{ fontFamily, color: colors.textMuted, marginTop: spacing.sm }, typography.small]}>Operação</Text>
+        <Text style={[{ fontFamily, color: colors.textMuted, marginTop: spacing.sm }, typography.small]}>Operação</Text>
+        <View style={{ gap: spacing.xs }}>
+          {OPERATIONS.map((o) => (
+            <AppButton key={o.key} title={o.title} variant={operation === o.key ? 'primary' : 'ghost'} onPress={() => setOperation(o.key)} />
+          ))}
+        </View>
+
+        {needsAmount ? (
+          <AppInput
+            ref={amountRef}
+            label="Valor (BRL)"
+            value={amount}
+            onChangeText={setAmount}
+            placeholder="Ex.: 12,50"
+            keyboardType="decimal-pad"
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => reasonRef.current?.focus()}
+          />
+        ) : (
+          <AppInput
+            ref={originalLedgerRef}
+            label="Lançamento original (ID)"
+            value={originalLedgerEntryId}
+            onChangeText={setOriginalLedgerEntryId}
+            placeholder="ledgerEntryId"
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => reasonRef.current?.focus()}
+          />
+        )}
+
+        {operation === 'correction' ? (
           <View style={{ gap: spacing.xs }}>
-            {OPERATIONS.map((o) => (
-              <AppButton key={o.key} title={o.title} variant={operation === o.key ? 'primary' : 'ghost'} onPress={() => setOperation(o.key)} />
-            ))}
+            <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Sinal da correção</Text>
+            <AppButton title="Aumentar (+)" variant={correctionSign === 'increase' ? 'primary' : 'ghost'} onPress={() => setCorrectionSign('increase')} />
+            <AppButton title="Diminuir (−)" variant={correctionSign === 'decrease' ? 'primary' : 'ghost'} onPress={() => setCorrectionSign('decrease')} />
           </View>
-
-          {needsAmount ? (
-            <AppInput label="Valor (BRL)" value={amount} onChangeText={setAmount} placeholder="Ex.: 12,50" keyboardType="decimal-pad" />
-          ) : (
-            <AppInput label="Lançamento original (ID)" value={originalLedgerEntryId} onChangeText={setOriginalLedgerEntryId} placeholder="ledgerEntryId" />
-          )}
-
-          {operation === 'correction' ? (
-            <View style={{ gap: spacing.xs }}>
-              <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>Sinal da correção</Text>
-              <AppButton title="Aumentar (+)" variant={correctionSign === 'increase' ? 'primary' : 'ghost'} onPress={() => setCorrectionSign('increase')} />
-              <AppButton title="Diminuir (−)" variant={correctionSign === 'decrease' ? 'primary' : 'ghost'} onPress={() => setCorrectionSign('decrease')} />
-            </View>
-          ) : null}
-
-          <AppInput label="Código do motivo" value={reasonCode} onChangeText={setReasonCode} placeholder="ex.: correcao_topup" />
-          <AppInput label="Nota (obrigatória)" value={note} onChangeText={setNote} placeholder="Descreva o ajuste" />
-
-          <AppButton title={submitting ? 'Processando…' : 'Aplicar ajuste'} onPress={handleSubmit} disabled={submitting} />
-        </AppCard>
-
-        {error ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text> : null}
-
-        {result ? (
-          <AppCard>
-            <AdminTableRow label="Operação" value={result.operation} />
-            <AdminTableRow label="Lançamento" value={result.ledgerEntryId} />
-            <AdminTableRow label="Saldo disponível" value={formatBRL(result.walletAvailableCentavos || 0)} />
-            <AdminTableRow label="Saldo total" value={formatBRL(result.walletBalanceCentavos || 0)} />
-            {result.replay ? <AdminTableRow label="Idempotente" value="já aplicado" /> : null}
-          </AppCard>
         ) : null}
-      </ScrollView>
-    </SafeAreaView>
+
+        <AppInput
+          ref={reasonRef}
+          label="Código do motivo"
+          value={reasonCode}
+          onChangeText={setReasonCode}
+          placeholder="ex.: correcao_topup"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => noteRef.current?.focus()}
+        />
+        <AppInput
+          ref={noteRef}
+          label="Nota (obrigatória)"
+          value={note}
+          onChangeText={setNote}
+          placeholder="Descreva o ajuste"
+          returnKeyType="done"
+          onSubmitEditing={handleSubmit}
+        />
+
+        <AppButton title={submitting ? 'Processando…' : 'Aplicar ajuste'} onPress={handleSubmit} disabled={submitting} />
+      </AppCard>
+
+      {error ? <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text> : null}
+
+      {result ? (
+        <AppCard>
+          <AdminTableRow label="Operação" value={result.operation} />
+          <AdminTableRow label="Lançamento" value={result.ledgerEntryId} />
+          <AdminTableRow label="Saldo disponível" value={formatBRL(result.walletAvailableCentavos || 0)} />
+          <AdminTableRow label="Saldo total" value={formatBRL(result.walletBalanceCentavos || 0)} />
+          {result.replay ? <AdminTableRow label="Idempotente" value="já aplicado" /> : null}
+        </AppCard>
+      ) : null}
+    </KeyboardSafeScreen>
   );
 }

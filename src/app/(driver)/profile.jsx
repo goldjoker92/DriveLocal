@@ -1,35 +1,33 @@
 // ============================================================
 // Driver profile (route "/profile"). Iteration 1B.
 // Charge/sauvegarde le profil chauffeur dans Firestore drivers/{uid}.
-// Champs : fullName, cpf (validÃƒÂ©), whatsApp, pixKeyType (select), pixKey.
+// Champs : fullName, cpf (validé), whatsApp, pixKeyType (select), pixKey.
 // ============================================================
 
 import { useEffect, useState } from 'react';
-import { ScrollView, View, Text, Pressable } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { getDriver, updateDriverProfile } from '../../services/driverService';
 import { validateCPF } from '../../utils/validation';
+import { goBackOrReplace } from '../../utils/navigation';
 
-// Options de type de clÃƒÂ© Pix (libellÃƒÂ©s PT-BR).
-const PIX_KEY_TYPES = ['CPF', 'Telefone', 'E-mail', 'Chave aleatÃƒÂ³ria'];
+const PIX_KEY_TYPES = ['CPF', 'Telefone', 'E-mail', 'Chave aleatória'];
 
-// Petit message d'erreur/alerte sous un champ.
 function FieldHint({ message, tone = 'danger' }) {
   if (!message) return null;
   const color = tone === 'warning' ? colors.warning : colors.danger;
   return <Text style={[{ fontFamily, color }, typography.small]}>{message}</Text>;
 }
 
-// SÃƒÂ©lecteur simple (chips) pour le type de clÃƒÂ© Pix.
 function PixKeyTypeSelect({ value, onChange }) {
   return (
     <View style={{ gap: spacing.xs }}>
@@ -71,10 +69,9 @@ export default function Profile() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [errors, setErrors] = useState({}); // erreurs bloquantes par champ
-  const [warnings, setWarnings] = useState({}); // alertes doublon (non bloquantes)
+  const [errors, setErrors] = useState({});
+  const [warnings, setWarnings] = useState({});
 
-  // Charge les donnÃƒÂ©es existantes au montage.
   useEffect(() => {
     let active = true;
     const uid = auth.currentUser && auth.currentUser.uid;
@@ -100,7 +97,6 @@ export default function Profile() {
     };
   }, []);
 
-  // Validation CPF en temps rÃƒÂ©el pendant la saisie.
   function onChangeCpf(text) {
     setCpf(text);
     if (text.trim() === '') {
@@ -111,20 +107,17 @@ export default function Profile() {
     setErrors((e) => ({ ...e, cpf: res.valid ? '' : res.message }));
   }
 
-  // Sauvegarde le profil aprÃƒÂ¨s validation + contrÃƒÂ´le de doublons.
   async function handleSave() {
     const uid = auth.currentUser && auth.currentUser.uid;
     if (!uid) {
-      setErrors({ form: 'SessÃƒÂ£o expirada. Entre novamente.' });
+      setErrors({ form: 'Sessão expirada. Entre novamente.' });
       return;
     }
 
-    // 1. Valide le CPF.
     const cpfRes = validateCPF(cpf);
-    // 2. VÃƒÂ©rifie que tous les champs sont remplis.
     const nextErrors = {};
     if (!fullName.trim()) nextErrors.fullName = 'Informe seu nome completo.';
-    if (!cpfRes.valid) nextErrors.cpf = cpfRes.message || 'CPF invÃƒÂ¡lido.';
+    if (!cpfRes.valid) nextErrors.cpf = cpfRes.message || 'CPF inválido.';
     if (!whatsApp.trim()) nextErrors.whatsApp = 'Informe seu WhatsApp.';
     if (!pixKeyType) nextErrors.pixKeyType = 'Escolha o tipo de chave Pix.';
     if (!pixKey.trim()) nextErrors.pixKey = 'Informe sua chave Pix.';
@@ -137,8 +130,6 @@ export default function Profile() {
 
     setSaving(true);
     try {
-      // 3. Sauvegarde -> profileStatus passe à "complete" si tout est rempli.
-      // Le contrôle de doublons global est réservé à l'admin pour respecter les règles Firestore.
       setWarnings({});
       await updateDriverProfile(uid, {
         fullName: fullName.trim(),
@@ -152,49 +143,76 @@ export default function Profile() {
       router.replace('/(driver)/vehicle');
     } catch (e) {
       console.log('[PROFILE] save error', e.message);
-      setErrors({ form: 'NÃƒÂ£o foi possÃƒÂ­vel salvar. Tente novamente.' });
+      setErrors({ form: 'Não foi possível salvar. Tente novamente.' });
       setSaving(false);
     }
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header title="Seu perfil" subtitle="Etapa 1 de 3" onBack={() => router.back()} />
-        <AppCard>
-          {loading ? (
-            <Text style={[{ fontFamily, color: colors.textMuted }, typography.body]}>Carregando...</Text>
-          ) : (
-            <>
-              <AppInput label="Nome completo" value={fullName} onChangeText={setFullName} placeholder="Seu nome completo" />
-              <FieldHint message={errors.fullName} />
+    <KeyboardSafeScreen>
+      <Header
+        title="Seu perfil"
+        subtitle="Etapa 1 de 3"
+        onBack={() => goBackOrReplace(router, '/(driver)/onboarding')}
+      />
+      <AppCard>
+        {loading ? (
+          <Text style={[{ fontFamily, color: colors.textMuted }, typography.body]}>Carregando...</Text>
+        ) : (
+          <>
+            <AppInput
+              label="Nome completo"
+              value={fullName}
+              onChangeText={setFullName}
+              placeholder="Seu nome completo"
+              textContentType="name"
+            />
+            <FieldHint message={errors.fullName} />
 
-              <AppInput label="CPF" value={cpf} onChangeText={onChangeCpf} placeholder="000.000.000-00" keyboardType="number-pad" />
-              <FieldHint message={errors.cpf} />
-              <FieldHint message={warnings.cpf} tone="warning" />
+            <AppInput
+              label="CPF"
+              value={cpf}
+              onChangeText={onChangeCpf}
+              placeholder="000.000.000-00"
+              keyboardType="number-pad"
+            />
+            <FieldHint message={errors.cpf} />
+            <FieldHint message={warnings.cpf} tone="warning" />
 
-              <AppInput label="WhatsApp" value={whatsApp} onChangeText={setWhatsApp} placeholder="+55 85 99999-9999" keyboardType="phone-pad" />
-              <FieldHint message={errors.whatsApp} />
-              <FieldHint message={warnings.whatsApp} tone="warning" />
+            <AppInput
+              label="WhatsApp"
+              value={whatsApp}
+              onChangeText={setWhatsApp}
+              placeholder="+55 85 99999-9999"
+              keyboardType="phone-pad"
+              textContentType="telephoneNumber"
+            />
+            <FieldHint message={errors.whatsApp} />
+            <FieldHint message={warnings.whatsApp} tone="warning" />
 
-              <PixKeyTypeSelect value={pixKeyType} onChange={setPixKeyType} />
-              <FieldHint message={errors.pixKeyType} />
+            <PixKeyTypeSelect value={pixKeyType} onChange={setPixKeyType} />
+            <FieldHint message={errors.pixKeyType} />
 
-              <AppInput label="Chave Pix" value={pixKey} onChangeText={setPixKey} placeholder="Sua chave Pix" />
-              <FieldHint message={errors.pixKey} />
-              <FieldHint message={warnings.pixKey} tone="warning" />
+            <AppInput
+              label="Chave Pix"
+              value={pixKey}
+              onChangeText={setPixKey}
+              placeholder="Sua chave Pix"
+              autoCapitalize="none"
+            />
+            <FieldHint message={errors.pixKey} />
+            <FieldHint message={warnings.pixKey} tone="warning" />
 
-              <FieldHint message={errors.form} />
+            <FieldHint message={errors.form} />
 
-              <AppButton
-                title={saving ? 'Salvando...' : 'Salvar e continuar'}
-                onPress={handleSave}
-                disabled={saving}
-              />
-            </>
-          )}
-        </AppCard>
-      </ScrollView>
-    </SafeAreaView>
+            <AppButton
+              title={saving ? 'Salvando...' : 'Salvar e continuar'}
+              onPress={handleSave}
+              disabled={saving}
+            />
+          </>
+        )}
+      </AppCard>
+    </KeyboardSafeScreen>
   );
 }

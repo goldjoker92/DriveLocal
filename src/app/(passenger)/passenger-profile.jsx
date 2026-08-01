@@ -15,6 +15,7 @@ import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { getPassenger } from '../../services/passengerService';
 import { logRideClientEvent } from '../../utils/clientRideLog';
+import { goBackOrReplace } from '../../utils/navigation';
 
 function DataRow({ label, value }) {
   return (
@@ -72,7 +73,7 @@ export default function PassengerProfile() {
         <Header
           title="Meus dados"
           subtitle="Informações cadastradas na sua conta"
-          onBack={() => router.back()}
+          onBack={() => goBackOrReplace(router, '/passenger-home')}
         />
 
         <AppCard>
