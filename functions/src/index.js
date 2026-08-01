@@ -68,6 +68,10 @@ exports.getPassengerRideHistorySecure = rideCallables.getPassengerRideHistorySec
 exports.getAdminRideSummarySecure = rideCallables.getAdminRideSummarySecure;
 exports.listAdminDisputedRidesSecure = rideCallables.listAdminDisputedRidesSecure;
 
+const placeCallables = require('./places/callables');
+exports.searchPlaceSuggestionsSecure = placeCallables.searchPlaceSuggestionsSecure;
+exports.resolvePlaceSuggestionSecure = placeCallables.resolvePlaceSuggestionSecure;
+
 const { expireRideOffersTask } = require('./rides/expireOffersTask');
 exports.expireRideOffersTask = expireRideOffersTask;
 const {
