@@ -1,15 +1,16 @@
 // Passenger ride request (route "/request-ride").
 //
 // Real secure flow:
-//   1. collect/confirm pickup + destination labels;
-//   2. resolve both points to real coordinates (GPS or native geocoder);
+//   1. suggest City Pack locations locally, then Google Places through a secure
+//      callable only when the local pack has no strong answer;
+//   2. resolve both points to real coordinates (selected Places result, GPS or
+//      native geocoder);
 //   3. call createRideRequestSecure, where routing, the official Horizonte
 //      geofence, pricing and dispatch remain server-authoritative;
 //   4. continue to /searching with the returned quote summary.
 //
 // The client never writes rideRequests directly and never supplies fare,
-// distance, duration, commission or service-area values. No runtime service-area
-// mock participates in the request decision.
+// distance, duration, commission or service-area values.
 
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
@@ -18,6 +19,7 @@ import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import AddressAutocompleteInput from '../../components/AddressAutocompleteInput';
 import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import LocationActionButton from '../../components/LocationActionButton';
 import { colors } from '../../constants/colors';
@@ -114,6 +116,9 @@ export default function RequestRide() {
   const [destinationText, setDestinationText] = useState(
     typeof params.destinationText === 'string' ? params.destinationText : ''
   );
+  const [destinationLat, setDestinationLat] = useState(null);
+  const [destinationLng, setDestinationLng] = useState(null);
+  const [destinationSource, setDestinationSource] = useState('manual');
 
   const [vehicleType, setVehicleType] = useState(VEHICLE_MOTO);
   const [loadingLocation, setLoadingLocation] = useState(false);
@@ -208,6 +213,33 @@ export default function RequestRide() {
     });
   }
 
+  function applyOriginSuggestion(result) {
+    setOriginText(result.label);
+    setOriginLat(result.lat);
+    setOriginLng(result.lng);
+    setOriginSource(result.source);
+    setGpsFound(false);
+    resetRequestAttempt();
+    logRideClientEvent('ride.request.place_selected', {
+      step: 'pickup',
+      provider: result.source,
+      hasPickupCoordinates: hasCoordinates(result.lat, result.lng),
+    });
+  }
+
+  function applyDestinationSuggestion(result) {
+    setDestinationText(result.label);
+    setDestinationLat(result.lat);
+    setDestinationLng(result.lng);
+    setDestinationSource(result.source);
+    resetRequestAttempt();
+    logRideClientEvent('ride.request.place_selected', {
+      step: 'destination',
+      provider: result.source,
+      hasDestinationCoordinates: hasCoordinates(result.lat, result.lng),
+    });
+  }
+
   async function resolveRidePoint({ text, knownLat, knownLng, step }) {
     if (hasCoordinates(knownLat, knownLng)) {
       logRideClientEvent('ride.request.geocode_skipped', {
@@ -251,8 +283,9 @@ export default function RequestRide() {
       action: 'requestRide',
       vehicleType,
       originSource,
+      destinationSource,
       hasPickupCoordinates: hasCoordinates(originLat, originLng),
-      hasDestinationCoordinates: false,
+      hasDestinationCoordinates: hasCoordinates(destinationLat, destinationLng),
       originTextLength: originText.trim().length,
       destinationTextLength: destinationText.trim().length,
     });
@@ -270,8 +303,8 @@ export default function RequestRide() {
 
       const destinationResult = await resolveRidePoint({
         text: destinationText.trim(),
-        knownLat: null,
-        knownLng: null,
+        knownLat: destinationLat,
+        knownLng: destinationLng,
         step: 'destination',
       });
       if (destinationResult.status !== 'ok') {
@@ -401,7 +434,7 @@ export default function RequestRide() {
             Localização encontrada. Confira o endereço antes de pedir a corrida.
           </Text>
         ) : null}
-        <AppInput
+        <AddressAutocompleteInput
           label="Rua, bairro ou ponto de referência"
           value={originText}
           onChangeText={(text) => {
@@ -412,7 +445,9 @@ export default function RequestRide() {
             setGpsFound(false);
             resetRequestAttempt();
           }}
-          placeholder="Ex: Rua José de Alencar, Centro"
+          onSuggestionSelected={applyOriginSuggestion}
+          disabled={submitting}
+          placeholder="Ex: Hospital Municipal ou Rua José de Alencar"
           returnKeyType="next"
           blurOnSubmit={false}
           onSubmitEditing={() => originReferenceRef.current?.focus()}
@@ -434,15 +469,20 @@ export default function RequestRide() {
 
       <AppCard>
         <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Destino</Text>
-        <AppInput
+        <AddressAutocompleteInput
           ref={destinationRef}
           label="Para onde você vai?"
           value={destinationText}
           onChangeText={(text) => {
             setDestinationText(text);
+            setDestinationLat(null);
+            setDestinationLng(null);
+            setDestinationSource('manual');
             resetRequestAttempt();
           }}
-          placeholder="Ex: Rua Presidente Castelo Branco, Centro"
+          onSuggestionSelected={applyDestinationSuggestion}
+          disabled={submitting}
+          placeholder="Ex: IFCE, Centro ou endereço completo"
           returnKeyType="done"
         />
       </AppCard>
