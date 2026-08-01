@@ -5,7 +5,7 @@
 import '../services/driverLocationTracking';
 import { useEffect } from 'react';
 import { Stack, usePathname } from 'expo-router';
-import { View } from 'react-native';
+import { KeyboardAvoidingView, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -177,7 +177,10 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <LocationDisclosureProvider>
             <StatusBar style="dark" />
-            <View style={{ flex: 1, backgroundColor: colors.background }}>
+            <KeyboardAvoidingView
+              style={{ flex: 1, backgroundColor: colors.background }}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
               {/* Never replays actions automatically; restores only an existing ride. */}
               <NetworkRecoveryGuard route={pathname} />
               {/* Silent when healthy; visible only on operational driver routes. */}
@@ -196,7 +199,7 @@ export default function RootLayout() {
                   contentStyle: { backgroundColor: colors.background },
                 }}
               />
-            </View>
+            </KeyboardAvoidingView>
           </LocationDisclosureProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>

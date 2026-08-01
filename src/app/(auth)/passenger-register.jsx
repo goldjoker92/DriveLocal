@@ -1,20 +1,20 @@
 // Passenger registration. New emails create an account; an existing email with
 // the correct password reconnects and repairs a missing passenger profile.
 
-import { useState } from 'react';
-import { ScrollView, Text } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRef, useState } from 'react';
+import { Text } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
 import AppButton from '../../components/AppButton';
+import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { colors } from '../../constants/colors';
-import { spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { registerPassenger } from '../../services/authService';
 import { registrationErrorMessage } from '../../utils/authErrorMessage';
+import { goBackOrReplace } from '../../utils/navigation';
 
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
@@ -33,6 +33,9 @@ function authTrace(stage, details = {}) {
 export default function PassengerRegister() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const whatsAppRef = useRef(null);
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
   const [fullName, setFullName] = useState('');
   const [whatsApp, setWhatsApp] = useState('');
   const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
@@ -67,7 +70,6 @@ export default function PassengerRegister() {
       });
       authTrace('register_completed', { accountState: result.accountState || 'unknown' });
 
-      // New, existing and repaired accounts all continue into the requested ride.
       router.replace({
         pathname: '/request-ride',
         params: {
@@ -87,47 +89,76 @@ export default function PassengerRegister() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
-        <Header
-          title="Criar conta de passageiro"
-          subtitle="Peça corridas locais em Horizonte"
-          onBack={() => router.back()}
+    <KeyboardSafeScreen>
+      <Header
+        title="Criar conta de passageiro"
+        subtitle="Peça corridas locais em Horizonte"
+        onBack={() => goBackOrReplace(router, '/')}
+      />
+      <AppCard>
+        <AppInput
+          label="Nome completo"
+          value={fullName}
+          onChangeText={setFullName}
+          placeholder="Seu nome"
+          textContentType="name"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => whatsAppRef.current?.focus()}
         />
-        <AppCard>
-          <AppInput label="Nome completo" value={fullName} onChangeText={setFullName} placeholder="Seu nome" />
-          <AppInput
-            label="WhatsApp"
-            value={whatsApp}
-            onChangeText={setWhatsApp}
-            placeholder="Ex: 85 99999-9999"
-            keyboardType="phone-pad"
-          />
-          <AppInput
-            label="E-mail"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="voce@email.com"
-            keyboardType="email-address"
-          />
-          <AppInput label="Senha" value={password} onChangeText={setPassword} placeholder="••••••••" secureTextEntry />
-          {error ? (
-            <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
-          ) : null}
-          <AppButton title={loading ? 'Acessando...' : 'Criar conta'} onPress={handleRegister} disabled={loading} />
-        </AppCard>
+        <AppInput
+          ref={whatsAppRef}
+          label="WhatsApp"
+          value={whatsApp}
+          onChangeText={setWhatsApp}
+          placeholder="Ex: 85 99999-9999"
+          keyboardType="phone-pad"
+          textContentType="telephoneNumber"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => emailRef.current?.focus()}
+        />
+        <AppInput
+          ref={emailRef}
+          label="E-mail"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="voce@email.com"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
+          returnKeyType="next"
+          blurOnSubmit={false}
+          onSubmitEditing={() => passwordRef.current?.focus()}
+        />
+        <AppInput
+          ref={passwordRef}
+          label="Senha"
+          value={password}
+          onChangeText={setPassword}
+          placeholder="••••••••"
+          secureTextEntry
+          textContentType="newPassword"
+          returnKeyType="done"
+          onSubmitEditing={handleRegister}
+        />
+        {error ? (
+          <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
+        ) : null}
+        <AppButton title={loading ? 'Acessando...' : 'Criar conta'} onPress={handleRegister} disabled={loading} />
+      </AppCard>
 
-        <AppButton
-          title="Já tenho conta"
-          variant="ghost"
-          onPress={() =>
-            router.push({
-              pathname: '/email-login',
-              params: { email: email.trim(), roleIntent: 'passenger' },
-            })
-          }
-        />
-      </ScrollView>
-    </SafeAreaView>
+      <AppButton
+        title="Já tenho conta"
+        variant="ghost"
+        onPress={() =>
+          router.push({
+            pathname: '/email-login',
+            params: { email: email.trim(), roleIntent: 'passenger' },
+          })
+        }
+      />
+    </KeyboardSafeScreen>
   );
 }
