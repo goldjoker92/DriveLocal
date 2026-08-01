@@ -133,7 +133,8 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(home).toContain('page.items.slice(0, 3)');
     expect(home).toContain('ÚLTIMAS CORRIDAS');
     expect(home).toContain('VER HISTÓRICO COMPLETO');
-    expect(home).toContain('<PassengerRideHistoryRow key={item.rideId} item={item} compact />');
+    expect(home).toContain('<PassengerRideHistoryRow');
+    expect(home).toContain("onPress={() => navigate('/passenger-ride-history', 'open_recent_ride')}");
     expect(home).toContain("activeRide?.status !== 'completed'");
     expect(home).toContain("navigate('/passenger-ride-history', 'open_full_history_from_recent')");
 
@@ -146,6 +147,9 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(row).toContain('item.amountLabel');
     expect(row).toContain('item.rideStatusLabel');
     expect(row).toContain('item.pixStatusLabel');
+    expect(row).toContain("item.pixStatus === 'received'");
+    expect(row).toContain('✓ PAGO');
+    expect(row).toContain('disabled={!onPress}');
     expect(service).toContain("httpsCallable(functions, 'getPassengerRideHistorySecure')");
     expect(service).not.toContain("collection(db, 'rideRequests'");
     expect(screen).not.toContain("collection(db, 'rideRequests'");
