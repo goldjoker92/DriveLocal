@@ -10,8 +10,8 @@ import { getStorage } from 'firebase/storage';
 import { getFunctions } from 'firebase/functions';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
-// Local-only safety fallback. EAS binaries must receive a validated config from
-// app.config.js and are never allowed to use this checked-in DEV configuration.
+// Local-only safety fallback. EAS binaries must receive a validated Firebase Web
+// App config from app.config.js and can never use this checked-in DEV config.
 const LOCAL_DEV_FIREBASE_CONFIG = Object.freeze({
   apiKey: 'AIzaSyCjOL8bIjXIvWqdnda5vpdBuCHIaM-liBg',
   authDomain: 'drivelocal-dev.firebaseapp.com',
@@ -48,6 +48,23 @@ function assertFirebaseConfig(config) {
     }
   }
 
+  const projectId = String(config.projectId).trim();
+  const authDomain = String(config.authDomain).trim();
+  const appId = String(config.appId).trim();
+  const messagingSenderId = String(config.messagingSenderId).trim();
+
+  if (authDomain !== `${projectId}.firebaseapp.com`) {
+    throw new Error('[FIREBASE_CONFIG] Firebase Web authDomain does not match projectId.');
+  }
+
+  if (!/^1:[0-9]+:web:[A-Za-z0-9_-]+$/.test(appId)) {
+    throw new Error('[FIREBASE_CONFIG] Firebase JS config must use a Web App ID.');
+  }
+
+  if (appId.split(':')[1] !== messagingSenderId) {
+    throw new Error('[FIREBASE_CONFIG] Firebase Web appId does not match messagingSenderId.');
+  }
+
   return config;
 }
 
@@ -66,6 +83,9 @@ function resolveFirebaseRuntimeConfig(extra) {
   if (easBuildActive && extra.firebaseBuildValidated !== true) {
     throw new Error('[FIREBASE_CONFIG] EAS build was not validated by app.config.js.');
   }
+  if (easBuildActive && extra.firebaseWebConfigValidated !== true) {
+    throw new Error('[FIREBASE_CONFIG] EAS build has no validated Firebase Web App config.');
+  }
   if (easBuildActive && !injectedConfig) {
     throw new Error('[FIREBASE_CONFIG] EAS build has no injected Firebase configuration.');
   }
@@ -82,9 +102,8 @@ function resolveFirebaseRuntimeConfig(extra) {
     );
   }
 
-  // This is the final runtime barrier after the build-time guard. A store binary
-  // can never start while pointing at the DEV project, even if its manifest was
-  // manually altered after app.config.js ran.
+  // Final runtime barrier after the build-time guard. A store binary can never
+  // start while pointing at DEV, even if its manifest was altered afterward.
   if (easBuildActive && firebaseConfig.projectId !== expectedProjectId) {
     throw new Error(
       `[FIREBASE_CONFIG] ${appEnvironment} EAS build selected `
@@ -98,8 +117,8 @@ function resolveFirebaseRuntimeConfig(extra) {
     expectedProjectId,
     projectId: firebaseConfig.projectId,
     source: injectedConfig
-      ? String(extra.firebaseConfigSource || 'manifest')
-      : 'local-dev-fallback',
+      ? String(extra.firebaseConfigSource || 'manifest-web-config')
+      : 'local-dev-web-fallback',
     firebaseConfig,
   });
 }
