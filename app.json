@@ -13,7 +13,7 @@
     "android": {
       "package": "com.drivelocal.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 4,
+      "versionCode": 5,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
