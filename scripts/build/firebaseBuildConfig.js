@@ -4,8 +4,9 @@
 //
 // Android native Firebase keeps using google-services.json. The Firebase JS SDK
 // (Auth, Firestore, Storage and Functions) must use the registered Firebase Web
-// App configuration. Both sides are validated against the same project so DEV
-// and PROD cannot silently drift apart.
+// App configuration. Remote EAS workers validate both sides against the same
+// project. Local EAS CLI config resolution may temporarily use the checked-in
+// DEV Android file because Secret file variables exist only on the remote worker.
 
 const fs = require('fs');
 const path = require('path');
@@ -24,13 +25,19 @@ const FIREBASE_WEB_ENV_FIELDS = Object.freeze({
   appId: 'EXPO_PUBLIC_FIREBASE_APP_ID',
 });
 
+const LOCAL_EAS_CONFIG_FALLBACK_ENV = 'EAS_CONFIG_ALLOW_LOCAL_GOOGLE_SERVICES_FALLBACK';
+
 function normalizeAppEnvironment(rawValue) {
   const value = String(rawValue || '').trim().toLowerCase();
   return ['dev', 'development'].includes(value) ? 'development' : 'production';
 }
 
+function envEnabled(value) {
+  return ['1', 'true'].includes(String(value || '').trim().toLowerCase());
+}
+
 function isEasBuild(env = {}) {
-  return ['1', 'true'].includes(String(env.EAS_BUILD || '').trim().toLowerCase());
+  return envEnabled(env.EAS_BUILD);
 }
 
 function nonEmpty(value, fieldName) {
@@ -140,17 +147,20 @@ function readFirebaseWebConfig(env = {}) {
   });
 }
 
-function assertEnvironmentProject({ appEnvironment, projectId, easBuildActive }) {
+function expectedProjectForEnvironment(appEnvironment) {
   const expectedProjectId = EXPECTED_PROJECT_IDS[appEnvironment];
   if (!expectedProjectId) {
     throw new Error(`[firebase-build] Unsupported app environment: ${appEnvironment}.`);
   }
+  return expectedProjectId;
+}
 
-  // Local Expo commands may intentionally use the repository DEV file while
-  // retaining production UI behavior. Every EAS binary remains strict.
-  if (easBuildActive && projectId !== expectedProjectId) {
+function assertEnvironmentProject({ appEnvironment, projectId, allowMismatch = false }) {
+  const expectedProjectId = expectedProjectForEnvironment(appEnvironment);
+
+  if (!allowMismatch && projectId !== expectedProjectId) {
     throw new Error(
-      `[firebase-build] ${appEnvironment} EAS build selected Firebase project `
+      `[firebase-build] ${appEnvironment} build selected Firebase project `
       + `${projectId}; expected ${expectedProjectId}.`
     );
   }
@@ -162,7 +172,7 @@ function assertFirebaseWebConfig({
   config,
   androidConfig,
   expectedProjectId,
-  easBuildActive,
+  compareAndroidConfig = true,
 }) {
   const expectedAuthDomain = `${config.projectId}.firebaseapp.com`;
 
@@ -187,32 +197,34 @@ function assertFirebaseWebConfig({
     );
   }
 
-  if (config.projectId !== androidConfig.projectId) {
-    throw new Error(
-      `[firebase-build] Firebase Web project ${config.projectId} does not match `
-      + `Android project ${androidConfig.projectId}.`
-    );
-  }
-
-  if (config.messagingSenderId !== androidConfig.projectNumber) {
-    throw new Error(
-      `[firebase-build] Firebase Web messagingSenderId ${config.messagingSenderId} `
-      + `does not match Android project number ${androidConfig.projectNumber}.`
-    );
-  }
-
-  if (config.storageBucket !== androidConfig.storageBucket) {
-    throw new Error(
-      `[firebase-build] Firebase Web storageBucket ${config.storageBucket} does not `
-      + `match Android storage bucket ${androidConfig.storageBucket}.`
-    );
-  }
-
-  if (easBuildActive && config.projectId !== expectedProjectId) {
+  if (config.projectId !== expectedProjectId) {
     throw new Error(
       `[firebase-build] Firebase Web project ${config.projectId}; `
       + `expected ${expectedProjectId}.`
     );
+  }
+
+  if (compareAndroidConfig) {
+    if (config.projectId !== androidConfig.projectId) {
+      throw new Error(
+        `[firebase-build] Firebase Web project ${config.projectId} does not match `
+        + `Android project ${androidConfig.projectId}.`
+      );
+    }
+
+    if (config.messagingSenderId !== androidConfig.projectNumber) {
+      throw new Error(
+        `[firebase-build] Firebase Web messagingSenderId ${config.messagingSenderId} `
+        + `does not match Android project number ${androidConfig.projectNumber}.`
+      );
+    }
+
+    if (config.storageBucket !== androidConfig.storageBucket) {
+      throw new Error(
+        `[firebase-build] Firebase Web storageBucket ${config.storageBucket} does not `
+        + `match Android storage bucket ${androidConfig.storageBucket}.`
+      );
+    }
   }
 
   return config;
@@ -226,22 +238,21 @@ function loadFirebaseBuildConfig({
 } = {}) {
   const appEnvironment = normalizeAppEnvironment(env.APP_ENV);
   const easBuildActive = isEasBuild(env);
+  const expectedProjectId = expectedProjectForEnvironment(appEnvironment);
   const explicitFile = String(env.GOOGLE_SERVICES_JSON || '').trim();
-
-  // Secret file variables exist only on the remote EAS worker. During EAS CLI's
-  // local app-config resolution they can be unavailable, so use the local fallback.
-  // The project/package/Web-config assertions below still fail closed if that
-  // fallback is not the matching DEV or PROD Android application file.
-  const googleServicesFile = explicitFile || fallbackPath;
-  const { parsed, resolvedPath } = readGoogleServicesJson(googleServicesFile, cwd);
-  const androidConfig = firebaseConfigFromGoogleServices(parsed, packageName);
-  const expectedProjectId = assertEnvironmentProject({
-    appEnvironment,
-    projectId: androidConfig.projectId,
-    easBuildActive,
-  });
-
+  const localEasConfigFallbackRequested = envEnabled(
+    env[LOCAL_EAS_CONFIG_FALLBACK_ENV]
+  );
   const webConfigResult = readFirebaseWebConfig(env);
+
+  // Fail closed on the remote worker. The production file secret must exist there.
+  if (easBuildActive && appEnvironment === 'production' && !explicitFile) {
+    throw new Error(
+      '[firebase-build] Production EAS build requires GOOGLE_SERVICES_JSON '
+      + 'pointing to the drivelocal-prod Firebase file.'
+    );
+  }
+
   if (easBuildActive && !webConfigResult.configured) {
     throw new Error(
       '[firebase-build] EAS build requires the six EXPO_PUBLIC_FIREBASE_* values '
@@ -249,13 +260,47 @@ function loadFirebaseBuildConfig({
     );
   }
 
+  const googleServicesFile = explicitFile || fallbackPath;
+  const { parsed, resolvedPath } = readGoogleServicesJson(googleServicesFile, cwd);
+  const androidConfig = firebaseConfigFromGoogleServices(parsed, packageName);
+  const androidFirebaseMatchesExpected = androidConfig.projectId === expectedProjectId;
+
+  // EAS CLI resolves app.config.js locally before upload. Secret file variables are
+  // unavailable at that stage, so the production profile explicitly allows the
+  // checked-in DEV Android file only for this local resolution. The remote worker
+  // re-evaluates the config with EAS_BUILD=1 and the PROD file secret, where every
+  // Android/Web cross-check remains mandatory.
+  const localEasConfigFallbackActive = Boolean(
+    !easBuildActive
+      && !explicitFile
+      && localEasConfigFallbackRequested
+      && webConfigResult.configured
+      && !androidFirebaseMatchesExpected
+  );
+
+  // Ordinary local Expo commands remain usable with the checked-in DEV file when
+  // no Firebase Web environment was loaded. This path cannot create a store build.
+  const runtimeLocalDevFallback = Boolean(
+    !easBuildActive
+      && !explicitFile
+      && !webConfigResult.configured
+      && androidConfig.projectId === 'drivelocal-dev'
+      && !androidFirebaseMatchesExpected
+  );
+
+  assertEnvironmentProject({
+    appEnvironment,
+    projectId: androidConfig.projectId,
+    allowMismatch: localEasConfigFallbackActive || runtimeLocalDevFallback,
+  });
+
   let firebaseConfig = null;
   if (webConfigResult.configured) {
     firebaseConfig = assertFirebaseWebConfig({
       config: webConfigResult.config,
       androidConfig,
       expectedProjectId,
-      easBuildActive,
+      compareAndroidConfig: androidFirebaseMatchesExpected,
     });
   } else if (androidConfig.projectId !== 'drivelocal-dev') {
     // Without a Web config, the runtime fallback is intentionally DEV-only.
@@ -273,19 +318,24 @@ function loadFirebaseBuildConfig({
     androidFirebaseProjectId: androidConfig.projectId,
     androidFirebaseAppId: androidConfig.appId,
     androidFirebaseProjectNumber: androidConfig.projectNumber,
+    androidFirebaseMatchesExpected,
     firebaseConfig,
     firebaseWebConfigValidated: Boolean(firebaseConfig),
     googleServicesFile,
     googleServicesResolvedPath: resolvedPath,
-    source: firebaseConfig
-      ? 'environment-web-config'
-      : 'runtime-local-dev-fallback',
+    localEasConfigFallbackActive,
+    source: localEasConfigFallbackActive
+      ? 'environment-web-config-local-android-fallback'
+      : firebaseConfig
+        ? 'environment-web-config'
+        : 'runtime-local-dev-fallback',
   });
 }
 
 module.exports = {
   EXPECTED_PROJECT_IDS,
   FIREBASE_WEB_ENV_FIELDS,
+  LOCAL_EAS_CONFIG_FALLBACK_ENV,
   normalizeAppEnvironment,
   isEasBuild,
   readGoogleServicesJson,
