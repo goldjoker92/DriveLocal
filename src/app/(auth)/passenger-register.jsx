@@ -22,7 +22,7 @@ function validEmail(value) {
 
 function authTrace(stage, details = {}) {
   console.log('[AUTH_FLOW]', {
-    scope: 'passenger_registration',
+    scope: 'passenger_registration_screen',
     stage,
     projectId: auth?.app?.options?.projectId || 'unknown',
     atMs: Date.now(),
@@ -33,6 +33,7 @@ function authTrace(stage, details = {}) {
 export default function PassengerRegister() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const registrationLockRef = useRef(false);
   const whatsAppRef = useRef(null);
   const emailRef = useRef(null);
   const passwordRef = useRef(null);
@@ -44,6 +45,11 @@ export default function PassengerRegister() {
   const [error, setError] = useState('');
 
   async function handleRegister() {
+    if (registrationLockRef.current) {
+      authTrace('duplicate_submit_blocked');
+      return;
+    }
+
     setError('');
 
     if (!fullName.trim() || !whatsApp.trim()) {
@@ -61,14 +67,21 @@ export default function PassengerRegister() {
       return;
     }
 
+    // React state disables the button only after the next render. The ref closes
+    // the tiny gap immediately for taps and keyboard submissions.
+    registrationLockRef.current = true;
     setLoading(true);
+
     try {
       authTrace('register_started');
       const result = await registerPassenger(email, password, {
         fullName: fullName.trim(),
         whatsApp: whatsApp.trim(),
       });
-      authTrace('register_completed', { accountState: result.accountState || 'unknown' });
+      authTrace('register_completed', {
+        accountState: result.accountState || 'unknown',
+        flowId: result.flowId || 'unknown',
+      });
 
       router.replace({
         pathname: '/request-ride',
@@ -80,10 +93,13 @@ export default function PassengerRegister() {
     } catch (e) {
       authTrace('register_failed', {
         code: e?.code || 'unknown',
-        name: e?.name || 'Error',
+        originalCode: e?.originalCode || null,
+        flowId: e?.flowId || 'unknown',
+        authAccountPreserved: e?.authAccountPreserved === true,
       });
       setError(registrationErrorMessage(e));
     } finally {
+      registrationLockRef.current = false;
       setLoading(false);
     }
   }
@@ -146,12 +162,17 @@ export default function PassengerRegister() {
         {error ? (
           <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
         ) : null}
-        <AppButton title={loading ? 'Acessando...' : 'Criar conta'} onPress={handleRegister} disabled={loading} />
+        <AppButton
+          title={loading ? 'Criando conta...' : 'Criar conta'}
+          onPress={handleRegister}
+          disabled={loading}
+        />
       </AppCard>
 
       <AppButton
         title="Já tenho conta"
         variant="ghost"
+        disabled={loading}
         onPress={() =>
           router.push({
             pathname: '/email-login',
