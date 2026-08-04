@@ -19,9 +19,19 @@ describe('authErrorMessage', () => {
       .toBe('Não foi possível concluir o acesso agora. Código: AUTH-UNKNOWN.');
   });
 
-  test('maps Firestore profile permissions separately from authentication', () => {
-    expect(registrationErrorMessage({ code: 'firestore/permission-denied' }))
-      .toContain('PROFILE-PERMISSION');
+  test('keeps profile permission failures recoverable with the same Auth account', () => {
+    const message = registrationErrorMessage({ code: 'firestore/permission-denied' });
+
+    expect(message).toContain('PROFILE-RETRY');
+    expect(message).toContain('mesmo e-mail e senha');
+    expect(message).not.toContain('PROFILE-PERMISSION');
+  });
+
+  test('explains that Auth is preserved after profile provisioning retries fail', () => {
+    const message = registrationErrorMessage({ code: 'auth/profile-provisioning-failed' });
+
+    expect(message).toContain('Sua conta foi preservada');
+    expect(message).toContain('PROFILE-RETRY');
   });
 
   test('keeps invalid credentials understandable during login', () => {

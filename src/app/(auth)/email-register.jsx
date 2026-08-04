@@ -11,15 +11,31 @@ import AppButton from '../../components/AppButton';
 import KeyboardSafeScreen from '../../components/KeyboardSafeScreen';
 import { colors } from '../../constants/colors';
 import { typography, fontFamily } from '../../constants/typography';
+import { auth } from '../../config/firebase';
 import { registerDriver } from '../../services/authService';
 import { useDriverRedirect } from '../../hooks/useDriverRedirect';
 import { registrationErrorMessage } from '../../utils/authErrorMessage';
 import { goBackOrReplace } from '../../utils/navigation';
 
+function validEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
+function authTrace(stage, details = {}) {
+  console.log('[AUTH_FLOW]', {
+    scope: 'driver_registration_screen',
+    stage,
+    projectId: auth?.app?.options?.projectId || 'unknown',
+    atMs: Date.now(),
+    ...details,
+  });
+}
+
 export default function EmailRegister() {
   const router = useRouter();
   const redirectDriver = useDriverRedirect();
   const params = useLocalSearchParams();
+  const registrationLockRef = useRef(false);
   const passwordRef = useRef(null);
   const [email, setEmail] = useState(typeof params.email === 'string' ? params.email : '');
   const [password, setPassword] = useState('');
@@ -27,12 +43,37 @@ export default function EmailRegister() {
   const [error, setError] = useState('');
 
   async function handleRegister() {
+    if (registrationLockRef.current) {
+      authTrace('duplicate_submit_blocked');
+      return;
+    }
+
     setError('');
+
+    if (!validEmail(email)) {
+      setError('Informe um e-mail válido.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('A senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    // A synchronous ref lock blocks repeated taps and keyboard submissions before
+    // React has time to render the disabled state.
+    registrationLockRef.current = true;
     setLoading(true);
+
     try {
-      console.log('[AUTH_FLOW] registerDriver roleIntent=', params.roleIntent || 'driver');
+      authTrace('register_started', {
+        roleIntent: params.roleIntent || 'driver',
+      });
       const result = await registerDriver(email, password);
-      console.log('[AUTH_FLOW] registerDriver accountState=', result.accountState);
+      authTrace('register_completed', {
+        accountState: result.accountState || 'unknown',
+        flowId: result.flowId || 'unknown',
+      });
 
       if (result.accountState === 'existing') {
         redirectDriver(result.profile);
@@ -41,9 +82,15 @@ export default function EmailRegister() {
 
       router.replace('/(driver)/onboarding');
     } catch (e) {
-      console.log('[AUTH_FLOW] register error', e.code || e.message);
+      authTrace('register_failed', {
+        code: e?.code || 'unknown',
+        originalCode: e?.originalCode || null,
+        flowId: e?.flowId || 'unknown',
+        authAccountPreserved: e?.authAccountPreserved === true,
+      });
       setError(registrationErrorMessage(e));
     } finally {
+      registrationLockRef.current = false;
       setLoading(false);
     }
   }
@@ -80,7 +127,7 @@ export default function EmailRegister() {
           <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>{error}</Text>
         ) : null}
         <AppButton
-          title={loading ? 'Acessando...' : 'Continuar'}
+          title={loading ? 'Criando conta...' : 'Continuar'}
           onPress={handleRegister}
           disabled={loading}
         />
@@ -89,6 +136,7 @@ export default function EmailRegister() {
       <AppButton
         title="Já tenho conta"
         variant="ghost"
+        disabled={loading}
         onPress={() =>
           router.push({
             pathname: '/email-login',

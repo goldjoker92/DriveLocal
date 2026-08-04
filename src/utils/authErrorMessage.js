@@ -66,12 +66,23 @@ export function registrationErrorMessage(error) {
     return `Este e-mail já está vinculado a uma conta de ${existingRole}. Entre com essa conta ou use outro e-mail.`;
   }
 
+  if (code === 'auth/registration-session-mismatch') {
+    return 'A sessão mudou durante o cadastro. Volte e tente novamente. Código: AUTH-SESSION.';
+  }
+
+  if (code === 'auth/profile-provisioning-failed') {
+    return 'Sua conta foi preservada, mas o perfil não foi concluído agora. Toque em Continuar novamente com o mesmo e-mail e senha. Código: PROFILE-RETRY.';
+  }
+
   if (isAuthConfigurationError(code)) {
     return 'O acesso por e-mail está temporariamente indisponível. Código: AUTH-PROD-CONFIG.';
   }
 
+  // Raw Firestore authorization errors should normally be absorbed by the
+  // registration reconciliation flow. Keep a recoverable message as a final
+  // safety net without telling the user to create another account.
   if (code === 'permission-denied' || code === 'firestore/permission-denied') {
-    return 'A conta foi autenticada, mas o perfil não pôde ser salvo. Código: PROFILE-PERMISSION.';
+    return 'Não foi possível confirmar seu perfil agora. Tente novamente com o mesmo e-mail e senha. Código: PROFILE-RETRY.';
   }
 
   if (isNetworkError(code)) {
