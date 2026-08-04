@@ -36,7 +36,8 @@ describe('registration, login and notification regressions', () => {
     expect(authService).toContain('const registrationOperations = new Map()');
     expect(authService).toContain("'registration_duplicate_joined'");
     expect(authService).toContain('recoverCurrentAuthenticatedAccount');
-    expect(authService).toContain("'matching_auth_session_reused'");
+    expect(authService).toContain("'matching_auth_session_reauthentication_succeeded'");
+    expect(authService).toContain('signInWithEmailAndPassword(auth, normalizedEmail, password)');
     expect(authService).toContain('registrationOperations.delete(normalizedEmail)');
   });
 
