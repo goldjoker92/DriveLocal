@@ -5,10 +5,14 @@ const {
   ensureDriverArrivalNotificationSound,
 } = require('./scripts/build/ensureNotificationSounds');
 
+const configDiagnosticsEnabled = ['1', 'true'].includes(
+  String(process.env.APP_CONFIG_DEBUG || '').trim().toLowerCase()
+);
+
 function writeConfigDiagnostic(message) {
-  // Expo/EAS commands may evaluate app.config.js through a child process whose
-  // stdout must contain JSON only. Diagnostics belong on stderr so commands such
-  // as `eas env:*`, `eas config --json` and fingerprints cannot be corrupted.
+  // Expo/EAS config commands require clean JSON output. Diagnostics are opt-in so
+  // PowerShell and EAS CLI do not interpret routine config traces as command errors.
+  if (!configDiagnosticsEnabled) return;
   process.stderr.write(`${String(message)}\n`);
 }
 
@@ -28,10 +32,12 @@ const {
   easBuildActive,
   expectedProjectId,
   androidFirebaseProjectId,
+  androidFirebaseMatchesExpected,
   firebaseConfig,
   firebaseProjectId,
   firebaseWebConfigValidated,
   googleServicesFile,
+  localEasConfigFallbackActive,
   source: firebaseConfigSource,
 } = firebaseBuild;
 const publicPolicy = loadPublicPolicyConfig({
@@ -54,11 +60,11 @@ if (!googleMapsAndroidApiKey) {
 }
 
 if (!easBuildActive && androidFirebaseProjectId !== expectedProjectId) {
-  // Local commands intentionally remain usable with the checked-in DEV Android
-  // file when APP_ENV is absent. EAS builds can never use this exception.
+  // EAS CLI may use the checked-in DEV file while resolving the production config
+  // locally. The remote worker still requires and validates the PROD file secret.
   writeConfigDiagnostic(
     `[app.config] Local Firebase Android fallback selected ${androidFirebaseProjectId} while `
-    + `APP_ENV resolves to ${appEnvironment}. EAS builds remain strict.`
+    + `APP_ENV resolves to ${appEnvironment}; localEasFallback=${localEasConfigFallbackActive}.`
   );
 }
 
@@ -71,13 +77,15 @@ if (!publicPolicy.configured) {
   );
 }
 
-// Safe build trace: public project identifiers and boolean states only.
+// Safe opt-in build trace: public project identifiers and boolean states only.
 // Never log API keys, app IDs, policy URLs, file contents or secret-file paths.
 writeConfigDiagnostic(
   `[app.config] Firebase androidProject=${androidFirebaseProjectId} `
   + `webProject=${firebaseProjectId} environment=${appEnvironment} `
   + `source=${firebaseConfigSource} webValidated=${firebaseWebConfigValidated} `
-  + `easBuild=${easBuildActive} publicPolicyConfigured=${publicPolicy.configured} `
+  + `androidValidated=${androidFirebaseMatchesExpected} easBuild=${easBuildActive} `
+  + `localEasFallback=${localEasConfigFallbackActive} `
+  + `publicPolicyConfigured=${publicPolicy.configured} `
   + 'driverArrivalSoundConfigured=true'
 );
 
@@ -160,8 +168,8 @@ module.exports = ({ config }) => ({
 
   android: {
     ...(expoConfig.android ?? {}),
-    // Native Android Firebase always uses the Android application file.
-    // Firebase JS receives the separately validated Web App config below.
+    // Local EAS config resolution may use the repository fallback. The remote
+    // worker re-evaluates this field with GOOGLE_SERVICES_JSON from EAS secrets.
     googleServicesFile,
   },
 
@@ -171,11 +179,14 @@ module.exports = ({ config }) => ({
     appEnvironment,
     devRideSimulatorEnabled,
     easBuildActive,
-    firebaseBuildValidated: !easBuildActive || firebaseWebConfigValidated,
+    firebaseBuildValidated:
+      firebaseWebConfigValidated && androidFirebaseMatchesExpected,
     ...(firebaseConfig ? { firebaseConfig } : {}),
     firebaseProjectId,
     firebaseConfigSource,
     firebaseWebConfigValidated,
+    androidFirebaseMatchesExpected,
+    localEasConfigFallbackActive,
     publicPolicyConfigured: publicPolicy.configured,
     publicPolicyLinks: publicPolicy.links,
   },
