@@ -53,6 +53,7 @@
       "env": {
         "EXPO_NO_TELEMETRY": "1",
         "APP_ENV": "prod",
+        "EAS_CONFIG_ALLOW_LOCAL_GOOGLE_SERVICES_FALLBACK": "1",
         "ENABLE_DEV_RIDE_SIMULATOR": "0",
         "PRIVACY_POLICY_URL": "https://rize-website-steel.vercel.app/drivelocal/privacy",
         "TERMS_OF_USE_URL": "https://rize-website-steel.vercel.app/drivelocal/terms",
