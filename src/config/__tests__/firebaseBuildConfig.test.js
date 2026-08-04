@@ -91,9 +91,11 @@ describe('Firebase Android/Web build environment separation', () => {
       appEnvironment: 'development',
       easBuildActive: true,
       androidFirebaseProjectId: 'drivelocal-dev',
+      androidFirebaseMatchesExpected: true,
       firebaseProjectId: 'drivelocal-dev',
       expectedProjectId: 'drivelocal-dev',
       firebaseWebConfigValidated: true,
+      localEasConfigFallbackActive: false,
       source: 'environment-web-config',
     });
     expect(result.firebaseConfig).toMatchObject({
@@ -104,19 +106,16 @@ describe('Firebase Android/Web build environment separation', () => {
     });
   });
 
-  it('accepts a matching production fallback during local EAS config resolution', () => {
+  it('allows the checked-in DEV file only during local production EAS config resolution', () => {
     const cwd = makeTempDirectory();
+    writeGoogleServices(cwd, googleServicesFixture());
     const projectNumber = '987654321';
-    writeGoogleServices(cwd, googleServicesFixture({
-      projectId: 'drivelocal-prod',
-      projectNumber,
-    }));
 
     const result = loadFirebaseBuildConfig({
       cwd,
       env: {
         APP_ENV: 'prod',
-        EAS_BUILD: '1',
+        EAS_CONFIG_ALLOW_LOCAL_GOOGLE_SERVICES_FALLBACK: '1',
         ...firebaseWebEnv({
           projectId: 'drivelocal-prod',
           projectNumber,
@@ -126,14 +125,53 @@ describe('Firebase Android/Web build environment separation', () => {
 
     expect(result).toMatchObject({
       appEnvironment: 'production',
-      easBuildActive: true,
-      androidFirebaseProjectId: 'drivelocal-prod',
-      firebaseProjectId: 'drivelocal-prod',
+      easBuildActive: false,
       expectedProjectId: 'drivelocal-prod',
+      androidFirebaseProjectId: 'drivelocal-dev',
+      androidFirebaseMatchesExpected: false,
+      firebaseProjectId: 'drivelocal-prod',
       firebaseWebConfigValidated: true,
       googleServicesFile: './google-services.json',
-      source: 'environment-web-config',
+      localEasConfigFallbackActive: true,
+      source: 'environment-web-config-local-android-fallback',
     });
+  });
+
+  it('rejects a production Web config with the DEV Android file outside the explicit local EAS fallback', () => {
+    const cwd = makeTempDirectory();
+    writeGoogleServices(cwd, googleServicesFixture());
+
+    expect(() => loadFirebaseBuildConfig({
+      cwd,
+      env: {
+        APP_ENV: 'prod',
+        ...firebaseWebEnv({
+          projectId: 'drivelocal-prod',
+          projectNumber: '987654321',
+        }),
+      },
+    })).toThrow('expected drivelocal-prod');
+  });
+
+  it('requires the production file secret on the remote EAS worker', () => {
+    const cwd = makeTempDirectory();
+    writeGoogleServices(cwd, googleServicesFixture({
+      projectId: 'drivelocal-prod',
+      projectNumber: '987654321',
+    }));
+
+    expect(() => loadFirebaseBuildConfig({
+      cwd,
+      env: {
+        APP_ENV: 'prod',
+        EAS_BUILD: '1',
+        EAS_CONFIG_ALLOW_LOCAL_GOOGLE_SERVICES_FALLBACK: '1',
+        ...firebaseWebEnv({
+          projectId: 'drivelocal-prod',
+          projectNumber: '987654321',
+        }),
+      },
+    })).toThrow('Production EAS build requires GOOGLE_SERVICES_JSON');
   });
 
   it('requires a Firebase Web App config for every EAS build', () => {
@@ -149,24 +187,7 @@ describe('Firebase Android/Web build environment separation', () => {
     })).toThrow('requires the six EXPO_PUBLIC_FIREBASE_* values');
   });
 
-  it('rejects the DEV Android fallback in a production EAS build', () => {
-    const cwd = makeTempDirectory();
-    writeGoogleServices(cwd, googleServicesFixture());
-
-    expect(() => loadFirebaseBuildConfig({
-      cwd,
-      env: {
-        APP_ENV: 'prod',
-        EAS_BUILD: 'true',
-        ...firebaseWebEnv({
-          projectId: 'drivelocal-prod',
-          projectNumber: '987654321',
-        }),
-      },
-    })).toThrow('expected drivelocal-prod');
-  });
-
-  it('accepts matching Android and Web PROD apps in a production EAS build', () => {
+  it('accepts matching Android and Web PROD apps on the remote production EAS worker', () => {
     const cwd = makeTempDirectory();
     const projectNumber = '987654321';
     const filePath = writeGoogleServices(
@@ -195,9 +216,11 @@ describe('Firebase Android/Web build environment separation', () => {
       appEnvironment: 'production',
       easBuildActive: true,
       androidFirebaseProjectId: 'drivelocal-prod',
+      androidFirebaseMatchesExpected: true,
       firebaseProjectId: 'drivelocal-prod',
       expectedProjectId: 'drivelocal-prod',
       firebaseWebConfigValidated: true,
+      localEasConfigFallbackActive: false,
       source: 'environment-web-config',
     });
     expect(result.firebaseConfig.appId).toBe(`1:${projectNumber}:web:test-web-app`);
@@ -221,7 +244,7 @@ describe('Firebase Android/Web build environment separation', () => {
         EAS_BUILD: '1',
         ...firebaseWebEnv({ projectId: 'other-project' }),
       },
-    })).toThrow('does not match Android project drivelocal-dev');
+    })).toThrow('expected drivelocal-dev');
   });
 
   it('rejects a Web App whose sender does not match the Android project number', () => {
@@ -268,7 +291,7 @@ describe('Firebase Android/Web build environment separation', () => {
     })).toThrow('Firebase Web configuration is incomplete');
   });
 
-  it('keeps local Expo commands usable with the checked-in DEV Web fallback', () => {
+  it('keeps ordinary local Expo commands usable with the checked-in DEV fallback', () => {
     const cwd = makeTempDirectory();
     writeGoogleServices(cwd, googleServicesFixture());
 
@@ -277,16 +300,16 @@ describe('Firebase Android/Web build environment separation', () => {
       env: {},
     });
 
-    // Missing APP_ENV keeps production UI behavior, while non-EAS local runtime
-    // falls back to the checked-in DEV Web config. Store binaries never can.
     expect(result).toMatchObject({
       appEnvironment: 'production',
       easBuildActive: false,
       expectedProjectId: 'drivelocal-prod',
       androidFirebaseProjectId: 'drivelocal-dev',
+      androidFirebaseMatchesExpected: false,
       firebaseProjectId: 'drivelocal-dev',
       firebaseConfig: null,
       firebaseWebConfigValidated: false,
+      localEasConfigFallbackActive: false,
       source: 'runtime-local-dev-fallback',
     });
   });
