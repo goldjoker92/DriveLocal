@@ -103,7 +103,6 @@ function profileProvisioningError(cause, user, requestedRole, flowId) {
   error.requestedRole = requestedRole;
   error.flowId = flowId;
   error.authAccountPreserved = Boolean(user?.uid);
-  error.cause = cause;
   return error;
 }
 
@@ -396,14 +395,14 @@ async function writeRoleProfile({
       await sleep(retryDelayMs);
     }
 
-    await refreshRegistrationAuth(
-      user,
-      flow,
-      attempt,
-      attempt === 1 ? 'initial_profile_write' : 'profile_write_retry'
-    );
-
     try {
+      await refreshRegistrationAuth(
+        user,
+        flow,
+        attempt,
+        attempt === 1 ? 'initial_profile_write' : 'profile_write_retry'
+      );
+
       authFlowTrace('log', flow, 'profile_write_started', {
         uid: shortId(user.uid),
         collectionName,
@@ -421,8 +420,12 @@ async function writeRoleProfile({
       });
       return profile;
     } catch (error) {
+      if (error?.code === 'auth/registration-session-mismatch') {
+        throw error;
+      }
+
       lastError = error;
-      authFlowTrace('warn', flow, 'profile_write_failed', {
+      authFlowTrace('warn', flow, 'profile_write_attempt_failed', {
         uid: shortId(user.uid),
         collectionName,
         attempt,
@@ -539,6 +542,7 @@ async function recoverExistingAccount({
 
 async function recoverCurrentAuthenticatedAccount({
   normalizedEmail,
+  password,
   collectionName,
   requestedRole,
   buildProfile,
@@ -548,12 +552,16 @@ async function recoverCurrentAuthenticatedAccount({
   if (!currentUser) return null;
   if (normalizeEmail(currentUser.email) !== normalizedEmail) return null;
 
-  authFlowTrace('log', flow, 'matching_auth_session_reused', {
+  authFlowTrace('log', flow, 'matching_auth_session_reauthentication_started', {
     uid: shortId(currentUser.uid),
+  });
+  const credential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+  authFlowTrace('log', flow, 'matching_auth_session_reauthentication_succeeded', {
+    uid: shortId(credential.user.uid),
   });
 
   return recoverAuthenticatedAccount({
-    user: currentUser,
+    user: credential.user,
     normalizedEmail,
     collectionName,
     requestedRole,
@@ -573,6 +581,7 @@ async function createAccountWithProfileInternal({
 }) {
   const currentAccountResult = await recoverCurrentAuthenticatedAccount({
     normalizedEmail,
+    password,
     collectionName,
     requestedRole,
     buildProfile,
@@ -803,11 +812,3 @@ export async function logoutUser() {
 export function getCurrentUser() {
   return auth.currentUser;
 }
-
-export const __authServiceInternals = {
-  normalizeEmail,
-  shortId,
-  profileProvisioningError,
-  registrationOperations,
-  PROFILE_WRITE_RETRY_DELAYS_MS,
-};
