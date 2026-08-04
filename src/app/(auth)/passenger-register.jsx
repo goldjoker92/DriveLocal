@@ -22,7 +22,7 @@ function validEmail(value) {
 
 function authTrace(stage, details = {}) {
   console.log('[AUTH_FLOW]', {
-    scope: 'passenger_registration_screen',
+    scope: 'passenger_registration',
     stage,
     projectId: auth?.app?.options?.projectId || 'unknown',
     atMs: Date.now(),
