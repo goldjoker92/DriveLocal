@@ -104,21 +104,36 @@ describe('Firebase Android/Web build environment separation', () => {
     });
   });
 
-  it('requires an explicit google-services file for a production EAS build', () => {
+  it('accepts a matching production fallback during local EAS config resolution', () => {
     const cwd = makeTempDirectory();
-    writeGoogleServices(cwd, googleServicesFixture());
+    const projectNumber = '987654321';
+    writeGoogleServices(cwd, googleServicesFixture({
+      projectId: 'drivelocal-prod',
+      projectNumber,
+    }));
 
-    expect(() => loadFirebaseBuildConfig({
+    const result = loadFirebaseBuildConfig({
       cwd,
       env: {
         APP_ENV: 'prod',
         EAS_BUILD: '1',
         ...firebaseWebEnv({
           projectId: 'drivelocal-prod',
-          projectNumber: '987654321',
+          projectNumber,
         }),
       },
-    })).toThrow('Production EAS build requires GOOGLE_SERVICES_JSON');
+    });
+
+    expect(result).toMatchObject({
+      appEnvironment: 'production',
+      easBuildActive: true,
+      androidFirebaseProjectId: 'drivelocal-prod',
+      firebaseProjectId: 'drivelocal-prod',
+      expectedProjectId: 'drivelocal-prod',
+      firebaseWebConfigValidated: true,
+      googleServicesFile: './google-services.json',
+      source: 'environment-web-config',
+    });
   });
 
   it('requires a Firebase Web App config for every EAS build', () => {
@@ -134,17 +149,19 @@ describe('Firebase Android/Web build environment separation', () => {
     })).toThrow('requires the six EXPO_PUBLIC_FIREBASE_* values');
   });
 
-  it('rejects the DEV Android project in a production EAS build', () => {
+  it('rejects the DEV Android fallback in a production EAS build', () => {
     const cwd = makeTempDirectory();
-    const filePath = writeGoogleServices(cwd, googleServicesFixture());
+    writeGoogleServices(cwd, googleServicesFixture());
 
     expect(() => loadFirebaseBuildConfig({
       cwd,
       env: {
         APP_ENV: 'prod',
         EAS_BUILD: 'true',
-        GOOGLE_SERVICES_JSON: filePath,
-        ...firebaseWebEnv(),
+        ...firebaseWebEnv({
+          projectId: 'drivelocal-prod',
+          projectNumber: '987654321',
+        }),
       },
     })).toThrow('expected drivelocal-prod');
   });

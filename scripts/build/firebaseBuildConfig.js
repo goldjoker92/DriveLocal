@@ -228,13 +228,10 @@ function loadFirebaseBuildConfig({
   const easBuildActive = isEasBuild(env);
   const explicitFile = String(env.GOOGLE_SERVICES_JSON || '').trim();
 
-  if (appEnvironment === 'production' && easBuildActive && !explicitFile) {
-    throw new Error(
-      '[firebase-build] Production EAS build requires GOOGLE_SERVICES_JSON '
-      + 'pointing to the drivelocal-prod Firebase file.'
-    );
-  }
-
+  // Secret file variables exist only on the remote EAS worker. During EAS CLI's
+  // local app-config resolution they can be unavailable, so use the local fallback.
+  // The project/package/Web-config assertions below still fail closed if that
+  // fallback is not the matching DEV or PROD Android application file.
   const googleServicesFile = explicitFile || fallbackPath;
   const { parsed, resolvedPath } = readGoogleServicesJson(googleServicesFile, cwd);
   const androidConfig = firebaseConfigFromGoogleServices(parsed, packageName);
