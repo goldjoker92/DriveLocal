@@ -204,10 +204,10 @@ export default function Wallet() {
             </Text>
             <Text style={styles.workContextText}>
               {wallet.topupLocked
-                ? `Sua comissão ainda está em 0%. Enquanto esse benefício estiver ativo, o wallet não bloqueia suas corridas${unlockDate ? ` e as recargas ficam liberadas em ${unlockDate}` : ''}.`
+                ? `Sua taxa da plataforma ainda está zerada. Enquanto esse benefício estiver ativo, o wallet não bloqueia suas corridas${unlockDate ? ` e as recargas ficam liberadas em ${unlockDate}` : ''}.`
                 : walletReadyForWork
                   ? `Seu saldo disponível é ${formatBRL(wallet.availableCentavos)}, acima do limite de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)}. O servidor fará uma nova verificação quando você voltar ao painel.`
-                  : `Seu saldo disponível é ${formatBRL(wallet.availableCentavos)}. Para ficar disponível, ele deve estar acima de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)} e também cobrir a comissão reservada da próxima corrida. A recarga Pix mínima é R$ 10,00.`}
+                  : `Seu saldo disponível é ${formatBRL(wallet.availableCentavos)}. Para ficar disponível, ele deve estar acima de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)} e também cobrir a reserva da taxa da plataforma da próxima corrida. A recarga Pix mínima é R$ 10,00.`}
             </Text>
             {wallet.topupLocked || walletReadyForWork ? (
               <AppButton
@@ -246,7 +246,7 @@ export default function Wallet() {
                 </Text>
                 {!wallet.topupLocked ? (
                   <Text style={styles.thresholdCopy}>
-                    {`Para receber corridas com comissão, mantenha o saldo disponível acima de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)}. A recarga mínima é R$ 10,00.`}
+                    {`Para receber corridas com taxa da plataforma ativa, mantenha o saldo disponível acima de ${formatBRL(MIN_WALLET_BALANCE_CENTAVOS)}. A recarga mínima é R$ 10,00.`}
                   </Text>
                 ) : null}
               </View>
@@ -255,7 +255,7 @@ export default function Wallet() {
             {wallet.topupLocked ? (
               <View style={styles.lockedBox}>
                 <Text style={styles.lockedTitle}>
-                  Nenhuma recarga é necessária durante sua comissão de 0%.
+                  Nenhuma recarga é necessária enquanto sua taxa da plataforma estiver zerada.
                 </Text>
                 <Text style={styles.lockedCopy}>
                   {unlockDate
