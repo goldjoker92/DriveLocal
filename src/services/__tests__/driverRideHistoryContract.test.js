@@ -63,7 +63,7 @@ describe('real driver history and performance contract', () => {
     expect(screen).toContain('CARREGAR MAIS CORRIDAS');
     expect(screen).toContain('PARTIDA');
     expect(screen).toContain('DESTINO');
-    expect(screen).toContain('Comissão');
+    expect(screen).toContain('Taxa da plataforma');
     expect(screen).toContain('Pix');
     expect(service).toContain("httpsCallable(functions, 'getDriverRideHistorySecure')");
     expect(service).not.toContain("collection(db, 'rideRequests'");
