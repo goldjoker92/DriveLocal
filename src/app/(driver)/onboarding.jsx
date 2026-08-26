@@ -51,7 +51,7 @@ export default function Onboarding() {
         <AppCard>
           <FounderOfferBadge />
           <AdminTableRow label="Oferta" value={FOUNDER_OFFER_HEADLINE_PT_BR} />
-          <AdminTableRow label="Comissão grátis" value={`${FOUNDER_DEFAULT_COMMISSION_FREE_DAYS} dias`} />
+          <AdminTableRow label="Taxa da plataforma zerada" value={`${FOUNDER_DEFAULT_COMMISSION_FREE_DAYS} dias`} />
           <AdminTableRow label="Vagas fundador restantes" value={remainingLabel} />
           <AdminTableRow label="Pix" value="100% do valor da corrida" />
         </AppCard>
