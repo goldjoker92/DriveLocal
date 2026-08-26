@@ -78,7 +78,7 @@ export default function FinishRide() {
 
       if (res && res.rejected && res.reason === 'WALLET_BALANCE_TOO_LOW') {
         console.log('[WalletCommission] rejected WALLET_BALANCE_TOO_LOW rideId=', rideId);
-        setSettleMsg('Saldo insuficiente para a comissão. Recarregue seu Saldo DriveLocal e finalize novamente.');
+        setSettleMsg('Saldo insuficiente para a taxa da plataforma. Recarregue seu Saldo DriveLocal e finalize novamente.');
         setFinalizing(false);
         return; // stay on screen so the driver sees the state (ride stays unsettled)
       }
