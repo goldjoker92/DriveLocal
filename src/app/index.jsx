@@ -213,21 +213,21 @@ export default function Landing() {
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
               <Text style={{ fontSize: 15, lineHeight: 19 }}>🏆</Text>
               <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
-                100 primeiros aprovados: 0% de comissão e sem assinatura por 60 dias.
+                100 primeiros aprovados: 0% de taxa da plataforma durante 60 dias e sem assinatura por 60 dias.
               </Text>
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
               <Text style={{ fontSize: 15, lineHeight: 19 }}>🚗</Text>
               <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
-                A partir do 101º: 0% de comissão por 60 dias e até 5 corridas sem assinatura.
+                A partir do 101º: 0% de taxa da plataforma durante 60 dias e até 5 corridas sem assinatura.
               </Text>
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
               <Text style={{ fontSize: 15, lineHeight: 19 }}>⏱️</Text>
               <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
-                Prazo contado a partir da aprovação da plataforma.
+                Durante os primeiros 60 dias após a aprovação, 100% do valor de cada corrida fica com você — 0% de taxa da plataforma.
               </Text>
             </View>
           </View>
