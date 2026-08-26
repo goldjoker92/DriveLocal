@@ -127,7 +127,7 @@ describe('real driver wallet view', () => {
       createdAtMs: NOW - 100,
     })[0]).toMatchObject({
       kind: 'hold',
-      title: 'Reserva de comissão',
+      title: 'Reserva da taxa da plataforma',
       amountLabel: '− R$ 3,00',
       status: 'Reservada',
     });
