@@ -49,7 +49,7 @@ export default function DriverTimedOfferCard({ view }) {
 
       <View style={styles.summary}>
         <SummaryRow label="Valor da corrida" value={view.fareLabel} />
-        <SummaryRow label="Comissão" value={view.commissionLabel} />
+        <SummaryRow label="Taxa da plataforma" value={view.commissionLabel} />
         <SummaryRow label="Pagamento" value={view.paymentLabel} emphasized />
       </View>
     </AppCard>
