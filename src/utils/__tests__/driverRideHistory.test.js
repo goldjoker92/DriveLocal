@@ -30,7 +30,7 @@ describe('driver ride history presentation', () => {
       vehicleLabel: '🏍 Moto',
       fareLabel: 'R$ 12,50',
       fareDetail: 'valor final',
-      commissionLabel: 'Comissão 12%',
+      commissionLabel: 'Taxa da plataforma: 12%',
       rideStatusLabel: 'Concluída',
       pixStatusLabel: 'Pix recebido',
     });
@@ -45,8 +45,8 @@ describe('driver ride history presentation', () => {
     });
 
     expect(item.fareLabel).toBe('Valor indisponível');
-    expect(item.commissionLabel).toBe('Comissão indisponível');
-    expect(formatDriverCommissionBps(null)).toBe('Comissão indisponível');
+    expect(item.commissionLabel).toBe('Taxa da plataforma indisponível');
+    expect(formatDriverCommissionBps(null)).toBe('Taxa da plataforma indisponível');
     expect(formatDriverRateBps(null)).toBe('—');
     expect(formatDriverRateBps(0)).toBe('0%');
   });

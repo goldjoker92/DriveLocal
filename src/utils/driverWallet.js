@@ -137,7 +137,7 @@ export function expandWalletTransaction(transaction = {}) {
       return [baseHistoryRow({
         id,
         kind: 'hold',
-        title: 'Reserva de comissão',
+        title: 'Reserva da taxa da plataforma',
         amountCentavos: amount,
         direction: 'debit',
         status,
@@ -164,7 +164,7 @@ export function expandWalletTransaction(transaction = {}) {
         rows.push(baseHistoryRow({
           id: `${id}:capture`,
           kind: 'capture',
-          title: 'Comissão capturada',
+          title: 'Taxa da plataforma debitada',
           amountCentavos: captured,
           direction: 'debit',
           status: 'Capturada',
@@ -187,7 +187,7 @@ export function expandWalletTransaction(transaction = {}) {
       return rows.length > 0 ? rows : [baseHistoryRow({
         id,
         kind: 'capture',
-        title: 'Liquidação de comissão',
+        title: 'Liquidação da taxa da plataforma',
         amountCentavos: amount,
         direction: 'neutral',
         status,

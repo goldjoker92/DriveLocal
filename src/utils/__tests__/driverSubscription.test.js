@@ -50,7 +50,7 @@ describe('real driver Pix subscription view', () => {
       profileTitle: 'Motorista Fundador nº 1–100',
     });
     expect(view.statusDetail).toContain('Assinatura grátis até');
-    expect(view.noSurpriseText).toContain('Depois, assinatura mensal, comissão normal');
+    expect(view.noSurpriseText).toContain('Depois, a assinatura mensal, a taxa normal da plataforma');
     expect(ruleBy(view, 'now', 'subscription')).toMatchObject({ value: 'Grátis' });
     expect(ruleBy(view, 'now', 'commission')).toMatchObject({ value: '0%' });
     expect(ruleBy(view, 'now', 'wallet')).toMatchObject({ value: 'Sem recarga' });
@@ -109,7 +109,7 @@ describe('real driver Pix subscription view', () => {
       commissionLabel: '0%',
       freeRidesRemaining: 0,
     });
-    expect(view.statusDetail).toContain('Comissão 0% até');
+    expect(view.statusDetail).toContain('Taxa da plataforma: 0% até');
     expect(sectionBy(view, 'now').title).toContain('5 corridas promocionais concluídas');
     expect(ruleBy(view, 'now', 'subscription')).toMatchObject({
       value: 'Mensal obrigatória',

@@ -47,7 +47,7 @@ function SubscriptionPlanCard({ plan, selected }) {
         {selected ? <AppBadge label="SEU PLANO" tone="success" /> : null}
       </View>
       <Text style={styles.planPrice}>{`${plan.priceLabel} / ${plan.periodLabel}`}</Text>
-      <Text style={styles.planCommission}>{`Comissão padrão: ${plan.commissionLabel}`}</Text>
+      <Text style={styles.planCommission}>{`Taxa da plataforma padrão: ${plan.commissionLabel}`}</Text>
     </View>
   );
 }
@@ -59,7 +59,7 @@ function SubscriptionDurationNotice() {
       <Text style={styles.durationTitle}>Cada pagamento de assinatura vale 30 dias</Text>
       <Text style={styles.durationText}>
         Os 60 dias não são a duração da assinatura. Eles são somente os benefícios de lançamento:
-        comissão 0% para todos e assinatura gratuita, durante esse período, apenas para os motoristas
+        taxa da plataforma zerada para todos e assinatura gratuita, durante esse período, apenas para os motoristas
         fundadores nº 1–100.
       </Text>
     </AppCard>
@@ -328,7 +328,7 @@ export default function SubscriptionPlans() {
               ) : null}
               <View style={styles.commercialRow}>
                 <View style={styles.commercialMetric}>
-                  <Text style={styles.metricLabel}>Comissão atual</Text>
+                  <Text style={styles.metricLabel}>Taxa da plataforma atual</Text>
                   <Text style={styles.metricValue}>{view.commissionLabel || '—'}</Text>
                   <Text style={styles.metricDetail}>{view.commissionDetail}</Text>
                 </View>

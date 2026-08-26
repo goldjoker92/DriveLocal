@@ -101,7 +101,7 @@ describe('block 18 real driver wallet contract', () => {
     const view = source('src/utils/driverWallet.js');
     const backend = source('functions/src/payments/createPixPayment.js');
 
-    expect(screen).toContain('Nenhuma recarga é necessária durante sua comissão de 0%.');
+    expect(screen).toContain('Nenhuma recarga é necessária enquanto sua taxa da plataforma estiver zerada.');
     expect(screen).toContain('As recargas serão liberadas em ${unlockDate}.');
     expect(screen).toContain('formatTopupPreset(amount, wallet.topupLocked)');
     expect(screen).toContain("? '🔒 Outro valor'");

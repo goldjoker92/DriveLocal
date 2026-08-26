@@ -213,7 +213,7 @@ export default function DriverCockpitDashboardCard({
       </View>
 
       <View style={styles.commercialGrid}>
-        <CommercialMetric label="Comissão" value={commission.label} />
+        <CommercialMetric label="Taxa da plataforma" value={commission.label} />
         <CommercialMetric
           label="Saldo DriveLocal"
           value={formatBRL(summary.walletAvailableCentavos)}
@@ -226,7 +226,7 @@ export default function DriverCockpitDashboardCard({
         <View style={styles.walletAlert}>
           <Text style={styles.walletAlertTitle}>Recarga necessária para receber corridas</Text>
           <Text style={styles.walletAlertText}>
-            {`Seu saldo disponível é ${formatBRL(summary.walletAvailableCentavos)}. Depois da promoção de comissão 0%, o servidor exige saldo acima de ${thresholdLabel} para ficar disponível e também saldo suficiente para reservar a comissão da próxima corrida.`}
+            {`Seu saldo disponível é ${formatBRL(summary.walletAvailableCentavos)}. Depois do período promocional com taxa da plataforma zerada, o servidor exige saldo acima de ${thresholdLabel} para ficar disponível e também saldo suficiente para reservar a taxa da plataforma da próxima corrida.`}
           </Text>
           <AppButton title="RECARREGAR AGORA" onPress={openWallet} />
         </View>
@@ -238,7 +238,7 @@ export default function DriverCockpitDashboardCard({
         <View style={styles.historySectionHeader}>
           <View style={styles.historySectionCopy}>
             <Text style={styles.eyebrow}>ÚLTIMAS 3 CORRIDAS</Text>
-            <Text style={styles.historyIntro}>Valores, comissão, status da corrida e confirmação Pix.</Text>
+            <Text style={styles.historyIntro}>Valores, taxa da plataforma, status da corrida e confirmação Pix.</Text>
           </View>
           <AppButton title="VER TODAS" variant="ghost" onPress={openAllHistory} />
         </View>

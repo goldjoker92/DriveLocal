@@ -206,8 +206,8 @@ function buildRuleSections({
     ? `Garantida até ${freePeriodDate}, mesmo quando a assinatura já for paga.`
     : 'Válida durante o período promocional confirmado no cadastro.';
   const noWalletDetail = freePeriodDate
-    ? `Nenhuma recarga é necessária até ${freePeriodDate}, enquanto a comissão for 0%.`
-    : 'Nenhuma recarga é necessária enquanto a comissão for 0%.';
+    ? `Nenhuma recarga é necessária até ${freePeriodDate}, enquanto a taxa da plataforma estiver zerada.`
+    : 'Nenhuma recarga é necessária enquanto a taxa da plataforma estiver zerada.';
   const walletRequiredDetail = `Mantenha o saldo disponível acima de ${walletThreshold} para receber novas corridas.`;
   const monthlyRequiredDetail = currentPlan
     ? `${recurringPlan}. O plano precisa estar ativo para receber novas corridas.`
@@ -225,12 +225,12 @@ function buildRuleSections({
           'Grátis',
           founderDate ? `Sem pagamento até ${founderDate}.` : 'Gratuita durante o período fundador.'
         ),
-        rule('commission', 'Comissão', '0%', commissionFreeDetail),
+        rule('commission', 'Taxa da plataforma', '0%', commissionFreeDetail),
         rule('wallet', 'Saldo DriveLocal', 'Sem recarga', noWalletDetail),
       ]),
       section('after_launch', 'Depois dos 60 dias', [
         rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
-        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('commission', 'Taxa da plataforma', standardCommission, 'Aplicada em cada corrida concluída.'),
         rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
       ]),
     ]);
@@ -247,14 +247,14 @@ function buildRuleSections({
           'Sem pagamento',
           `${remaining} ${rideWord}. O plano passa a ser obrigatório depois da 5ª corrida ou no fim dos 60 dias, o que ocorrer primeiro.`
         ),
-        rule('commission', 'Comissão', '0%', commissionFreeDetail),
+        rule('commission', 'Taxa da plataforma', '0%', commissionFreeDetail),
         rule('wallet', 'Saldo DriveLocal', 'Sem recarga', noWalletDetail),
       ]),
       section('after_fifth_ride', 'Depois da 5ª corrida', [
         rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
         rule(
           'commission',
-          'Comissão',
+          'Taxa da plataforma',
           'Continua 0%',
           freePeriodDate ? `Permanece em 0% até ${freePeriodDate}.` : commissionFreeDetail
         ),
@@ -262,7 +262,7 @@ function buildRuleSections({
       ]),
       section('after_launch', afterLaunchTitle, [
         rule('subscription', 'Assinatura', 'Continua mensal', monthlyRequiredDetail),
-        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('commission', 'Taxa da plataforma', standardCommission, 'Aplicada em cada corrida concluída.'),
         rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
       ]),
     ]);
@@ -280,7 +280,7 @@ function buildRuleSections({
       ),
       rule(
         'commission',
-        'Comissão',
+        'Taxa da plataforma',
         policy.freePeriodActive ? '0%' : standardCommission,
         policy.freePeriodActive ? commissionFreeDetail : 'Aplicada em cada corrida concluída.'
       ),
@@ -296,7 +296,7 @@ function buildRuleSections({
     if (policy.freePeriodActive) {
       sections.push(section('after_launch', afterLaunchTitle, [
         rule('subscription', 'Assinatura', 'Continua mensal', monthlyRequiredDetail),
-        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('commission', 'Taxa da plataforma', standardCommission, 'Aplicada em cada corrida concluída.'),
         rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
       ]));
     } else if (subscriptionDate) {
@@ -316,12 +316,12 @@ function buildRuleSections({
     return Object.freeze([
       section('now', 'Agora — 5 corridas promocionais concluídas', [
         rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
-        rule('commission', 'Comissão', '0%', commissionFreeDetail),
+        rule('commission', 'Taxa da plataforma', '0%', commissionFreeDetail),
         rule('wallet', 'Saldo DriveLocal', 'Sem recarga', noWalletDetail),
       ]),
       section('after_launch', afterLaunchTitle, [
         rule('subscription', 'Assinatura', 'Continua mensal', monthlyRequiredDetail),
-        rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+        rule('commission', 'Taxa da plataforma', standardCommission, 'Aplicada em cada corrida concluída.'),
         rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
       ]),
     ]);
@@ -330,7 +330,7 @@ function buildRuleSections({
   return Object.freeze([
     section('now', 'Agora — período promocional encerrado', [
       rule('subscription', 'Assinatura', 'Mensal obrigatória', monthlyRequiredDetail),
-      rule('commission', 'Comissão', standardCommission, 'Aplicada em cada corrida concluída.'),
+      rule('commission', 'Taxa da plataforma', standardCommission, 'Aplicada em cada corrida concluída.'),
       rule('wallet', 'Saldo DriveLocal', 'Obrigatório', walletRequiredDetail),
     ]),
   ]);
@@ -421,8 +421,8 @@ export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
     mode = DRIVER_SUBSCRIPTION_MODE.REQUIRED_COMMISSION_FREE;
     statusTitle = 'Assinatura necessária';
     statusDetail = freePeriodDate
-      ? `Comissão 0% até ${freePeriodDate}.`
-      : 'Sua comissão promocional continua em 0%.';
+      ? `Taxa da plataforma: 0% até ${freePeriodDate}.`
+      : 'A taxa da plataforma continua zerada.';
     paymentEnabled = Boolean(currentPlan);
     paymentButtonTitle = 'PAGAR COM PIX';
     paymentReason = currentPlan ? null : 'vehicle_unknown';
@@ -430,7 +430,7 @@ export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
     mode = DRIVER_SUBSCRIPTION_MODE.REQUIRED_STANDARD;
     statusTitle = 'Assinatura necessária';
     statusDetail = currentPlan
-      ? `Comissão ${currentPlan.commissionLabel} após a ativação.`
+      ? `Taxa da plataforma: ${currentPlan.commissionLabel} após a ativação.`
       : 'Selecione um veículo válido para consultar o plano.';
     paymentEnabled = Boolean(currentPlan);
     paymentButtonTitle = 'PAGAR COM PIX';
@@ -442,11 +442,11 @@ export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
     : currentPlan?.commissionLabel || null;
   const commissionDetail = policy.freePeriodActive
     ? freePeriodDate
-      ? `Comissão 0% até ${freePeriodDate}`
-      : 'Comissão promocional 0%'
+      ? `Taxa da plataforma: 0% até ${freePeriodDate}`
+      : 'Taxa da plataforma promocional: 0%'
     : currentPlan
-      ? `Comissão ${currentPlan.commissionLabel}`
-      : 'Comissão indisponível';
+      ? `Taxa da plataforma: ${currentPlan.commissionLabel}`
+      : 'Taxa da plataforma indisponível';
   const approvalNumber = safePositiveInteger(d.approvalNumber || d.founderNumber);
   const profileTitle = policy.founder
     ? 'Motorista Fundador nº 1–100'
@@ -456,8 +456,8 @@ export function deriveDriverSubscriptionView(driver, nowValue = Date.now()) {
     approvalDate ? `em ${approvalDate}` : null,
   ].filter(Boolean).join(' ') || 'Condição calculada pelo cadastro aprovado.';
   const noSurpriseText = policy.founder
-    ? 'Durante 60 dias, assinatura e comissão são gratuitas. Depois, assinatura mensal, comissão normal e saldo DriveLocal passam a ser obrigatórios.'
-    : 'As 5 corridas definem quando a assinatura começa. Os 60 dias definem quando a comissão normal e o saldo DriveLocal começam. São contadores independentes.';
+    ? 'Durante 60 dias, a assinatura é gratuita e a taxa da plataforma fica zerada. Depois, a assinatura mensal, a taxa normal da plataforma e o saldo DriveLocal passam a ser obrigatórios.'
+    : 'As 5 corridas definem quando a assinatura começa. Os 60 dias definem quando a taxa normal da plataforma e o saldo DriveLocal começam. São contadores independentes.';
   const ruleSections = buildRuleSections({
     policy,
     currentPlan,

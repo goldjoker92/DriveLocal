@@ -81,7 +81,7 @@ describe('block 19 real Pix subscription contract', () => {
     expect(model).toContain('priceLabel: formatBRL(priceCentavos)');
     expect(model).toContain('commissionLabel: `${commissionBps / 100}%`');
     expect(screen).toContain('Planos de 30 dias');
-    expect(screen).toContain('Comissão padrão: ${plan.commissionLabel}');
+    expect(screen).toContain('Taxa da plataforma padrão: ${plan.commissionLabel}');
     expect(screen).toContain('plan.priceLabel');
   });
 
