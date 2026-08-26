@@ -404,7 +404,7 @@ export default function DriverHome() {
   const isAvailable = availability === AVAILABILITY.ONLINE;
   const photoStatus = driverPhotoStatus(driver);
   const activePublicPhoto = hasApprovedDriverPhoto(driver);
-  const commissionWarn = benefitWarning('Sua comissão gratuita', commissionFreeUntilMs(driver), nowMs);
+  const commissionWarn = benefitWarning('Sua taxa da plataforma zerada', commissionFreeUntilMs(driver), nowMs);
   const subscriptionWarn = benefitWarning('Sua assinatura gratuita', subscriptionFreeUntilMs(driver), nowMs);
 
   useEffect(() => {
