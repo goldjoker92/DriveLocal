@@ -63,7 +63,7 @@ function RideHistoryRow({ item }) {
           <Text style={styles.detailValue}>{item.vehicleLabel}</Text>
         </View>
         <View style={styles.detailCell}>
-          <Text style={styles.detailLabel}>Comissão</Text>
+          <Text style={styles.detailLabel}>Taxa da plataforma</Text>
           <Text style={styles.detailValue}>{item.commissionLabel}</Text>
         </View>
       </View>
@@ -146,7 +146,7 @@ export default function DriverRideHistory() {
               <Text style={styles.eyebrow}>SEUS REGISTROS REAIS</Text>
               <Text style={styles.introTitle}>Corridas aceitas e pagamentos Pix</Text>
               <Text style={styles.introText}>
-                Veja data, passageiro, trajeto, veículo, valor, comissão e o estado final do Pix. Os dados vêm do servidor e podem levar alguns segundos para refletir uma corrida recém-concluída.
+                Veja data, passageiro, trajeto, veículo, valor, taxa da plataforma e o estado final do Pix. Os dados vêm do servidor e podem levar alguns segundos para refletir uma corrida recém-concluída.
               </Text>
             </View>
             <AppButton
