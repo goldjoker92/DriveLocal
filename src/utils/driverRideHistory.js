@@ -58,10 +58,10 @@ export function formatDriverHistoryDateTime(timestampMs) {
 }
 
 export function formatDriverCommissionBps(value) {
-  if (value == null || value === '') return 'Comissão indisponível';
+  if (value == null || value === '') return 'Taxa da plataforma indisponível';
   const bps = Number(value);
-  if (![0, 1200, 1500].includes(bps)) return 'Comissão indisponível';
-  return `Comissão ${String(bps / 100).replace('.', ',')}%`;
+  if (![0, 1200, 1500].includes(bps)) return 'Taxa da plataforma indisponível';
+  return `Taxa da plataforma: ${String(bps / 100).replace('.', ',')}%`;
 }
 
 export function formatDriverRateBps(value) {
