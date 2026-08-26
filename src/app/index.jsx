@@ -170,7 +170,7 @@ export default function Landing() {
           <RideField dotColor={C.green} placeholder="Origem" value={origem} onChangeText={setOrigem} />
           <RideField dotColor={C.cta} placeholder="Destino" value={destino} onChangeText={setDestino} />
 
-          <CtaButton label="Ver preço / pedir corrida" onPress={onRequestRide} kind="primary" />
+          <CtaButton label="Ver preço / cadastrar-se ou entrar / pedir corrida" onPress={onRequestRide} kind="primary" />
 
           <Text style={{ fontSize: 13, color: C.muted }}>Pagamento direto por Pix ao motorista.</Text>
 
