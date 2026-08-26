@@ -187,7 +187,7 @@ export default function Landing() {
       <View style={[card, { gap: 12 }]}>
         <Text style={{ fontSize: 18, fontWeight: '800', color: C.text }}>Sou motorista?</Text>
         <Text style={{ fontSize: 14, color: C.muted, lineHeight: 20 }}>
-          Ganhe corridas locais com menos comissão da plataforma e receba direto no seu Pix.
+          Ganhe corridas locais com uma taxa da plataforma menor e receba direto no seu Pix.
         </Text>
 
         {/* Founder offer — same wording, friendlier visual rhythm */}
