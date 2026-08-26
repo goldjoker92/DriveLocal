@@ -18,7 +18,7 @@ describe('block 17 compact timed offer contract', () => {
     expect(card).toContain('view.distanceLabel');
     expect(card).toContain('view.etaLabel');
     expect(card).toContain('view.vehicle.label');
-    expect(card).toContain('label="Comissão"');
+    expect(card).toContain('label="Taxa da plataforma"');
     expect(card).toContain('label="Pagamento"');
 
     const countdownIndex = card.indexOf('view.secondsLeft');
