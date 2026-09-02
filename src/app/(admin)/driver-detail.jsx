@@ -5,10 +5,10 @@
 // Garde admin au montage. Toutes les erreurs passent par un message UI.
 // ============================================================
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View, Text, Pressable, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
@@ -43,6 +43,10 @@ import {
   verificationTone,
 } from '../../constants/driverStatuses';
 import { showConfirmAlert } from '../../utils/alertUtils';
+import {
+  driverApprovalErrorMessage,
+  hasPhotoApprovedForDriverApproval,
+} from '../../utils/adminDriverApproval';
 
 // Documents affichables avec leur champ URL sur le document driver.
 const DOC_LINKS = [
@@ -160,7 +164,7 @@ export default function DriverDetail() {
   }, []);
 
   // Charge (ou recharge) le document driver.
-  function loadDriver() {
+  const loadDriver = useCallback(() => {
     if (!driverId) {
       setLoading(false);
       return Promise.resolve();
@@ -175,37 +179,44 @@ export default function DriverDetail() {
         setError('Não foi possível carregar o motorista.');
       })
       .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    let active = true;
-    if (!driverId) {
-      setLoading(false);
-      return undefined;
-    }
-    getDriver(driverId)
-      .then((data) => {
-        if (active) {
-          setDriver(data);
-          console.log('[ADMIN_HISTORY] entries=', (data && data.statusHistory ? data.statusHistory.length : 0));
-        }
-      })
-      .catch((e) => {
-        console.log('[ADMIN_DRIVER_DETAIL] load error', e.message);
-        if (active) setError('Não foi possível carregar o motorista.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
   }, [driverId]);
+
+  // Refresh after returning from the photo-review screen so the final approval
+  // button immediately reflects the newly approved public photo.
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    loadDriver();
+  }, [loadDriver]));
 
   const adminUid = () => auth.currentUser && auth.currentUser.uid;
 
+  function openPhotoReview() {
+    setError('');
+    console.log('[ADMIN_DRIVER_DETAIL] photo review opened', {
+      driverId,
+      vehicleType: driver?.vehicleType || null,
+      verificationStatus: driver?.verificationStatus || null,
+      driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+    });
+    router.push({ pathname: '/(admin)/driver-photo-review', params: { driverId } });
+  }
+
   // Approbation — avec confirmation. Aucune commission prélevée ici (règle métier).
   function handleApprove() {
+    // The backend requires an approved public photo for both cars and motorcycles.
+    // Fail early with an actionable message; the callable repeats this check as
+    // the security boundary in case the client state is stale.
+    if (!hasPhotoApprovedForDriverApproval(driver, driverId)) {
+      console.log('[ADMIN_DRIVER_DETAIL] approval blocked', {
+        driverId,
+        vehicleType: driver?.vehicleType || null,
+        verificationStatus: driver?.verificationStatus || null,
+        driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+        reason: 'DRIVER_PHOTO_APPROVAL_REQUIRED',
+      });
+      setError('Aprove primeiro a foto do motorista.');
+      return;
+    }
     showConfirmAlert({
       title: 'Aprovar motorista?',
       message: 'Este motorista poderá ficar disponível para corridas após aprovação.',
@@ -214,12 +225,25 @@ export default function DriverDetail() {
         setError('');
         setSubmitting(true);
         try {
-          console.log('[ADMIN_DRIVER_DETAIL] approve requested driverId=', driverId);
+          console.log('[ADMIN_DRIVER_DETAIL] approval requested', {
+            driverId,
+            vehicleType: driver?.vehicleType || null,
+            verificationStatus: driver?.verificationStatus || null,
+            driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+          });
           await approveDriver(driverId);
           await loadDriver();
         } catch (e) {
-          console.log('[ADMIN_DRIVER_DETAIL] approve error', e.message);
-          setError('Não foi possível aprovar o motorista.');
+          console.log('[ADMIN_DRIVER_DETAIL] approval failed', {
+            driverId,
+            vehicleType: driver?.vehicleType || null,
+            verificationStatus: driver?.verificationStatus || null,
+            driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+            code: e?.code || null,
+            reason: e?.details?.metadata?.reason || e?.metadata?.reason || null,
+            message: e?.message || 'unknown',
+          });
+          setError(driverApprovalErrorMessage(e));
         } finally {
           setSubmitting(false);
         }
@@ -395,6 +419,7 @@ export default function DriverDetail() {
   }
 
   const status = driver && driver.verificationStatus;
+  const photoApprovedForFinalApproval = hasPhotoApprovedForDriverApproval(driver, driverId);
   // Founder protection (Iteration 2B): founder drivers must show benefit info
   // only — never the subscription test buttons, and their fields stay untouched.
   const isFounder =
@@ -408,6 +433,21 @@ export default function DriverDetail() {
     if (status === VERIFICATION_STATUS.PENDING_REVIEW) {
       return (
         <>
+          {!photoApprovedForFinalApproval ? (
+            <>
+              <InfoBanner
+                tone="warning"
+                title="Aprovação da foto necessária"
+                body="Revise e aprove a foto pública antes de aprovar o motorista."
+              />
+              <AppButton
+                title="Revisar foto do motorista"
+                variant="secondary"
+                onPress={openPhotoReview}
+                disabled={submitting}
+              />
+            </>
+          ) : null}
           <AppInput
             label="Motivo (para correção ou recusa)"
             value={reason}
@@ -417,7 +457,7 @@ export default function DriverDetail() {
           <AppButton
             title={submitting ? 'Processando…' : 'Aprovar motorista'}
             onPress={handleApprove}
-            disabled={submitting}
+            disabled={submitting || !photoApprovedForFinalApproval}
           />
           <AppButton
             title={submitting ? 'Processando…' : 'Solicitar correção'}
