@@ -59,6 +59,8 @@ service cloud.firestore {
         'selfieUrl', 'selfieStatus',
         'cnhFrenteUrl', 'cnhFrenteStatus', 'cnhVersoUrl', 'cnhVersoStatus',
         'crlvUrl', 'crlvStatus', 'vehiclePhotoUrl', 'vehiclePhotoStatus',
+        // Rollout compatibility only: installed app versions may still write
+        // these fields, but the current application never requires or reads them.
         'motofreteUrl', 'motofreteStatus',
         // Availability itself is server-owned. The client may only renew the lease
         // while publishing a point bound to the existing server session.
@@ -129,11 +131,7 @@ service cloud.firestore {
         request.resource.data.crlvStatus == 'submitted' &&
         request.resource.data.crlvUrl is string &&
         request.resource.data.vehiclePhotoStatus == 'submitted' &&
-        request.resource.data.vehiclePhotoUrl is string &&
-        (request.resource.data.vehicleType != 'moto' || (
-          request.resource.data.motofreteStatus == 'submitted' &&
-          request.resource.data.motofreteUrl is string
-        ));
+        request.resource.data.vehiclePhotoUrl is string;
     }
 
     function driverDocumentsSubmissionValid() {
@@ -164,7 +162,7 @@ service cloud.firestore {
       return [
         'documentsStatus', 'selfieStatus',
         'cnhFrenteStatus', 'cnhVersoStatus', 'crlvStatus',
-        'vehiclePhotoStatus', 'motofreteStatus',
+        'vehiclePhotoStatus',
         'reviewNote', 'adminNote',
         'updatedAt'
       ];

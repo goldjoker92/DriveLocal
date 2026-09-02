@@ -5,10 +5,10 @@
 // Garde admin au montage. Toutes les erreurs passent par un message UI.
 // ============================================================
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, View, Text, Pressable, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
@@ -19,7 +19,7 @@ import AdminTableRow from '../../components/AdminTableRow';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
-import { VEHICLE_LABELS_PT_BR, VEHICLE_MOTO } from '../../constants/vehicleTypes';
+import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { auth, db } from '../../config/firebase';
 import {
   getDriver,
@@ -43,6 +43,12 @@ import {
   verificationTone,
 } from '../../constants/driverStatuses';
 import { showConfirmAlert } from '../../utils/alertUtils';
+import {
+  driverApprovalErrorReason,
+  driverApprovalErrorMessage,
+  hasPhotoApprovedForDriverApproval,
+  requiresDuplicateApprovalReview,
+} from '../../utils/adminDriverApproval';
 
 // Documents affichables avec leur champ URL sur le document driver.
 const DOC_LINKS = [
@@ -51,7 +57,6 @@ const DOC_LINKS = [
   { label: '📷 CNH verso', field: 'cnhVersoUrl' },
   { label: '📷 CRLV', field: 'crlvUrl' },
   { label: '📷 Foto do veículo', field: 'vehiclePhotoUrl' },
-  { label: '📷 Certificado Motofretista', field: 'motofreteUrl', motoOnly: true },
 ];
 
 // Formate un Timestamp/Date en "28/06/2026 às 14:33".
@@ -161,7 +166,7 @@ export default function DriverDetail() {
   }, []);
 
   // Charge (ou recharge) le document driver.
-  function loadDriver() {
+  const loadDriver = useCallback(() => {
     if (!driverId) {
       setLoading(false);
       return Promise.resolve();
@@ -176,51 +181,96 @@ export default function DriverDetail() {
         setError('Não foi possível carregar o motorista.');
       })
       .finally(() => setLoading(false));
-  }
-
-  useEffect(() => {
-    let active = true;
-    if (!driverId) {
-      setLoading(false);
-      return undefined;
-    }
-    getDriver(driverId)
-      .then((data) => {
-        if (active) {
-          setDriver(data);
-          console.log('[ADMIN_HISTORY] entries=', (data && data.statusHistory ? data.statusHistory.length : 0));
-        }
-      })
-      .catch((e) => {
-        console.log('[ADMIN_DRIVER_DETAIL] load error', e.message);
-        if (active) setError('Não foi possível carregar o motorista.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
   }, [driverId]);
+
+  // Refresh after returning from the photo-review screen so the final approval
+  // button immediately reflects the newly approved public photo.
+  useFocusEffect(useCallback(() => {
+    setLoading(true);
+    loadDriver();
+  }, [loadDriver]));
 
   const adminUid = () => auth.currentUser && auth.currentUser.uid;
 
+  function openPhotoReview() {
+    setError('');
+    console.log('[ADMIN_DRIVER_DETAIL] photo review opened', {
+      driverId,
+      vehicleType: driver?.vehicleType || null,
+      verificationStatus: driver?.verificationStatus || null,
+      driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+    });
+    router.push({ pathname: '/(admin)/driver-photo-review', params: { driverId } });
+  }
+
   // Approbation — avec confirmation. Aucune commission prélevée ici (règle métier).
   function handleApprove() {
+    // The backend requires an approved public photo for both cars and motorcycles.
+    // Fail early with an actionable message; the callable repeats this check as
+    // the security boundary in case the client state is stale.
+    if (!hasPhotoApprovedForDriverApproval(driver, driverId)) {
+      console.log('[ADMIN_DRIVER_DETAIL] approval blocked', {
+        driverId,
+        vehicleType: driver?.vehicleType || null,
+        verificationStatus: driver?.verificationStatus || null,
+        driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+        reason: 'DRIVER_PHOTO_APPROVAL_REQUIRED',
+      });
+      setError('Aprove primeiro a foto do motorista.');
+      return;
+    }
+    const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
+    const duplicateOverrideReason = duplicateReviewRequired ? reason.trim() : null;
+    if (duplicateReviewRequired && !duplicateOverrideReason) {
+      console.log('[ADMIN_DRIVER_DETAIL] approval blocked', {
+        driverId,
+        vehicleType: driver?.vehicleType || null,
+        verificationStatus: driver?.verificationStatus || null,
+        driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+        duplicateCheckStatus: driver?.duplicateCheckStatus || null,
+        reason: 'DUPLICATE_OVERRIDE_REASON_REQUIRED',
+      });
+      setError('Revise os dados duplicados e informe o motivo da aprovação manual.');
+      return;
+    }
     showConfirmAlert({
       title: 'Aprovar motorista?',
-      message: 'Este motorista poderá ficar disponível para corridas após aprovação.',
+      message: duplicateReviewRequired
+        ? 'Você confirma que revisou os possíveis dados duplicados e deseja aprovar manualmente este motorista?'
+        : 'Este motorista poderá ficar disponível para corridas após aprovação.',
       confirmText: 'Aprovar',
       onConfirm: async () => {
         setError('');
         setSubmitting(true);
         try {
-          console.log('[ADMIN_DRIVER_DETAIL] approve requested driverId=', driverId);
-          await approveDriver(driverId);
+          console.log('[ADMIN_DRIVER_DETAIL] approval requested', {
+            driverId,
+            vehicleType: driver?.vehicleType || null,
+            verificationStatus: driver?.verificationStatus || null,
+            driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+            duplicateCheckStatus: driver?.duplicateCheckStatus || null,
+            duplicateOverrideProvided: Boolean(duplicateOverrideReason),
+          });
+          await approveDriver(driverId, duplicateOverrideReason);
+          setReason('');
           await loadDriver();
         } catch (e) {
-          console.log('[ADMIN_DRIVER_DETAIL] approve error', e.message);
-          setError('Não foi possível aprovar o motorista.');
+          const failureReason = driverApprovalErrorReason(e);
+          console.log('[ADMIN_DRIVER_DETAIL] approval failed', {
+            driverId,
+            vehicleType: driver?.vehicleType || null,
+            verificationStatus: driver?.verificationStatus || null,
+            driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+            duplicateCheckStatus: driver?.duplicateCheckStatus || null,
+            code: e?.code || null,
+            reason: failureReason,
+            message: e?.message || 'unknown',
+          });
+          setError(driverApprovalErrorMessage(e));
+          // The backend writes `review_required` during the first failed duplicate
+          // scan. Reload so the admin can immediately provide an explicit reason
+          // and retry without leaving this screen.
+          if (failureReason === 'DUPLICATE_REVIEW_REQUIRED') await loadDriver();
         } finally {
           setSubmitting(false);
         }
@@ -395,8 +445,9 @@ export default function DriverDetail() {
     if (url) Linking.openURL(url);
   }
 
-  const isMoto = driver && driver.vehicleType === VEHICLE_MOTO;
   const status = driver && driver.verificationStatus;
+  const photoApprovedForFinalApproval = hasPhotoApprovedForDriverApproval(driver, driverId);
+  const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
   // Founder protection (Iteration 2B): founder drivers must show benefit info
   // only — never the subscription test buttons, and their fields stay untouched.
   const isFounder =
@@ -410,8 +461,32 @@ export default function DriverDetail() {
     if (status === VERIFICATION_STATUS.PENDING_REVIEW) {
       return (
         <>
+          {!photoApprovedForFinalApproval ? (
+            <>
+              <InfoBanner
+                tone="warning"
+                title="Aprovação da foto necessária"
+                body="Revise e aprove a foto pública antes de aprovar o motorista."
+              />
+              <AppButton
+                title="Revisar foto do motorista"
+                variant="secondary"
+                onPress={openPhotoReview}
+                disabled={submitting}
+              />
+            </>
+          ) : null}
+          {duplicateReviewRequired ? (
+            <InfoBanner
+              tone="warning"
+              title="Revisão de possível duplicata"
+              body="Confira CPF, telefone, placa, chave Pix e e-mail. Para aprovar, registre abaixo o motivo da decisão manual."
+            />
+          ) : null}
           <AppInput
-            label="Motivo (para correção ou recusa)"
+            label={duplicateReviewRequired
+              ? 'Motivo da aprovação manual, correção ou recusa'
+              : 'Motivo (para correção ou recusa)'}
             value={reason}
             onChangeText={setReason}
             placeholder="Descreva o que precisa ser corrigido ou o motivo da recusa"
@@ -419,7 +494,9 @@ export default function DriverDetail() {
           <AppButton
             title={submitting ? 'Processando…' : 'Aprovar motorista'}
             onPress={handleApprove}
-            disabled={submitting}
+            disabled={submitting
+              || !photoApprovedForFinalApproval
+              || (duplicateReviewRequired && !reason.trim())}
           />
           <AppButton
             title={submitting ? 'Processando…' : 'Solicitar correção'}
@@ -622,7 +699,7 @@ export default function DriverDetail() {
             {/* DOCUMENTOS */}
             <AppCard>
               <SectionTitle>DOCUMENTOS</SectionTitle>
-              {DOC_LINKS.filter((d) => !d.motoOnly || isMoto).map((d) => {
+              {DOC_LINKS.map((d) => {
                 const url = driver[d.field];
                 return (
                   <AdminTableRow

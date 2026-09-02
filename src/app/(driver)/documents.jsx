@@ -2,10 +2,10 @@
 // guided capture -> passenger preview -> private admin review. Other documents keep
 // their existing camera/gallery upload behavior.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
@@ -15,7 +15,6 @@ import { colors } from '../../constants/colors';
 import { radius, spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { DRIVER_PHOTO_STATUS, driverPhotoStatus, rejectionReasonLabel } from '../../constants/driverPhoto';
-import { VEHICLE_MOTO } from '../../constants/vehicleTypes';
 import { auth, db } from '../../config/firebase';
 import { getDriver, submitForReview, updateDocumentUrl } from '../../services/driverService';
 import { uploadDriverDocument } from '../../services/storageService';
@@ -26,11 +25,10 @@ const STATUS_FIELD = {
   cnh_verso: 'cnhVersoStatus',
   crlv: 'crlvStatus',
   vehicle_photo: 'vehiclePhotoStatus',
-  motofrete_cert: 'motofreteStatus',
 };
 
-function buildDocList(vehicleType) {
-  const base = [
+function buildDocList() {
+  return [
     {
       type: 'selfie',
       label: 'Foto de motorista',
@@ -42,14 +40,6 @@ function buildDocList(vehicleType) {
     { type: 'crlv', label: 'CRLV', note: 'Documento do veículo.' },
     { type: 'vehicle_photo', label: 'Foto do veículo', note: 'Foto do veículo com a placa visível.' },
   ];
-  if (vehicleType === VEHICLE_MOTO) {
-    base.push({
-      type: 'motofrete_cert',
-      label: 'Certificado Motofretista',
-      note: 'Certificado de Condutor de Mototáxi (obrigatório por lei).',
-    });
-  }
-  return base;
 }
 
 function PhotoStatus({ state, driver }) {
@@ -76,55 +66,57 @@ export default function Documents() {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
   const [driver, setDriver] = useState(null);
-  const [vehicleType, setVehicleType] = useState(null);
   const [docState, setDocState] = useState({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  useEffect(() => {
-    let active = true;
-    if (!uid) {
-      setLoading(false);
-      return undefined;
-    }
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      setLoading(true);
+      setSubmitError('');
+      if (!uid) {
+        setLoading(false);
+        return undefined;
+      }
 
-    getDriver(uid)
-      .then((data) => {
-        if (!active || !data) return;
-        setDriver(data);
-        setVehicleType(data.vehicleType || null);
-        const initial = {};
-        const photoStatus = driverPhotoStatus(data);
-        if (photoStatus === DRIVER_PHOTO_STATUS.APPROVED || photoStatus === DRIVER_PHOTO_STATUS.PENDING) {
-          initial.selfie = { status: 'done', progress: 100, photoReviewStatus: photoStatus };
-        } else if (photoStatus === DRIVER_PHOTO_STATUS.REJECTED) {
-          initial.selfie = { status: 'error', progress: 0, photoReviewStatus: photoStatus };
-        }
-        Object.entries(STATUS_FIELD).forEach(([docType, field]) => {
-          if (data[field] === 'submitted' || data[field] === 'approved') {
-            initial[docType] = { status: 'done', progress: 100 };
+      getDriver(uid)
+        .then((data) => {
+          if (!active || !data) return;
+          setDriver(data);
+          const initial = {};
+          const photoStatus = driverPhotoStatus(data);
+          if (photoStatus === DRIVER_PHOTO_STATUS.APPROVED || photoStatus === DRIVER_PHOTO_STATUS.PENDING) {
+            initial.selfie = { status: 'done', progress: 100, photoReviewStatus: photoStatus };
+          } else if (photoStatus === DRIVER_PHOTO_STATUS.REJECTED) {
+            initial.selfie = { status: 'error', progress: 0, photoReviewStatus: photoStatus };
           }
+          Object.entries(STATUS_FIELD).forEach(([docType, field]) => {
+            if (data[field] === 'submitted' || data[field] === 'approved') {
+              initial[docType] = { status: 'done', progress: 100 };
+            }
+          });
+          setDocState(initial);
+          logDriverPhotoEvent('documents.photo_status_loaded', {
+            driverId: uid,
+            status: photoStatus,
+            hasApprovedPhoto: photoStatus === DRIVER_PHOTO_STATUS.APPROVED,
+          });
+        })
+        .catch((error) => {
+          console.log('[DOCUMENTS] load error', error?.message || 'unknown');
+          if (active) setSubmitError('Não foi possível carregar os documentos.');
+        })
+        .finally(() => {
+          if (active) setLoading(false);
         });
-        setDocState(initial);
-        logDriverPhotoEvent('documents.photo_status_loaded', {
-          driverId: uid,
-          status: photoStatus,
-          hasApprovedPhoto: photoStatus === DRIVER_PHOTO_STATUS.APPROVED,
-        });
-      })
-      .catch((error) => {
-        console.log('[DOCUMENTS] load error', error?.message || 'unknown');
-        if (active) setSubmitError('Não foi possível carregar os documentos.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
 
-    return () => {
-      active = false;
-    };
-  }, [uid]);
+      return () => {
+        active = false;
+      };
+    }, [uid])
+  );
 
   function patchDoc(docType, patch) {
     setDocState((previous) => ({
@@ -201,7 +193,7 @@ export default function Documents() {
     ]);
   }
 
-  const docList = buildDocList(vehicleType);
+  const docList = buildDocList();
   const allSubmitted = docList.every((item) => docState[item.type]?.status === 'done');
 
   async function handleSubmit() {

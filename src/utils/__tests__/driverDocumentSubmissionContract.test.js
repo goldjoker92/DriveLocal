@@ -25,6 +25,15 @@ describe('driver document submission contract', () => {
     expect(rules).toContain("request.resource.data.duplicateCheckStatus == 'pending_admin_review'");
   });
 
+  it('reloads persisted document and selfie statuses after returning from capture', () => {
+    const documents = source('src/app/(driver)/documents.jsx');
+
+    expect(documents).toContain("import { useFocusEffect, useRouter } from 'expo-router'");
+    expect(documents).toContain('useFocusEffect(');
+    expect(documents).toContain('getDriver(uid)');
+    expect(documents).toContain("initial.selfie = { status: 'done'");
+  });
+
   it('requires every uploaded document and prevents driver self-approval', () => {
     const rules = source('backend/firebase/rules/firestore.rules');
 
@@ -38,10 +47,25 @@ describe('driver document submission contract', () => {
     expect(rules).toContain('request.resource.data.crlvUrl is string');
     expect(rules).toContain("request.resource.data.vehiclePhotoStatus == 'submitted'");
     expect(rules).toContain('request.resource.data.vehiclePhotoUrl is string');
-    expect(rules).toContain("request.resource.data.motofreteStatus == 'submitted'");
-    expect(rules).toContain('request.resource.data.motofreteUrl is string');
     expect(rules).toContain("resource.data.verificationStatus in ['draft', 'correction_requested']");
     expect(rules).not.toContain("request.resource.data.verificationStatus == 'approved'");
+  });
+
+  it('lets a motorcycle package reach admin review without a specialized certificate', () => {
+    const applicationFiles = [
+      'src/app/(driver)/documents.jsx',
+      'src/app/(admin)/driver-detail.jsx',
+      'src/services/driverService.js',
+      'src/services/storageService.js',
+    ];
+
+    applicationFiles.forEach((file) => {
+      expect(source(file)).not.toMatch(/motofrete|motofretista/i);
+    });
+
+    const rules = source('backend/firebase/rules/firestore.rules');
+    expect(rules).not.toContain("request.resource.data.motofreteStatus == 'submitted'");
+    expect(rules).not.toContain('request.resource.data.motofreteUrl is string');
   });
 
   it('keeps package submission out of the generic driver update allowlist', () => {

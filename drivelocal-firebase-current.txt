@@ -435,10 +435,9 @@ const DOC_FIELD_MAP = {
   cnh_verso: { url: 'cnhVersoUrl', status: 'cnhVersoStatus' },
   crlv: { url: 'crlvUrl', status: 'crlvStatus' },
   vehicle_photo: { url: 'vehiclePhotoUrl', status: 'vehiclePhotoStatus' },
-  motofrete_cert: { url: 'motofreteUrl', status: 'motofreteStatus' },
 };
 
-// Documents obligatoires pour tous + le certificat motofrete pour la moto.
+// Documents obligatoires pour tous les véhicules.
 const BASE_REQUIRED_DOCS = ['selfie', 'cnh_frente', 'cnh_verso', 'crlv', 'vehicle_photo'];
 
 // Met Ã  jour les infos vÃ©hicule et recalcule vehicleStatus.
@@ -474,11 +473,10 @@ export async function updateDocumentUrl(driverId, docType, url) {
 }
 
 // VÃ©rifie que tous les documents obligatoires ont le statut "submitted".
-// La moto exige en plus motofrete_cert. Retourne { allSubmitted, missing }.
-export function checkAllDocumentsSubmitted(driver, vehicleType) {
+// Retourne { allSubmitted, missing }.
+export function checkAllDocumentsSubmitted(driver) {
   const d = driver || {};
   const required = [...BASE_REQUIRED_DOCS];
-  if (vehicleType === 'moto') required.push('motofrete_cert');
 
   const missing = required.filter((docType) => {
     const fields = DOC_FIELD_MAP[docType];
@@ -524,7 +522,6 @@ const DRIVER_DOCS = Object.freeze({
   cnh_verso: 'cnh_verso',
   crlv: 'crlv',
   vehicle_photo: 'vehicle_photo',
-  motofrete_cert: 'motofrete_cert',
 });
 
 export { DRIVER_DOCS };
