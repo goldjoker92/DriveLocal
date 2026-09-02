@@ -44,8 +44,10 @@ import {
 } from '../../constants/driverStatuses';
 import { showConfirmAlert } from '../../utils/alertUtils';
 import {
+  driverApprovalErrorReason,
   driverApprovalErrorMessage,
   hasPhotoApprovedForDriverApproval,
+  requiresDuplicateApprovalReview,
 } from '../../utils/adminDriverApproval';
 
 // Documents affichables avec leur champ URL sur le document driver.
@@ -217,9 +219,25 @@ export default function DriverDetail() {
       setError('Aprove primeiro a foto do motorista.');
       return;
     }
+    const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
+    const duplicateOverrideReason = duplicateReviewRequired ? reason.trim() : null;
+    if (duplicateReviewRequired && !duplicateOverrideReason) {
+      console.log('[ADMIN_DRIVER_DETAIL] approval blocked', {
+        driverId,
+        vehicleType: driver?.vehicleType || null,
+        verificationStatus: driver?.verificationStatus || null,
+        driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+        duplicateCheckStatus: driver?.duplicateCheckStatus || null,
+        reason: 'DUPLICATE_OVERRIDE_REASON_REQUIRED',
+      });
+      setError('Revise os dados duplicados e informe o motivo da aprovação manual.');
+      return;
+    }
     showConfirmAlert({
       title: 'Aprovar motorista?',
-      message: 'Este motorista poderá ficar disponível para corridas após aprovação.',
+      message: duplicateReviewRequired
+        ? 'Você confirma que revisou os possíveis dados duplicados e deseja aprovar manualmente este motorista?'
+        : 'Este motorista poderá ficar disponível para corridas após aprovação.',
       confirmText: 'Aprovar',
       onConfirm: async () => {
         setError('');
@@ -230,20 +248,29 @@ export default function DriverDetail() {
             vehicleType: driver?.vehicleType || null,
             verificationStatus: driver?.verificationStatus || null,
             driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+            duplicateCheckStatus: driver?.duplicateCheckStatus || null,
+            duplicateOverrideProvided: Boolean(duplicateOverrideReason),
           });
-          await approveDriver(driverId);
+          await approveDriver(driverId, duplicateOverrideReason);
+          setReason('');
           await loadDriver();
         } catch (e) {
+          const failureReason = driverApprovalErrorReason(e);
           console.log('[ADMIN_DRIVER_DETAIL] approval failed', {
             driverId,
             vehicleType: driver?.vehicleType || null,
             verificationStatus: driver?.verificationStatus || null,
             driverPhotoReviewStatus: driver?.driverPhotoReviewStatus || null,
+            duplicateCheckStatus: driver?.duplicateCheckStatus || null,
             code: e?.code || null,
-            reason: e?.details?.metadata?.reason || e?.metadata?.reason || null,
+            reason: failureReason,
             message: e?.message || 'unknown',
           });
           setError(driverApprovalErrorMessage(e));
+          // The backend writes `review_required` during the first failed duplicate
+          // scan. Reload so the admin can immediately provide an explicit reason
+          // and retry without leaving this screen.
+          if (failureReason === 'DUPLICATE_REVIEW_REQUIRED') await loadDriver();
         } finally {
           setSubmitting(false);
         }
@@ -420,6 +447,7 @@ export default function DriverDetail() {
 
   const status = driver && driver.verificationStatus;
   const photoApprovedForFinalApproval = hasPhotoApprovedForDriverApproval(driver, driverId);
+  const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
   // Founder protection (Iteration 2B): founder drivers must show benefit info
   // only — never the subscription test buttons, and their fields stay untouched.
   const isFounder =
@@ -448,8 +476,17 @@ export default function DriverDetail() {
               />
             </>
           ) : null}
+          {duplicateReviewRequired ? (
+            <InfoBanner
+              tone="warning"
+              title="Revisão de possível duplicata"
+              body="Confira CPF, telefone, placa, chave Pix e e-mail. Para aprovar, registre abaixo o motivo da decisão manual."
+            />
+          ) : null}
           <AppInput
-            label="Motivo (para correção ou recusa)"
+            label={duplicateReviewRequired
+              ? 'Motivo da aprovação manual, correção ou recusa'
+              : 'Motivo (para correção ou recusa)'}
             value={reason}
             onChangeText={setReason}
             placeholder="Descreva o que precisa ser corrigido ou o motivo da recusa"
@@ -457,7 +494,9 @@ export default function DriverDetail() {
           <AppButton
             title={submitting ? 'Processando…' : 'Aprovar motorista'}
             onPress={handleApprove}
-            disabled={submitting || !photoApprovedForFinalApproval}
+            disabled={submitting
+              || !photoApprovedForFinalApproval
+              || (duplicateReviewRequired && !reason.trim())}
           />
           <AppButton
             title={submitting ? 'Processando…' : 'Solicitar correção'}
