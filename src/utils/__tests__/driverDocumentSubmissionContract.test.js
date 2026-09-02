@@ -25,6 +25,15 @@ describe('driver document submission contract', () => {
     expect(rules).toContain("request.resource.data.duplicateCheckStatus == 'pending_admin_review'");
   });
 
+  it('reloads persisted document and selfie statuses after returning from capture', () => {
+    const documents = source('src/app/(driver)/documents.jsx');
+
+    expect(documents).toContain("import { useFocusEffect, useRouter } from 'expo-router'");
+    expect(documents).toContain('useFocusEffect(');
+    expect(documents).toContain('getDriver(uid)');
+    expect(documents).toContain("initial.selfie = { status: 'done'");
+  });
+
   it('requires every uploaded document and prevents driver self-approval', () => {
     const rules = source('backend/firebase/rules/firestore.rules');
 

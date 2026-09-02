@@ -2,10 +2,10 @@
 // guided capture -> passenger preview -> private admin review. Other documents keep
 // their existing camera/gallery upload behavior.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
@@ -71,48 +71,52 @@ export default function Documents() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  useEffect(() => {
-    let active = true;
-    if (!uid) {
-      setLoading(false);
-      return undefined;
-    }
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      setLoading(true);
+      setSubmitError('');
+      if (!uid) {
+        setLoading(false);
+        return undefined;
+      }
 
-    getDriver(uid)
-      .then((data) => {
-        if (!active || !data) return;
-        setDriver(data);
-        const initial = {};
-        const photoStatus = driverPhotoStatus(data);
-        if (photoStatus === DRIVER_PHOTO_STATUS.APPROVED || photoStatus === DRIVER_PHOTO_STATUS.PENDING) {
-          initial.selfie = { status: 'done', progress: 100, photoReviewStatus: photoStatus };
-        } else if (photoStatus === DRIVER_PHOTO_STATUS.REJECTED) {
-          initial.selfie = { status: 'error', progress: 0, photoReviewStatus: photoStatus };
-        }
-        Object.entries(STATUS_FIELD).forEach(([docType, field]) => {
-          if (data[field] === 'submitted' || data[field] === 'approved') {
-            initial[docType] = { status: 'done', progress: 100 };
+      getDriver(uid)
+        .then((data) => {
+          if (!active || !data) return;
+          setDriver(data);
+          const initial = {};
+          const photoStatus = driverPhotoStatus(data);
+          if (photoStatus === DRIVER_PHOTO_STATUS.APPROVED || photoStatus === DRIVER_PHOTO_STATUS.PENDING) {
+            initial.selfie = { status: 'done', progress: 100, photoReviewStatus: photoStatus };
+          } else if (photoStatus === DRIVER_PHOTO_STATUS.REJECTED) {
+            initial.selfie = { status: 'error', progress: 0, photoReviewStatus: photoStatus };
           }
+          Object.entries(STATUS_FIELD).forEach(([docType, field]) => {
+            if (data[field] === 'submitted' || data[field] === 'approved') {
+              initial[docType] = { status: 'done', progress: 100 };
+            }
+          });
+          setDocState(initial);
+          logDriverPhotoEvent('documents.photo_status_loaded', {
+            driverId: uid,
+            status: photoStatus,
+            hasApprovedPhoto: photoStatus === DRIVER_PHOTO_STATUS.APPROVED,
+          });
+        })
+        .catch((error) => {
+          console.log('[DOCUMENTS] load error', error?.message || 'unknown');
+          if (active) setSubmitError('Não foi possível carregar os documentos.');
+        })
+        .finally(() => {
+          if (active) setLoading(false);
         });
-        setDocState(initial);
-        logDriverPhotoEvent('documents.photo_status_loaded', {
-          driverId: uid,
-          status: photoStatus,
-          hasApprovedPhoto: photoStatus === DRIVER_PHOTO_STATUS.APPROVED,
-        });
-      })
-      .catch((error) => {
-        console.log('[DOCUMENTS] load error', error?.message || 'unknown');
-        if (active) setSubmitError('Não foi possível carregar os documentos.');
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
 
-    return () => {
-      active = false;
-    };
-  }, [uid]);
+      return () => {
+        active = false;
+      };
+    }, [uid])
+  );
 
   function patchDoc(docType, patch) {
     setDocState((previous) => ({
