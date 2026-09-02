@@ -19,7 +19,7 @@ import AdminTableRow from '../../components/AdminTableRow';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
-import { VEHICLE_LABELS_PT_BR, VEHICLE_MOTO } from '../../constants/vehicleTypes';
+import { VEHICLE_LABELS_PT_BR } from '../../constants/vehicleTypes';
 import { auth, db } from '../../config/firebase';
 import {
   getDriver,
@@ -51,7 +51,6 @@ const DOC_LINKS = [
   { label: '📷 CNH verso', field: 'cnhVersoUrl' },
   { label: '📷 CRLV', field: 'crlvUrl' },
   { label: '📷 Foto do veículo', field: 'vehiclePhotoUrl' },
-  { label: '📷 Certificado Motofretista', field: 'motofreteUrl', motoOnly: true },
 ];
 
 // Formate un Timestamp/Date en "28/06/2026 às 14:33".
@@ -395,7 +394,6 @@ export default function DriverDetail() {
     if (url) Linking.openURL(url);
   }
 
-  const isMoto = driver && driver.vehicleType === VEHICLE_MOTO;
   const status = driver && driver.verificationStatus;
   // Founder protection (Iteration 2B): founder drivers must show benefit info
   // only — never the subscription test buttons, and their fields stay untouched.
@@ -622,7 +620,7 @@ export default function DriverDetail() {
             {/* DOCUMENTOS */}
             <AppCard>
               <SectionTitle>DOCUMENTOS</SectionTitle>
-              {DOC_LINKS.filter((d) => !d.motoOnly || isMoto).map((d) => {
+              {DOC_LINKS.map((d) => {
                 const url = driver[d.field];
                 return (
                   <AdminTableRow

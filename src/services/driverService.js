@@ -361,7 +361,6 @@ const DOC_FIELD_MAP = {
   cnh_verso: { url: 'cnhVersoUrl', status: 'cnhVersoStatus' },
   crlv: { url: 'crlvUrl', status: 'crlvStatus' },
   vehicle_photo: { url: 'vehiclePhotoUrl', status: 'vehiclePhotoStatus' },
-  motofrete_cert: { url: 'motofreteUrl', status: 'motofreteStatus' },
 };
 
 const BASE_REQUIRED_DOCS = ['selfie', 'cnh_frente', 'cnh_verso', 'crlv', 'vehicle_photo'];
@@ -398,10 +397,9 @@ export async function updateDocumentUrl(driverId, docType, url) {
 }
 
 // Checks that every required document has status "submitted".
-export function checkAllDocumentsSubmitted(driver, vehicleType) {
+export function checkAllDocumentsSubmitted(driver) {
   const d = driver || {};
   const required = [...BASE_REQUIRED_DOCS];
-  if (vehicleType === 'moto') required.push('motofrete_cert');
 
   const missing = required.filter((docType) => {
     const fields = DOC_FIELD_MAP[docType];

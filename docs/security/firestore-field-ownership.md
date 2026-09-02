@@ -17,8 +17,9 @@ Read: owner or admin. Delete: never (client).
 | displayName, fullName, whatsApp, cpf, pixKeyType, pixKey | C-create, C-update; read(self/admin) |
 | vehicleType, vehicleBrand, vehicleModel, vehicleColor, vehiclePlate, vehicleYear | C-create, C-update; read(self/admin) |
 | profilePhotoUrl, profileStatus, vehicleStatus | C-create, C-update |
-| documentsStatus, selfieStatus, cnhFrenteStatus, cnhVersoStatus, crlvStatus, vehiclePhotoStatus, motofreteStatus | C-update (client sets `submitted` during onboarding) |
-| selfieUrl, cnhFrenteUrl, cnhVersoUrl, crlvUrl, vehiclePhotoUrl, motofreteUrl | C-update |
+| documentsStatus, selfieStatus, cnhFrenteStatus, cnhVersoStatus, crlvStatus, vehiclePhotoStatus | C-update (client sets `submitted` during onboarding) |
+| selfieUrl, cnhFrenteUrl, cnhVersoUrl, crlvUrl, vehiclePhotoUrl | C-update |
+| motofreteStatus, motofreteUrl | Legacy C-update during the mobile rollout only; ignored by current onboarding and admin review |
 | availabilityStatus, availabilityUpdatedAt | C-update |
 | updatedAt | C-create, C-update |
 | **verificationStatus, duplicateCheckStatus** | **server** (client create/update denied) |

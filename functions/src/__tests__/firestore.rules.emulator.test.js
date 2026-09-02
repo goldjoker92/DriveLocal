@@ -39,6 +39,7 @@ describeEmu('firestore rules (emulator)', () => {
     collection,
     query,
     where,
+    serverTimestamp,
   } = require('firebase/firestore');
 
   let testEnv;
@@ -88,11 +89,79 @@ describeEmu('firestore rules (emulator)', () => {
     return testEnv.authenticatedContext(PASS_A).firestore();
   }
 
+  async function seedCompleteMotoApplication(overrides = {}) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'drivers', DRIVER_A), {
+        uid: DRIVER_A,
+        vehicleType: 'moto',
+        verificationStatus: 'draft',
+        duplicateCheckStatus: 'clear',
+        profileStatus: 'complete',
+        vehicleStatus: 'complete',
+        documentsStatus: 'missing',
+        selfieStatus: 'submitted',
+        selfieUrl: 'https://example.test/selfie.jpg',
+        cnhFrenteStatus: 'submitted',
+        cnhFrenteUrl: 'https://example.test/cnh-front.jpg',
+        cnhVersoStatus: 'submitted',
+        cnhVersoUrl: 'https://example.test/cnh-back.jpg',
+        crlvStatus: 'submitted',
+        crlvUrl: 'https://example.test/crlv.jpg',
+        vehiclePhotoStatus: 'submitted',
+        vehiclePhotoUrl: 'https://example.test/motorcycle.jpg',
+        ...overrides,
+      });
+    });
+  }
+
   // 1. Driver cannot self-approve.
   it('driver cannot set verificationStatus=approved', async () => {
     await rut.assertFails(
       updateDoc(doc(asDriverA(), 'drivers', DRIVER_A), { verificationStatus: 'approved' })
     );
+  });
+
+  it('motorcycle driver can submit the standard document package for admin review', async () => {
+    await seedCompleteMotoApplication();
+    const driverRef = doc(asDriverA(), 'drivers', DRIVER_A);
+
+    await rut.assertSucceeds(updateDoc(driverRef, {
+      documentsStatus: 'submitted',
+      submittedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await rut.assertSucceeds(updateDoc(driverRef, {
+      verificationStatus: 'pending_review',
+      duplicateCheckStatus: 'pending_admin_review',
+      submittedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it('motorcycle document submission still fails when CRLV is missing', async () => {
+    await seedCompleteMotoApplication({ crlvStatus: 'missing' });
+
+    await rut.assertFails(updateDoc(doc(asDriverA(), 'drivers', DRIVER_A), {
+      documentsStatus: 'submitted',
+      submittedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
+  it('keeps an installed legacy motorcycle app unblocked during rollout', async () => {
+    await seedCompleteMotoApplication();
+    const driverRef = doc(asDriverA(), 'drivers', DRIVER_A);
+
+    await rut.assertSucceeds(updateDoc(driverRef, {
+      motofreteStatus: 'submitted',
+      motofreteUrl: 'https://example.test/legacy-certificate.jpg',
+      updatedAt: serverTimestamp(),
+    }));
+    await rut.assertSucceeds(updateDoc(driverRef, {
+      documentsStatus: 'submitted',
+      submittedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
   });
 
   // 2. Driver cannot edit wallet.

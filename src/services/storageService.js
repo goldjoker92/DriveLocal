@@ -24,7 +24,6 @@ const DRIVER_DOCS = Object.freeze({
   cnh_verso: 'cnh_verso',
   crlv: 'crlv',
   vehicle_photo: 'vehicle_photo',
-  motofrete_cert: 'motofrete_cert',
 });
 
 export { DRIVER_DOCS };

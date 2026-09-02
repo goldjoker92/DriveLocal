@@ -44,6 +44,29 @@ function countAudits(db) {
 }
 
 describe('secure driver domain — approval / founder', () => {
+  it('approves a pending-review motorcycle with the standard documents only', async () => {
+    const db = makeFakeFirestore();
+    seedAdmin(db);
+    seedDriver(db, 'moto-standard-docs', {
+      verificationStatus: 'pending_review',
+      documentsStatus: 'submitted',
+      selfieStatus: 'submitted',
+      cnhFrenteStatus: 'submitted',
+      cnhVersoStatus: 'submitted',
+      crlvStatus: 'submitted',
+      vehiclePhotoStatus: 'submitted',
+    });
+
+    const approved = await approveDriver({
+      db,
+      request: adminReq({ driverId: 'moto-standard-docs' }),
+      context: ctx,
+      clock: fixedClock(T0),
+    });
+
+    expect(approved.verificationStatus).toBe('approved');
+  });
+
   it('T1: founder positions 1 and 100, non-founder 101 (one city)', async () => {
     const db = makeFakeFirestore();
     seedAdmin(db);
