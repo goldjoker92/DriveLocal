@@ -2,7 +2,7 @@
   "expo": {
     "name": "DriveLocal",
     "slug": "drivelocal",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "drivelocal",
@@ -13,7 +13,7 @@
     "android": {
       "package": "com.drivelocal.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 8,
+      "versionCode": 9,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
