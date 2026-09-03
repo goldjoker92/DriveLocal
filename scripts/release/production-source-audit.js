@@ -90,31 +90,44 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     "'lng'",
   ]), 'Logger Functions: couverture de redaction PII/localisation/Pix incomplète.');
 
-  // Commercial invariant: outside the 60-day commission benefit, every ride
-  // must fund both the DriveLocal minimum and the guaranteed driver net.
+  // Commercial invariant: Horizonte uses the versioned competitive pilot grid.
+  // After the commission-free benefit, every ride charges the advertised
+  // percentage, including rides at the minimum passenger fare.
   const pricingConfig = read(root, 'src/constants/pricingConfig.js');
   const clientPricing = read(root, 'src/utils/ridePricing.js');
   const backendPricing = read(root, 'functions/src/pricing/pricing.js');
   const rideCreation = read(root, 'functions/src/rides/createRideRequest.js');
 
   check(containsEvery(pricingConfig, [
-    "'horizonte-1.2.0'",
-    'minimumPassengerFareCentavos: 600',
-    'minimumPlatformCommissionCentavos: 100',
-    'minimumDriverNetCentavos: 500',
-    'minimumPassengerFareCentavos: 950',
-    'minimumPlatformCommissionCentavos: 143',
-    'minimumDriverNetCentavos: 800',
-  ]), 'Pricing mobile: minimums rentables Horizonte V1.2 absents ou modifiés.');
+    "'horizonte-1.3.0'",
+    'baseFareCentavos: 200',
+    'perKmCentavos: 85',
+    'perMinuteCentavos: 10',
+    'minimumPassengerFareCentavos: 500',
+    'minimumPlatformCommissionCentavos: 60',
+    'minimumDriverNetCentavos: 440',
+    'baseFareCentavos: 300',
+    'perKmCentavos: 120',
+    'perMinuteCentavos: 15',
+    'minimumPassengerFareCentavos: 750',
+    'minimumPlatformCommissionCentavos: 113',
+    'minimumDriverNetCentavos: 637',
+  ]), 'Pricing mobile: grille compétitive Horizonte V1.3 absente ou modifiée.');
 
   check(containsEvery(backendPricing, [
-    "'horizonte-1.2.0'",
-    'minimumPassengerFareCentavos: 600',
-    'minimumPlatformCommissionCentavos: 100',
-    'minimumPassengerFareCentavos: 950',
-    'minimumPlatformCommissionCentavos: 143',
+    "'horizonte-1.3.0'",
+    'baseFareCentavos: 200',
+    'perKmCentavos: 85',
+    'perMinuteCentavos: 10',
+    'minimumPassengerFareCentavos: 500',
+    'minimumPlatformCommissionCentavos: 60',
+    'baseFareCentavos: 300',
+    'perKmCentavos: 120',
+    'perMinuteCentavos: 15',
+    'minimumPassengerFareCentavos: 750',
+    'minimumPlatformCommissionCentavos: 113',
     'INVALID_COMMISSION_CONFIGURATION',
-  ]), 'Pricing Functions: minimums rentables ou garde-fou fail-closed incomplets.');
+  ]), 'Pricing Functions: grille compétitive ou garde-fou fail-closed incomplets.');
 
   check(containsEvery(clientPricing, [
     'calculateConfiguredCommissionCentavos',
@@ -127,7 +140,7 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     'estimatedCommissionCentavos',
     'minimumPlatformCommissionCentavos',
     'pricingConfigVersion',
-  ]), 'Création de course: snapshot financier V1.2 incomplet.');
+  ]), 'Création de course: snapshot financier versionné incomplet.');
 
   const applicationSources = collectSourceFiles(path.join(root, 'src'));
   const functionSources = collectSourceFiles(path.join(root, 'functions/src'));

@@ -11,31 +11,30 @@
 const BPS_DENOMINATOR = 10000;
 
 // Bump when fares/commission change so historical rides keep their snapshot.
-const PRICING_CONFIG_VERSION = 'horizonte-1.2.0';
+const PRICING_CONFIG_VERSION = 'horizonte-1.3.0';
 
-// Per-vehicle fare + commission model (Horizonte-CE, governance D3).
-// Outside the 60-day commission-free launch benefit, acceptance freezes at least
-// the configured platform commission for every ride. The acceptance transaction
-// converts the estimate to R$0 only while that driver's benefit is active.
+// Competitive pilot grid for Horizonte. After the commission-free benefit,
+// every ride charges the advertised percentage: 12% moto and 15% car. The
+// minimum commission values are the rounded percentages of the minimum fares.
 const CITY_PRICING = Object.freeze({
   HORIZONTE_CE_BR: {
     moto: {
-      baseFareCentavos: 250,
-      perKmCentavos: 95,
-      perMinuteCentavos: 12,
-      minimumPassengerFareCentavos: 600,
+      baseFareCentavos: 200,
+      perKmCentavos: 85,
+      perMinuteCentavos: 10,
+      minimumPassengerFareCentavos: 500,
       normalCommissionBps: 1200,
-      minimumPlatformCommissionCentavos: 100,
-      minimumDriverNetCentavos: 500,
+      minimumPlatformCommissionCentavos: 60,
+      minimumDriverNetCentavos: 440,
     },
     car: {
-      baseFareCentavos: 350,
-      perKmCentavos: 135,
-      perMinuteCentavos: 20,
-      minimumPassengerFareCentavos: 950,
+      baseFareCentavos: 300,
+      perKmCentavos: 120,
+      perMinuteCentavos: 15,
+      minimumPassengerFareCentavos: 750,
       normalCommissionBps: 1500,
-      minimumPlatformCommissionCentavos: 143,
-      minimumDriverNetCentavos: 800,
+      minimumPlatformCommissionCentavos: 113,
+      minimumDriverNetCentavos: 637,
     },
   },
 });
