@@ -146,9 +146,21 @@ try {
   auth = initializeAuth(app, {
     persistence: getReactNativePersistence(appStorage),
   });
+  console.info('[AUTH_SESSION] persistence_initialized', {
+    scope: 'auth_session',
+    event: 'persistence_initialized',
+    mode: 'react_native_async_storage',
+    atMs: Date.now(),
+  });
 } catch (error) {
   // Hot reload can attempt to initialize Auth twice. Reuse the existing instance
   // without logging config values or user data.
+  console.warn('[AUTH_SESSION] persistence_instance_reused', {
+    scope: 'auth_session',
+    event: 'persistence_instance_reused',
+    reason: error?.code || error?.name || 'already_initialized',
+    atMs: Date.now(),
+  });
   auth = getAuth(app);
 }
 
