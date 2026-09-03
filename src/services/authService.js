@@ -293,6 +293,13 @@ async function roleResult(user) {
   return { user, role: 'unknown' };
 }
 
+// Reads the role/profile for a Firebase user that was already restored from
+// persistent storage. It performs no sign-in, sign-out or profile mutation.
+export async function getAuthenticatedAccountSession(user = auth.currentUser) {
+  if (!user?.uid) return { user: null, role: 'unknown' };
+  return roleResult(user);
+}
+
 async function refreshRegistrationAuth(user, flow, attempt, reason) {
   if (!user?.uid || auth.currentUser?.uid !== user.uid) {
     authFlowTrace('error', flow, 'auth_session_mismatch', {

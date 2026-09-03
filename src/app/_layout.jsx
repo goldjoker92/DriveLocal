@@ -11,6 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import AppErrorBoundary from '../components/AppErrorBoundary';
+import AuthSessionGate from '../components/AuthSessionGate';
 import NetworkRecoveryGuard from '../components/NetworkRecoveryGuard';
 import DriverDeviceHealthGuard from '../components/DriverDeviceHealthGuard';
 import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
@@ -199,6 +200,8 @@ export default function RootLayout() {
                   contentStyle: { backgroundColor: colors.background },
                 }}
               />
+              {/* Cold-start only: hides public auth routes until Firebase restores a session. */}
+              <AuthSessionGate route={pathname} />
             </KeyboardAvoidingView>
           </LocationDisclosureProvider>
         </SafeAreaProvider>
