@@ -1,5 +1,5 @@
 // @ts-check
-// DriveLocal V1.2 pricing configuration (governance D3).
+// DriveLocal V1.3 pricing configuration (governance D3).
 //
 // SINGLE SOURCE OF TRUTH for fares, commission, the wallet threshold,
 // subscription prices, promotions, dynamic pricing and operating mode.
@@ -19,7 +19,7 @@ import { VEHICLE_MOTO, VEHICLE_CAR } from './vehicleTypes';
 
 // Bump on ANY change to fares/commission so historical rides keep the pricing
 // they were created with, even after these tables change.
-export const PRICING_CONFIG_VERSION = 'horizonte-1.2.0';
+export const PRICING_CONFIG_VERSION = 'horizonte-1.3.0';
 
 // Backward-compatible alias — confirm-price.jsx (Step 1) imports PRICING_VERSION.
 export const PRICING_VERSION = PRICING_CONFIG_VERSION;
@@ -30,30 +30,29 @@ export const BPS_DENOMINATOR = 10000;
 // ---------------------------------------------------------------------------
 // Per-vehicle fare + commission model — Horizonte-CE (D3)
 // ---------------------------------------------------------------------------
-// Outside the 60-day commission-free launch benefit, every completed ride must
-// generate at least the configured platform commission while preserving the
-// configured minimum driver net. The minimum passenger fare is therefore high
-// enough to fund both amounts:
-//   moto: R$6.00 = R$1.00 DriveLocal + R$5.00 minimum driver net
-//   car : R$9.50 >= R$1.43 DriveLocal + R$8.00 minimum driver net
+// Competitive pilot grid for Horizonte. After the commission-free benefit,
+// every ride charges the advertised percentage: 12% moto and 15% car. The
+// minimum commission values below are the rounded percentages of each vehicle's
+// minimum fare, and the driver-net floors make the configuration fail closed if
+// a future change would prevent that commission from being collected.
 export const HORIZONTE_VEHICLE_PRICING = {
   [VEHICLE_MOTO]: {
-    baseFareCentavos: 250,
-    perKmCentavos: 95,
-    perMinuteCentavos: 12,
-    minimumPassengerFareCentavos: 600,
+    baseFareCentavos: 200,
+    perKmCentavos: 85,
+    perMinuteCentavos: 10,
+    minimumPassengerFareCentavos: 500,
     normalCommissionBps: 1200, // 12%
-    minimumPlatformCommissionCentavos: 100,
-    minimumDriverNetCentavos: 500,
+    minimumPlatformCommissionCentavos: 60,
+    minimumDriverNetCentavos: 440,
   },
   [VEHICLE_CAR]: {
-    baseFareCentavos: 350,
-    perKmCentavos: 135,
-    perMinuteCentavos: 20,
-    minimumPassengerFareCentavos: 950,
+    baseFareCentavos: 300,
+    perKmCentavos: 120,
+    perMinuteCentavos: 15,
+    minimumPassengerFareCentavos: 750,
     normalCommissionBps: 1500, // 15%
-    minimumPlatformCommissionCentavos: 143,
-    minimumDriverNetCentavos: 800,
+    minimumPlatformCommissionCentavos: 113,
+    minimumDriverNetCentavos: 637,
   },
 };
 

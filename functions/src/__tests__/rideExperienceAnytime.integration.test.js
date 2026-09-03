@@ -41,7 +41,7 @@ function events(db, rideId) {
 }
 
 describe('any-hour moto customer experience', () => {
-  it('runs the whole 00:07 flow through visible notifications and R$1.00 minimum commission', async () => {
+  it('runs the whole 00:07 flow through visible notifications and percentage commission', async () => {
     const db = makeFakeFirestore();
     const clock = fixedClock(AT_0007);
 
@@ -108,12 +108,11 @@ describe('any-hour moto customer experience', () => {
       routingAdapter,
     });
 
-    // Moto: 250 + 4*95 + 12*12 = 774; 12% = 92.88 -> 93,
-    // then the post-promotion minimum lifts the frozen commission to R$1.00.
+    // Moto: 200 + 4*85 + 12*10 = 660; 12% = 79.2 -> 79.
     expect(created).toMatchObject({
       status: C.RIDE_STATUS.SEARCHING,
       vehicleType: 'moto',
-      estimatedFareCentavos: 774,
+      estimatedFareCentavos: 660,
       routeDistanceMeters: 4000,
       routeDurationSeconds: 720,
     });
@@ -121,8 +120,8 @@ describe('any-hour moto customer experience', () => {
 
     const rideId = created.rideId;
     const persistedQuotedRide = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
-    expect(persistedQuotedRide.estimatedCommissionCentavos).toBe(100);
-    expect(persistedQuotedRide.minimumPlatformCommissionCentavos).toBe(100);
+    expect(persistedQuotedRide.estimatedCommissionCentavos).toBe(79);
+    expect(persistedQuotedRide.minimumPlatformCommissionCentavos).toBe(60);
 
     const offerId = `${rideId}_${DRIVER}`;
     const offered = db._store.get(`${C.DRIVER_OFFERS}/${offerId}`);
@@ -151,7 +150,7 @@ describe('any-hour moto customer experience', () => {
       context: CTX,
       clock,
     });
-    expect(accepted.commissionHoldCentavos).toBe(100);
+    expect(accepted.commissionHoldCentavos).toBe(79);
     expect(accepted.pickup).toEqual(PICKUP);
 
     const assignedRide = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
@@ -197,8 +196,8 @@ describe('any-hour moto customer experience', () => {
     });
     let ride = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
     expect(ride.status).toBe('awaiting_payment');
-    expect(ride.paymentAmountCentavos).toBe(774);
-    expect(ride.paymentPixPayload).toContain('54047.74');
+    expect(ride.paymentAmountCentavos).toBe(660);
+    expect(ride.paymentPixPayload).toContain('54046.60');
     expect(db._store.get(`${C.DRIVER_OFFERS}/${offerId}`).driverRideStatus).toBe('awaiting_payment');
 
     await lifecycle.markPassengerPixSent({
@@ -221,12 +220,12 @@ describe('any-hour moto customer experience', () => {
       context: CTX,
       clock,
     });
-    expect(completed).toMatchObject({ status: 'completed', commissionCapturedCentavos: 100 });
+    expect(completed).toMatchObject({ status: 'completed', commissionCapturedCentavos: 79 });
     ride = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
     const driver = db._store.get(`${C.DRIVERS}/${DRIVER}`);
-    expect(ride.commissionCapturedCentavos).toBe(100);
-    expect(driver.walletBalanceCentavos).toBe(900);
-    expect(driver.walletAvailableCentavos).toBe(900);
+    expect(ride.commissionCapturedCentavos).toBe(79);
+    expect(driver.walletBalanceCentavos).toBe(921);
+    expect(driver.walletAvailableCentavos).toBe(921);
     expect(driver.walletHeldCentavos).toBe(0);
     expect(db._store.get(`${C.DRIVER_OFFERS}/${offerId}`).driverRideStatus).toBe('completed');
 
