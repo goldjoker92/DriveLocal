@@ -2,28 +2,35 @@
 // Admin home / console dashboard (route "/(admin)/admin-home").
 // Iteration 1C — operational admin console for driver approval.
 //
-// Data: a single real-time Firestore listener on the "drivers" collection.
-// All counts are derived client-side. KPI tiles are clickable and navigate to
-// the filtered drivers list. Rides + Financeiro are placeholders ("Em breve")
-// because those modules do not exist yet — we never show fake data as real.
+// Data: driver moderation keeps its existing real-time Firestore listener.
+// Ride KPIs come from the existing privacy-safe admin analytics callable, so
+// every created request is counted without downloading passenger ride records.
 //
 // Admin-only: the screen mounts an admins/{uid} guard. Snapshot errors are
 // surfaced as a UI message, never a red screen.
 // ============================================================
 
 import { useEffect, useState } from 'react';
-import { ScrollView, View, Text } from 'react-native';
+import { Pressable, ScrollView, View, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
 import AdminStatCard from '../../components/AdminStatCard';
 import { colors } from '../../constants/colors';
-import { spacing } from '../../constants/spacing';
+import { radius, spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { auth, db } from '../../config/firebase';
 import { VERIFICATION_STATUS } from '../../constants/driverStatuses';
-import { RIDE_REQUEST_PENDING } from '../../constants/rideRequestStatuses';
+import { getAdminBusinessAnalytics } from '../../services/adminService';
+import { formatBRL } from '../../utils/format';
+import {
+  ADMIN_RIDE_METRIC_PERIODS,
+  deriveAdminRideMetrics,
+  formatAdminRideDecimal,
+  formatAdminRideHour,
+  formatAdminRideRate,
+} from '../../utils/adminRideMetrics';
 
 // A titled section: caption title once, then its content below. Vertical
 // spacing between sections is handled by the ScrollView's `gap`.
@@ -54,10 +61,37 @@ function Grid({ children }) {
   );
 }
 
-// Small note shown once under a "coming soon" section (never inside each card).
-function ComingSoonNote({ children }) {
+function RidePeriodSelector({ selectedDays, onSelect }) {
   return (
-    <Text style={[{ fontFamily, color: colors.textFaint }, typography.small]}>{children}</Text>
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm }}>
+      {ADMIN_RIDE_METRIC_PERIODS.map((period) => {
+        const selected = selectedDays === period.days;
+        return (
+          <Pressable
+            key={period.days}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            onPress={() => onSelect(period.days)}
+            style={({ pressed }) => ({
+              borderRadius: radius.full,
+              borderWidth: 1,
+              borderColor: selected ? colors.primary : colors.border,
+              backgroundColor: selected ? colors.primary : colors.card,
+              paddingHorizontal: spacing.md,
+              paddingVertical: spacing.sm,
+              opacity: pressed ? 0.68 : 1,
+            })}
+          >
+            <Text style={[
+              { fontFamily, color: selected ? colors.onPrimary : colors.textMuted },
+              typography.small,
+            ]}>
+              {period.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -69,9 +103,11 @@ export default function AdminHome() {
   const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  // Iteration 3A: live count of pending passenger ride requests.
-  const [rideRequestsPending, setRideRequestsPending] = useState(0);
-  const [reqLoading, setReqLoading] = useState(true);
+  const [rideRangeDays, setRideRangeDays] = useState(1);
+  const [rideAnalytics, setRideAnalytics] = useState(null);
+  const [rideMetricsLoading, setRideMetricsLoading] = useState(true);
+  const [rideMetricsError, setRideMetricsError] = useState('');
+  const [rideMetricsRefreshKey, setRideMetricsRefreshKey] = useState(0);
 
   // Garde admin : l'utilisateur courant doit exister dans admins/{uid}.
   useEffect(() => {
@@ -116,23 +152,45 @@ export default function AdminHome() {
     return () => unsubscribe();
   }, []);
 
-  // Real-time count of pending ride requests. Errors are logged, not shown, so
-  // they never disrupt the drivers console. (Iteration 3A.)
+  // One bounded server aggregate per selected period. This is intentionally not
+  // a raw rideRequests listener: it is cheaper, privacy-safe and includes every
+  // terminal outcome (including no_driver_available and cancelled).
   useEffect(() => {
-    const q = query(collection(db, 'rideRequests'), where('status', '==', RIDE_REQUEST_PENDING));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        setRideRequestsPending(snapshot.size);
-        setReqLoading(false);
-      },
-      (e) => {
-        console.log('[ADMIN] admin-home rideRequests snapshot error', e.message);
-        setReqLoading(false);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
+    let active = true;
+    const startedAtMs = Date.now();
+    setRideAnalytics(null);
+    setRideMetricsLoading(true);
+    setRideMetricsError('');
+    console.log('[ADMIN_RIDE_METRICS] load.started', { rangeDays: rideRangeDays });
+
+    getAdminBusinessAnalytics(rideRangeDays)
+      .then((result) => {
+        if (!active) return;
+        const metrics = deriveAdminRideMetrics(result);
+        setRideAnalytics(result);
+        setRideMetricsLoading(false);
+        console.log('[ADMIN_RIDE_METRICS] load.succeeded', {
+          rangeDays: rideRangeDays,
+          durationMs: Date.now() - startedAtMs,
+          requests: metrics.requests,
+          truncated: metrics.ridesTruncated,
+        });
+      })
+      .catch((e) => {
+        if (!active) return;
+        setRideMetricsError('Não foi possível carregar os indicadores de corridas.');
+        setRideMetricsLoading(false);
+        console.warn('[ADMIN_RIDE_METRICS] load.failed', {
+          rangeDays: rideRangeDays,
+          durationMs: Date.now() - startedAtMs,
+          reason: e?.code || e?.name || 'unknown',
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [rideRangeDays, rideMetricsRefreshKey]);
 
   // Counts per verificationStatus.
   const countBy = (status) => drivers.filter((d) => d.verificationStatus === status).length;
@@ -143,6 +201,7 @@ export default function AdminHome() {
   const suspendedCount = countBy(VERIFICATION_STATUS.SUSPENDED);
   // "Documentos com alerta": drivers flagged as possible duplicates.
   const alertCount = drivers.filter((d) => d.duplicateCheckStatus === 'warning').length;
+  const rideMetrics = deriveAdminRideMetrics(rideAnalytics);
 
   // Navigate to the drivers list filtered by a verificationStatus (or "all").
   function openList(status) {
@@ -151,6 +210,35 @@ export default function AdminHome() {
   }
 
   const loadingValue = (value) => (loading ? '…' : String(value));
+  const rideValue = (value) => (
+    rideMetricsLoading ? '…' : rideAnalytics ? String(value) : '—'
+  );
+  const rideRateHint = (value) => (
+    rideAnalytics ? formatAdminRideRate(value) : undefined
+  );
+  const openRideDashboard = () => router.push('/(admin)/dashboard');
+  const peakDemandValue = rideMetricsLoading
+    ? '…'
+    : rideAnalytics && rideMetrics.peakDemandRequests > 0
+      ? formatAdminRideHour(rideMetrics.peakDemandHour)
+      : '—';
+  const peakUnservedValue = rideMetricsLoading
+    ? '…'
+    : rideAnalytics && rideMetrics.peakUnservedRequests > 0
+      ? formatAdminRideHour(rideMetrics.peakUnservedHour)
+      : '—';
+  const peakDayValue = rideMetricsLoading
+    ? '…'
+    : rideAnalytics && rideMetrics.peakDayRequests > 0
+      ? rideMetrics.peakDayLabel
+      : '—';
+  const peakPressureValue = rideMetricsLoading
+    ? '…'
+    : !rideAnalytics || rideMetrics.peakPressureHour == null
+      ? '—'
+      : rideMetrics.peakPressureHasNoAvailableDriver
+        ? 'Sem oferta'
+        : `${formatAdminRideDecimal(rideMetrics.peakPressureRequestsPerDriver)}×`;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'bottom']}>
@@ -225,36 +313,193 @@ export default function AdminHome() {
           </Grid>
         </Section>
 
-        {/* SOLICITAÇÕES DE CORRIDA — real pending count (Iteration 3A). Clickable. */}
-        <Section title="SOLICITAÇÕES DE CORRIDA">
+        <Section title="CORRIDAS">
+          <RidePeriodSelector selectedDays={rideRangeDays} onSelect={setRideRangeDays} />
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Atualizar indicadores de corridas"
+            disabled={rideMetricsLoading}
+            onPress={() => setRideMetricsRefreshKey((value) => value + 1)}
+            style={({ pressed }) => ({
+              alignSelf: 'flex-start',
+              borderRadius: radius.full,
+              borderWidth: 1,
+              borderColor: colors.primary,
+              backgroundColor: colors.primaryTint,
+              paddingHorizontal: spacing.md,
+              paddingVertical: spacing.sm,
+              opacity: rideMetricsLoading ? 0.5 : pressed ? 0.65 : 1,
+            })}
+          >
+            <Text style={[{ fontFamily, color: colors.primary }, typography.small]}>
+              {rideMetricsLoading ? 'ATUALIZANDO…' : '↻ ATUALIZAR'}
+            </Text>
+          </Pressable>
+
+          {rideMetricsError ? (
+            <View style={{ gap: spacing.sm }}>
+              <Text style={[{ fontFamily, color: colors.danger }, typography.small]}>
+                {rideMetricsError}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setRideMetricsRefreshKey((value) => value + 1)}
+                style={({ pressed }) => ({ alignSelf: 'flex-start', opacity: pressed ? 0.65 : 1 })}
+              >
+                <Text style={[{ fontFamily, color: colors.primary }, typography.small]}>
+                  TENTAR NOVAMENTE
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <Grid>
             <AdminStatCard
               style={CELL}
-              label="Corridas pendentes"
-              value={reqLoading ? '…' : String(rideRequestsPending)}
-              onPress={() => router.push('/(admin)/ride-requests')}
+              label="Solicitações"
+              value={rideValue(rideMetrics.requests)}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Atribuídas"
+              value={rideValue(rideMetrics.assigned)}
+              hint={rideRateHint(rideMetrics.assignmentRate)}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Iniciadas"
+              value={rideValue(rideMetrics.started)}
+              hint={rideRateHint(rideMetrics.startRate)}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Concluídas"
+              value={rideValue(rideMetrics.completed)}
+              hint={rideRateHint(rideMetrics.completionRate)}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Sem motorista"
+              value={rideValue(rideMetrics.noDriverAvailable)}
+              hint={rideRateHint(rideMetrics.unservedRate)}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Canceladas"
+              value={rideValue(rideMetrics.cancelled)}
+              hint={rideRateHint(rideMetrics.cancellationRate)}
+              onPress={openRideDashboard}
+            />
+          </Grid>
+
+          {rideMetrics.ridesTruncated ? (
+            <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>
+              Totais parciais: a consulta atingiu o limite de segurança.
+            </Text>
+          ) : null}
+        </Section>
+
+        <Section title="PICOS E DEMANDA">
+          <Grid>
+            <AdminStatCard
+              style={CELL}
+              label="Hora com mais solicitações"
+              value={peakDemandValue}
+              hint={rideAnalytics && rideMetrics.peakDemandRequests > 0
+                ? `${rideMetrics.peakDemandRequests} pedido(s)`
+                : undefined}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Hora crítica sem motorista"
+              value={peakUnservedValue}
+              hint={rideAnalytics && rideMetrics.peakUnservedRequests > 0
+                ? `${rideMetrics.peakUnservedRequests} pedido(s) não atendido(s)`
+                : undefined}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Dia mais ativo"
+              value={peakDayValue}
+              hint={rideAnalytics && rideMetrics.peakDayRequests > 0
+                ? `${rideMetrics.peakDayRequests} pedido(s)`
+                : undefined}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Pressão máxima"
+              value={peakPressureValue}
+              hint={rideAnalytics && rideMetrics.peakPressureHour != null
+                ? `${formatAdminRideHour(rideMetrics.peakPressureHour)} · ${rideMetrics.peakPressureRequests} pedido(s)`
+                : undefined}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Solicitações Moto"
+              value={rideValue(rideMetrics.motoRequests)}
+              hint={rideAnalytics
+                ? `${formatAdminRideRate(rideMetrics.motoCompletionRate)} concluídas`
+                : undefined}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Solicitações Carro"
+              value={rideValue(rideMetrics.carRequests)}
+              hint={rideAnalytics
+                ? `${formatAdminRideRate(rideMetrics.carCompletionRate)} concluídas`
+                : undefined}
+              onPress={openRideDashboard}
             />
           </Grid>
         </Section>
 
-        {/* CORRIDAS — module not built yet: real zeros + single "em breve" note, never mock. */}
-        <Section title="CORRIDAS">
+        <Section title="OPERAÇÃO E RECEITA">
           <Grid>
-            <AdminStatCard style={CELL} label="Hoje" value="0" />
-            <AdminStatCard style={CELL} label="Mês" value="0" />
-            <AdminStatCard style={CELL} label="Ano" value="0" />
+            <AdminStatCard
+              style={CELL}
+              label="Online no último snapshot"
+              value={rideValue(rideMetrics.onlineDrivers)}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Disponíveis no último snapshot"
+              value={rideValue(rideMetrics.availableDrivers)}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Comissão capturada"
+              value={rideMetricsLoading ? '…' : rideAnalytics
+                ? formatBRL(rideMetrics.commissionCapturedCentavos)
+                : '—'}
+              hint={rideAnalytics
+                ? rideMetrics.commissionCaptureRate == null
+                  ? 'Sem comissão esperada'
+                  : formatAdminRideRate(rideMetrics.commissionCaptureRate)
+                : undefined}
+              onPress={openRideDashboard}
+            />
+            <AdminStatCard
+              style={CELL}
+              label="Comissão esperada"
+              value={rideMetricsLoading ? '…' : rideAnalytics
+                ? formatBRL(rideMetrics.commissionExpectedCentavos)
+                : '—'}
+              onPress={openRideDashboard}
+            />
           </Grid>
-          <ComingSoonNote>Em breve após ativação das corridas</ComingSoonNote>
-        </Section>
-
-        {/* FINANCEIRO — module not built yet. */}
-        <Section title="FINANCEIRO">
-          <Grid>
-            <AdminStatCard style={CELL} label="Comissões hoje" value="R$0,00" />
-            <AdminStatCard style={CELL} label="Comissões mês" value="R$0,00" />
-            <AdminStatCard style={CELL} label="Saldo baixo" value="0" />
-          </Grid>
-          <ComingSoonNote>Em breve</ComingSoonNote>
         </Section>
       </ScrollView>
     </SafeAreaView>
