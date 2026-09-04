@@ -1,7 +1,7 @@
 {
   "name": "drivelocal",
   "main": "./index.js",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "dependencies": {
     "@expo/ui": "~56.0.22",
     "@react-native-async-storage/async-storage": "2.2.0",
