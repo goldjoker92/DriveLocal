@@ -7,6 +7,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import DriverActiveRideCard from '../../components/DriverActiveRideCard';
+import DriverKeepAwakeGuard from '../../components/DriverKeepAwakeGuard';
 import { auth, db } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
@@ -69,6 +70,7 @@ export default function DriverLayout() {
   const lastOfferId = useRef(null);
   const reconciliationBusy = useRef(false);
   const [activeRideId, setActiveRideId] = useState(null);
+  const [availabilityStatus, setAvailabilityStatus] = useState('offline');
   const [activeOffer, setActiveOffer] = useState(null);
   const onRobotScreen = segments.includes('robot-driver');
   const onActiveRideScreen = segments.includes('active-ride');
@@ -217,12 +219,21 @@ export default function DriverLayout() {
       (snapshot) => {
         if (!snapshot.exists()) {
           setActiveRideId(null);
+          setAvailabilityStatus('offline');
           return;
         }
         const remote = snapshot.data();
         // activeRideId is the authoritative pointer for restoring the exact accepted
         // offer, including non-terminal payment disputes after a process restart.
         setActiveRideId(remote?.activeRideId || null);
+        // Do not keep the screen awake from a cached/stale "online" flag after
+        // the seven-minute server lease has expired. Active rides are handled
+        // independently by activeRideId and always retain the screen lock.
+        const screenAvailabilityStatus = remote?.availabilityStatus === 'online'
+          && remoteSessionFresh(remote)
+          ? 'online'
+          : 'offline';
+        setAvailabilityStatus(screenAvailabilityStatus);
         reconcileRemoteDriver(
           remote,
           'driver_snapshot',
@@ -352,6 +363,10 @@ export default function DriverLayout() {
 
   return (
     <View style={styles.container}>
+      <DriverKeepAwakeGuard
+        availabilityStatus={availabilityStatus}
+        activeRideId={activeRideId}
+      />
       {activeRideCardVisible ? (
         <SafeAreaView style={styles.activeRideArea} edges={['top']}>
           <DriverActiveRideCard
