@@ -72,7 +72,7 @@ describe('driver arrived passenger notification', () => {
     };
     const db = { collection: jest.fn(() => query) };
     const eventRef = { set: jest.fn(async () => undefined) };
-    const messaging = { sendEachForMulticast: jest.fn() };
+    const messaging = { sendEach: jest.fn() };
 
     const result = await processRideNotificationEvent({
       db,
@@ -94,12 +94,12 @@ describe('driver arrived passenger notification', () => {
       processedAtMs: 1_000_000,
       attemptCount: 1,
     }, { merge: true });
-    expect(messaging.sendEachForMulticast).not.toHaveBeenCalled();
+    expect(messaging.sendEach).not.toHaveBeenCalled();
   });
 
   it('ignores a redelivery after the event has already been processed', async () => {
     const db = { collection: jest.fn() };
-    const messaging = { sendEachForMulticast: jest.fn() };
+    const messaging = { sendEach: jest.fn() };
     const eventRef = { set: jest.fn() };
 
     const result = await processRideNotificationEvent({
@@ -113,7 +113,7 @@ describe('driver arrived passenger notification', () => {
 
     expect(result).toEqual({ skipped: true });
     expect(db.collection).not.toHaveBeenCalled();
-    expect(messaging.sendEachForMulticast).not.toHaveBeenCalled();
+    expect(messaging.sendEach).not.toHaveBeenCalled();
     expect(eventRef.set).not.toHaveBeenCalled();
   });
 });

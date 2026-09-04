@@ -152,8 +152,8 @@ describe('notifications', () => {
 
     let sentMessage = null;
     const messaging = {
-      async sendEachForMulticast(msg) {
-        sentMessage = msg;
+      async sendEach(messages) {
+        [sentMessage] = messages;
         return { responses: [{ success: true }, { success: false, error: { code: 'messaging/registration-token-not-registered' } }] };
       },
     };

@@ -4,15 +4,15 @@ const path = require('path');
 const {
   buildMulticastMessage,
   presentationForEvent,
-} = require('./processEvent');
-const C = require('../rides/constants');
+} = require('../processEvent');
+const C = require('../../rides/constants');
 
 function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
 describe('notification delivery reliability', () => {
-  test('driver arrival uses a visible high-priority Android notification', () => {
+  test('driver arrival keeps its dedicated visible high-priority presentation', () => {
     const event = {
       notificationId: 'ride-arrived-test',
       eventType: C.NOTIFICATION_EVENT.RIDE_ARRIVED,
@@ -22,21 +22,23 @@ describe('notification delivery reliability', () => {
     };
 
     expect(presentationForEvent(event)).toEqual({
-      title: 'Motorista chegou',
-      body: 'Seu motorista chegou ao local de embarque.',
+      title: '🚗 Seu motorista chegou!',
+      body: 'Ele está esperando no local de embarque.',
     });
 
     const message = buildMulticastMessage(event, ['token-a']);
     expect(message.android.priority).toBe('high');
     expect(message.android.ttl).toBe(10 * 60 * 1000);
     expect(message.android.collapseKey).toContain('ride_123');
-    expect(message.android.notification.channelId).toBe(C.NOTIFICATION_CHANNELS.RIDE_STATUS);
-    expect(message.android.notification.sound).toBe('default');
-    expect(message.android.notification.defaultVibrateTimings).toBe(true);
+    expect(message.android.notification.channelId)
+      .toBe(C.NOTIFICATION_CHANNELS.DRIVER_ARRIVAL);
+    expect(message.android.notification.sound)
+      .toBe(C.NOTIFICATION_SOUNDS.DRIVER_ARRIVAL);
+    expect(message.android.notification.defaultVibrateTimings).toBe(false);
     expect(message.android.notification.tag).toContain('ride-arrived-test');
   });
 
-  test('Firestore notification trigger retries and rethrows provider failures', () => {
+  test('Firestore notification trigger remains configured to retry provider throws', () => {
     const bindings = source('src/notifications/callables.js');
 
     expect(bindings).toContain('retry: true');
