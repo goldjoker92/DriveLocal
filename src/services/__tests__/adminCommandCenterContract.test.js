@@ -65,4 +65,46 @@ describe('admin command center contracts', () => {
     expect(primitives).toContain('colors.dangerBg');
     expect(primitives).not.toMatch(/#[0-9a-f]{6}/i);
   });
+
+  it('uses the secure aggregate for admin-home ride KPIs without changing driver moderation', () => {
+    const home = source('src/app/(admin)/admin-home.jsx');
+
+    expect(home).toContain('getAdminBusinessAnalytics(rideRangeDays)');
+    expect(home).toContain('deriveAdminRideMetrics');
+    expect(home).toContain('label="Solicitações"');
+    expect(home).toContain('label="Sem motorista"');
+    expect(home).toContain('label="Concluídas"');
+    expect(home).toContain('label="Comissão capturada"');
+    expect(home).toContain('title="PICOS E DEMANDA"');
+    expect(home).toContain('label="Hora com mais solicitações"');
+    expect(home).toContain('label="Hora crítica sem motorista"');
+    expect(home).toContain('label="Dia mais ativo"');
+    expect(home).toContain('label="Pressão máxima"');
+    expect(home).toContain('label="Solicitações Moto"');
+    expect(home).toContain('label="Solicitações Carro"');
+    expect(home).toContain('↻ ATUALIZAR');
+    expect(home).not.toContain('setInterval(');
+    expect(home).not.toContain("collection(db, 'rideRequests')");
+    expect(home).not.toContain('RIDE_REQUEST_PENDING');
+    expect(home).not.toContain('label="Hoje" value="0"');
+    expect(home).not.toContain('Comissões hoje" value="R$0,00"');
+
+    // Driver approval keeps its existing listener, status filters and routes.
+    expect(home).toContain("collection(db, 'drivers')");
+    expect(home).toContain('VERIFICATION_STATUS.PENDING_REVIEW');
+    expect(home).toContain("pathname: '/(admin)/drivers'");
+  });
+
+  it('labels one day as rolling 24 hours and removes the legacy fake ride screens', () => {
+    const dashboard = source('src/app/(admin)/dashboard.jsx');
+    const requests = source('src/app/(admin)/ride-requests.jsx');
+    const rides = source('src/app/(admin)/rides.jsx');
+
+    expect(dashboard).toContain("{ days: 1, label: '24 h' }");
+    expect(dashboard).not.toContain("{ days: 1, label: 'Hoje' }");
+    expect(requests).toContain('<Redirect href="/(admin)/dashboard" />');
+    expect(requests).not.toContain("collection(db, 'rideRequests')");
+    expect(rides).toContain('<Redirect href="/(admin)/dashboard" />');
+    expect(rides).not.toContain('mockRides');
+  });
 });

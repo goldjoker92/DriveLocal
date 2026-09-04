@@ -45,7 +45,7 @@ import {
 } from '../../services/adminService';
 
 const PERIODS = Object.freeze([
-  { days: 1, label: 'Hoje' },
+  { days: 1, label: '24 h' },
   { days: 7, label: '7 dias' },
   { days: 30, label: '30 dias' },
   { days: 90, label: '90 dias' },
