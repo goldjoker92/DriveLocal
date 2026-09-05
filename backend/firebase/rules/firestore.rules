@@ -247,6 +247,14 @@ service cloud.firestore {
       ];
     }
 
+    // A driver may renew his own lease while the session is not abandoned. This
+    // window is 30 min, NOT the 7 min dispatch lease: dispatch skipping a driver
+    // whose last point is late is temporary, but refusing his next point would
+    // make the situation permanent — the app could never repair itself after a
+    // tunnel or an Android doze. Resurrection of a long-dead session is still
+    // impossible: the status must already be 'online', the session id must match,
+    // the point must be current, and dispatch closes abandoned sessions past the
+    // same 30 min (functions/src/rides/constants.js), which flips the status.
     function driverOperationalUpdateValid() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let locationChanged = changed.hasAny(driverLocationFields());
@@ -255,7 +263,7 @@ service cloud.firestore {
           resource.data.availabilityStatus == 'online' &&
           resource.data.availabilitySessionId is string &&
           resource.data.availabilitySessionId.size() >= 16 &&
-          resource.data.availabilityUpdatedAt > request.time - duration.value(7, 'm') &&
+          resource.data.availabilityUpdatedAt > request.time - duration.value(30, 'm') &&
           request.resource.data.locationAvailabilitySessionId == resource.data.availabilitySessionId &&
           request.resource.data.keys().hasAll(driverLocationFields()) &&
           pointValid(request.resource.data.location) &&

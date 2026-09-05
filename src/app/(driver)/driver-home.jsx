@@ -50,8 +50,8 @@ import {
 } from '../../utils/driverCockpit';
 import { deriveDriverCockpitSummary } from '../../utils/driverCockpitSummary';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
+import { remoteWorkSessionRecoverable } from '../../utils/driverWorkSession';
 
-const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
 const REMOTE_RECONCILIATION_GRACE_MS = 12_000;
 
 function shortId(value) {
@@ -112,22 +112,11 @@ function robotSimulationActive() {
   return DEV_RIDE_SIMULATOR_ENABLED && getRobotDriverState().enabled;
 }
 
-function timestampMs(value) {
-  if (!value) return 0;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  if (typeof value.toMillis === 'function') return Number(value.toMillis()) || 0;
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  if (Number.isFinite(Number(value.seconds))) {
-    return Number(value.seconds) * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6);
-  }
-  return 0;
-}
-
-function hasFreshRemoteWorkSession(driver, nowMs = Date.now()) {
+// Keeps the session id requirement of the cockpit, but delegates the age rule to
+// the shared work-session policy so the three reconcilers cannot diverge again.
+function hasRecoverableRemoteWorkSession(driver, nowMs = Date.now()) {
   if (!driver?.availabilitySessionId) return false;
-  const updatedAtMs = timestampMs(driver.availabilityUpdatedAt)
-    || Number(driver.availabilityUpdatedAtMs || 0);
-  return updatedAtMs > 0 && nowMs - updatedAtMs <= WORK_SESSION_MAX_AGE_MS;
+  return remoteWorkSessionRecoverable(driver, nowMs);
 }
 
 function localSessionInTransition(session, nowMs = Date.now()) {
@@ -198,7 +187,7 @@ export default function DriverHome() {
           return;
         }
 
-        if (!remoteSessionId || !hasFreshRemoteWorkSession(data)) {
+        if (!remoteSessionId || !hasRecoverableRemoteWorkSession(data)) {
           const matchingTransition = Boolean(
             localBeforeRestore?.availabilitySessionId
             && localBeforeRestore.availabilitySessionId === remoteSessionId
@@ -361,7 +350,7 @@ export default function DriverHome() {
           remote?.availabilityStatus === AVAILABILITY.ONLINE
           && remote?.availabilitySessionId
           && remote.availabilitySessionId === expectedSessionId
-          && hasFreshRemoteWorkSession(remote)
+          && hasRecoverableRemoteWorkSession(remote)
         );
         if (remoteSessionMatches) return;
 

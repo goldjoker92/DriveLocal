@@ -27,12 +27,11 @@ import {
   setCurrentCrashRoute,
 } from '../services/clientErrorReporter';
 import { getDriver } from '../services/driverService';
+import { remoteWorkSessionRecoverable } from '../utils/driverWorkSession';
 import {
   getDriverTrackingSession,
   stopDriverOnlineTracking,
 } from '../services/driverLocationTracking';
-
-const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
 
 function shortId(value) {
   const text = typeof value === 'string' ? value : '';
@@ -40,21 +39,6 @@ function shortId(value) {
   return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
 }
 
-function timestampMs(value) {
-  if (!value) return 0;
-  if (typeof value.toMillis === 'function') return Number(value.toMillis()) || 0;
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  if (Number.isFinite(Number(value.seconds))) {
-    return Number(value.seconds) * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6);
-  }
-  return Number.isFinite(Number(value)) ? Number(value) : 0;
-}
-
-function remoteWorkSessionFresh(driver, nowMs = Date.now()) {
-  const updatedAtMs = timestampMs(driver?.availabilityUpdatedAt)
-    || Number(driver?.availabilityUpdatedAtMs || 0);
-  return updatedAtMs > 0 && nowMs - updatedAtMs <= WORK_SESSION_MAX_AGE_MS;
-}
 
 // Install once, before route components mount. The reporter preserves React
 // Native's original fatal handler after scheduling the privacy-safe report.
@@ -110,7 +94,7 @@ export default function RootLayout() {
           remoteDriver?.availabilityStatus === 'online'
           && remoteDriver?.availabilitySessionId
           && remoteDriver.availabilitySessionId === trackingSession.availabilitySessionId
-          && remoteWorkSessionFresh(remoteDriver)
+          && remoteWorkSessionRecoverable(remoteDriver)
         );
         if (sessionMatches) return;
 

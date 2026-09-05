@@ -127,6 +127,35 @@ describe('driver offer sound routing', () => {
     expect(legacy.android.notification.tag).toBe(v2.android.notification.tag);
   });
 
+  // V3 exists because an Android channel's sound cannot be changed after
+  // creation. Devices stuck on a soundless V2 move to a fresh id, while app
+  // versions still installed keep being routed to the channel they do have.
+  it('routes each capability to the offer channel that exists on the device', () => {
+    const event = offerEvent();
+    const byCapability = (capability) => buildTokenMessage(event, {
+      token: `token-${capability}`,
+      rideOfferChannelCapability: capability,
+    }).android.notification;
+
+    expect(byCapability(C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3)).toMatchObject({
+      channelId: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
+      sound: C.NOTIFICATION_SOUNDS.RIDE_OFFER,
+    });
+    expect(byCapability(C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2)).toMatchObject({
+      channelId: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      sound: C.NOTIFICATION_SOUNDS.RIDE_OFFER,
+    });
+    expect(byCapability(C.RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1)).toMatchObject({
+      channelId: C.NOTIFICATION_CHANNELS.RIDE_OFFERS,
+      sound: 'default',
+    });
+    // An unknown value must never route to a channel the device may not have.
+    expect(byCapability('custom_sound_v9')).toMatchObject({
+      channelId: C.NOTIFICATION_CHANNELS.RIDE_OFFERS,
+      sound: 'default',
+    });
+  });
+
   it('does not alter passenger status or arrival channels when a token supports V2', () => {
     const target = {
       token: 'token-v2',

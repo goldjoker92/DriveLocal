@@ -92,9 +92,17 @@ function safeCollapseKey(event) {
     .slice(0, 64);
 }
 
+// Each capability names the offer channel that actually exists on the device.
+// Anything unknown or missing degrades to the immutable legacy channel, which
+// every app version has.
+const RIDE_OFFER_CHANNEL_BY_CAPABILITY = Object.freeze({
+  [C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3]: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
+  [C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2]: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+});
+
 function safeRideOfferChannelCapability(value) {
-  return value === C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
-    ? C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
+  return Object.prototype.hasOwnProperty.call(RIDE_OFFER_CHANNEL_BY_CAPABILITY, value)
+    ? value
     : C.RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1;
 }
 
@@ -104,13 +112,13 @@ function androidNotificationForEvent(event, options = {}) {
   const rideOfferChannelCapability = safeRideOfferChannelCapability(
     options.rideOfferChannelCapability
   );
-  const usesV2OfferChannel = isOffer
-    && rideOfferChannelCapability === C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2;
+  const soundOfferChannelId = RIDE_OFFER_CHANNEL_BY_CAPABILITY[rideOfferChannelCapability];
+  const usesSoundOfferChannel = isOffer && Boolean(soundOfferChannelId);
   const channelId = isDriverArrival
     ? C.NOTIFICATION_CHANNELS.DRIVER_ARRIVAL
     : isOffer
-      ? usesV2OfferChannel
-        ? C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V2
+      ? usesSoundOfferChannel
+        ? soundOfferChannelId
         : C.NOTIFICATION_CHANNELS.RIDE_OFFERS
       : C.NOTIFICATION_CHANNELS.RIDE_STATUS;
 
@@ -122,7 +130,7 @@ function androidNotificationForEvent(event, options = {}) {
   if (!isDriverArrival) {
     return {
       ...common,
-      sound: usesV2OfferChannel ? C.NOTIFICATION_SOUNDS.RIDE_OFFER : 'default',
+      sound: usesSoundOfferChannel ? C.NOTIFICATION_SOUNDS.RIDE_OFFER : 'default',
       defaultVibrateTimings: true,
     };
   }

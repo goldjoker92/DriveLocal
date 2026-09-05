@@ -24,7 +24,9 @@ describe('root tracking session reconciliation contract', () => {
     const layout = source('src/app/_layout.jsx');
 
     expect(layout).toContain("import { getDriver } from '../services/driverService'");
-    expect(layout).toContain('remoteWorkSessionFresh(remoteDriver)');
+    // Shared policy: the root reconciler stops an abandoned session, not merely
+    // one that is late for dispatch.
+    expect(layout).toContain('remoteWorkSessionRecoverable(remoteDriver)');
     expect(layout).toContain("remoteDriver?.availabilityStatus === 'online'");
     expect(layout).toContain('remoteDriver.availabilitySessionId === trackingSession.availabilitySessionId');
     expect(layout).toContain("? 'remote_offline'");

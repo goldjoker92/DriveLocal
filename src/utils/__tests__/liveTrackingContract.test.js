@@ -61,8 +61,12 @@ describe('Android live driver tracking contracts', () => {
     expect(home).toContain('GPS de trabalho ativo.');
     expect(home).toContain('Parar de trabalhar');
     expect(home).toContain('cockpit.remote_session_revoked');
-    expect(home).toContain('timestampMs(driver.availabilityUpdatedAt)');
-    expect(home).toContain('|| Number(driver.availabilityUpdatedAtMs || 0)');
+    // The session age rule now lives in one shared policy instead of being
+    // reimplemented here; it still honors both timestamp shapes.
+    expect(home).toContain('remoteWorkSessionRecoverable');
+    const workSession = source('src/utils/driverWorkSession.js');
+    expect(workSession).toContain('availabilityUpdatedAt');
+    expect(workSession).toContain('availabilityUpdatedAtMs');
     expect(home).not.toContain('setDriverAvailability(uid, AVAILABILITY.ONLINE)');
   });
 
@@ -145,7 +149,9 @@ describe('Android live driver tracking contracts', () => {
     expect(rules).toContain("ride.status in ['assigned', 'driver_arrived', 'in_progress']");
     expect(rules).toContain('driverOperationalUpdateValid');
     expect(rules).toContain("resource.data.availabilityStatus == 'online'");
-    expect(rules).toContain("resource.data.availabilityUpdatedAt > request.time - duration.value(7, 'm')");
+    // 30 min, not the 7 min dispatch lease: a driver must always be able to
+    // publish the point that repairs his own session (see the rule comment).
+    expect(rules).toContain("resource.data.availabilityUpdatedAt > request.time - duration.value(30, 'm')");
     expect(rules).toContain('request.resource.data.locationAvailabilitySessionId == resource.data.availabilitySessionId');
     expect(rules).toContain('request.resource.data.locationUpdatedAt == request.time');
     expect(rules).toContain('request.resource.data.availabilityUpdatedAt == request.time');

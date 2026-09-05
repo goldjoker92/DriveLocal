@@ -36,10 +36,14 @@ module.exports = Object.freeze({
     'searching', 'assigned', 'driver_arrived', 'in_progress', 'awaiting_payment', 'payment_marked_sent',
   ]),
 
+  // Mirror of src/constants/notificationChannels.js. Android channel settings are
+  // immutable after creation, so a new offer sound always needs a NEW id; older
+  // ids stay routable for app versions still installed in the field.
   NOTIFICATION_CHANNELS: Object.freeze({
     // Immutable legacy id: every old/missing capability must continue here.
     RIDE_OFFERS: 'drivelocal-ride-offers',
     RIDE_OFFERS_V2: 'drivelocal-ride-offers-v2',
+    RIDE_OFFERS_V3: 'drivelocal-ride-offers-v3',
     RIDE_STATUS: 'drivelocal-ride-status',
     DRIVER_ARRIVAL: 'drivelocal-driver-arrival-v1',
   }),
@@ -51,7 +55,10 @@ module.exports = Object.freeze({
 
   RIDE_OFFER_CHANNEL_CAPABILITIES: Object.freeze({
     LEGACY_V1: 'legacy_v1',
+    // Reported by app versions still installed in the field: keep routing them to
+    // the V2 channel, which is the one that exists on those devices.
     CUSTOM_SOUND_V2: 'custom_sound_v2',
+    CUSTOM_SOUND_V3: 'custom_sound_v3',
   }),
 
   DRIVER_ARRIVAL_VIBRATION_PATTERN: Object.freeze([
