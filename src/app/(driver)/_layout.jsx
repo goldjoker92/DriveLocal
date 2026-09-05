@@ -24,9 +24,9 @@ import { getRobotDriverState } from '../../services/robotDriverEngine';
 import { listenToMyOffer } from '../../services/ridesService';
 import { deriveDriverActiveRideCard } from '../../utils/driverActiveRideCard';
 import { BACKGROUND_INCIDENT_REASONS } from '../../utils/driverBackgroundReliability';
+import { remoteWorkSessionRecoverable } from '../../utils/driverWorkSession';
 
 const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000;
-const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
 // Firestore may replay a cached pre-transition document immediately after a JS
 // reload. Never let that stale snapshot cancel a work session whose local GPS
 // transition has only just started.
@@ -36,22 +36,6 @@ function shortId(value) {
   const text = typeof value === 'string' ? value : '';
   if (!text) return null;
   return text.length <= 12 ? text : `${text.slice(0, 6)}…${text.slice(-4)}`;
-}
-
-function timestampMs(value) {
-  if (!value) return 0;
-  if (typeof value.toMillis === 'function') return Number(value.toMillis()) || 0;
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  if (Number.isFinite(Number(value.seconds))) {
-    return Number(value.seconds) * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6);
-  }
-  return Number.isFinite(Number(value)) ? Number(value) : 0;
-}
-
-function remoteSessionFresh(driver, nowMs = Date.now()) {
-  const serverUpdatedAtMs = timestampMs(driver?.availabilityUpdatedAt)
-    || Number(driver?.availabilityUpdatedAtMs || 0);
-  return serverUpdatedAtMs > 0 && nowMs - serverUpdatedAtMs <= WORK_SESSION_MAX_AGE_MS;
 }
 
 function localSessionInTransition(session, nowMs = Date.now()) {
@@ -90,7 +74,7 @@ export default function DriverLayout() {
       remote?.availabilityStatus === 'online'
       && remote?.availabilitySessionId
       && remote.availabilitySessionId === local.availabilitySessionId
-      && remoteSessionFresh(remote)
+      && remoteWorkSessionRecoverable(remote)
     );
     if (sessionMatches) return;
 
@@ -234,11 +218,13 @@ export default function DriverLayout() {
         // activeRideId is the authoritative pointer for restoring the exact accepted
         // offer, including non-terminal payment disputes after a process restart.
         setActiveRideId(remote?.activeRideId || null);
-        // Do not keep the screen awake from a cached/stale "online" flag after
-        // the seven-minute server lease has expired. Active rides are handled
+        // Keep the screen awake while the session is still recoverable, not just
+        // while it is dispatchable: the driver needs the app awake precisely when
+        // his last point is late, so it can republish one. A session abandoned
+        // past the window releases the lock. Active rides are handled
         // independently by activeRideId and always retain the screen lock.
         const screenAvailabilityStatus = remote?.availabilityStatus === 'online'
-          && remoteSessionFresh(remote)
+          && remoteWorkSessionRecoverable(remote)
           ? 'online'
           : 'offline';
         setAvailabilityStatus(screenAvailabilityStatus);

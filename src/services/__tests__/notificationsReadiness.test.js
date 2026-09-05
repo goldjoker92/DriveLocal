@@ -19,6 +19,7 @@ jest.mock('expo-notifications', () => ({
   AndroidNotificationVisibility: { PUBLIC: 1 },
   setNotificationChannelAsync: jest.fn(async () => undefined),
   getNotificationChannelAsync: jest.fn(),
+  deleteNotificationChannelAsync: jest.fn(async () => undefined),
   getPermissionsAsync: jest.fn(),
   requestPermissionsAsync: jest.fn(),
   getDevicePushTokenAsync: jest.fn(),
@@ -43,7 +44,7 @@ const {
 const {
   ensureAndroidChannels,
   getPushNotificationDiagnosticState,
-  isRideOfferV2ChannelReady,
+  isRideOfferSoundChannelReady,
   registerForPushNotifications,
 } = require('../notificationsService');
 
@@ -76,16 +77,16 @@ describe('notification readiness diagnostics', () => {
       data: 'SECRET_FCM_TOKEN_MUST_NOT_BE_PERSISTED',
     });
     Notifications.getNotificationChannelAsync.mockResolvedValue({
-      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
       sound: 'custom',
       importance: Notifications.AndroidImportance.MAX,
       enableVibrate: true,
     });
   });
 
-  it('keeps V1 and creates verified V2 plus the existing arrival channel', async () => {
+  it('keeps V1 and creates verified V3 plus the existing arrival channel', async () => {
     await expect(ensureAndroidChannels()).resolves.toBe(
-      RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+      RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3,
     );
 
     expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledTimes(4);
@@ -103,7 +104,7 @@ describe('notification readiness diagnostics', () => {
     );
     expect(legacyCall[1]).not.toHaveProperty('sound');
     expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
-      NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
       expect.objectContaining({
         importance: Notifications.AndroidImportance.MAX,
         sound: NOTIFICATION_SOUNDS.RIDE_OFFER,
@@ -125,21 +126,52 @@ describe('notification readiness diagnostics', () => {
     );
   });
 
+  // Android channel settings are immutable after creation, so a device that
+  // created V2 from a build whose offer sound was unusable can never be upgraded
+  // in place. V3 is a fresh id; the stale V2 entry is removed, never recreated.
+  it('removes the superseded V2 channel once V3 is verified', async () => {
+    await expect(ensureAndroidChannels()).resolves.toBe(
+      RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3,
+    );
+
+    expect(Notifications.deleteNotificationChannelAsync).toHaveBeenCalledWith(
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+    );
+    expect(Notifications.setNotificationChannelAsync).not.toHaveBeenCalledWith(
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      expect.anything(),
+    );
+  });
+
+  it('keeps the superseded channel when V3 cannot be verified', async () => {
+    Notifications.getNotificationChannelAsync.mockResolvedValue({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
+      sound: null,
+      importance: Notifications.AndroidImportance.MAX,
+      enableVibrate: true,
+    });
+
+    await expect(ensureAndroidChannels()).resolves.toBe(
+      RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
+    );
+    expect(Notifications.deleteNotificationChannelAsync).not.toHaveBeenCalled();
+  });
+
   it('requires Android to confirm custom sound, high importance and vibration', () => {
-    expect(isRideOfferV2ChannelReady({
-      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+    expect(isRideOfferSoundChannelReady({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
       sound: 'custom',
       importance: Notifications.AndroidImportance.MAX,
       enableVibrate: true,
     })).toBe(true);
-    expect(isRideOfferV2ChannelReady({
-      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+    expect(isRideOfferSoundChannelReady({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
       sound: null,
       importance: Notifications.AndroidImportance.MAX,
       enableVibrate: true,
     })).toBe(false);
-    expect(isRideOfferV2ChannelReady({
-      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+    expect(isRideOfferSoundChannelReady({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
       sound: 'custom',
       importance: 1,
       enableVibrate: true,
@@ -156,7 +188,7 @@ describe('notification readiness diagnostics', () => {
       platform: 'android',
       role: 'driver',
       rideOfferChannelCapability:
-        RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+        RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3,
     });
 
     const persistedValues = AsyncStorage.setItem.mock.calls.map((call) => String(call[1]));
@@ -169,13 +201,13 @@ describe('notification readiness diagnostics', () => {
       permissionGranted: true,
       role: 'driver',
       rideOfferChannelCapability:
-        RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+        RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3,
     });
   });
 
-  it('keeps registration on V1 when Android cannot verify the V2 sound', async () => {
+  it('keeps registration on V1 when Android cannot verify the V3 sound', async () => {
     Notifications.getNotificationChannelAsync.mockResolvedValue({
-      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
       sound: null,
       importance: Notifications.AndroidImportance.MAX,
       enableVibrate: true,
@@ -189,9 +221,9 @@ describe('notification readiness diagnostics', () => {
     }));
   });
 
-  it('keeps registration on V1 when creating V2 throws', async () => {
+  it('keeps registration on V1 when creating V3 throws', async () => {
     Notifications.setNotificationChannelAsync.mockImplementation(async (channelId) => {
-      if (channelId === NOTIFICATION_CHANNELS.RIDE_OFFERS_V2) {
+      if (channelId === NOTIFICATION_CHANNELS.RIDE_OFFERS_V3) {
         const error = new Error('native channel failure');
         error.code = 'ERR_CHANNEL_SETUP';
         throw error;
@@ -220,7 +252,7 @@ describe('notification readiness diagnostics', () => {
     expect(mockSyncToken).toHaveBeenCalledTimes(2);
     expect(mockSyncToken.mock.calls[0][0]).toHaveProperty(
       'rideOfferChannelCapability',
-      RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+      RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3,
     );
     expect(mockSyncToken.mock.calls[1][0]).not.toHaveProperty(
       'rideOfferChannelCapability',
