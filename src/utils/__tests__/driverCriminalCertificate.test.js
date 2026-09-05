@@ -113,12 +113,24 @@ describe('criminal certificate integration contract', () => {
     expect(approval).toContain("reason: 'CRIMINAL_CERTIFICATE_REQUIRED'");
   });
 
-  it('ships as the next Android bundle without imposing a minimum app version', () => {
+  // Rule: from 1.0.7 (versionCode 12) onward, EVERY new driver account requires
+  // the criminal certificate, and that stays true for all later versions.
+  // Accounts created before keep their legacy workflow — no retroactivity.
+  //
+  // So the assertion is "at least 12", not an exact version: the guarantee is
+  // that the policy never gates drivers on an app version (the rollout marker in
+  // the profile alone decides), and it must not break on every release bump.
+  const CRIMINAL_CERTIFICATE_FIRST_VERSION_CODE = 12;
+
+  it('ships as an Android bundle without imposing a minimum app version', () => {
     const app = JSON.parse(source('app.json')).expo;
     const policy = source('src/utils/driverDocumentPolicy.js');
 
-    expect(app.version).toBe('1.0.7');
-    expect(app.android.versionCode).toBe(12);
+    expect(Number.isInteger(app.android.versionCode)).toBe(true);
+    expect(app.android.versionCode).toBeGreaterThanOrEqual(
+      CRIMINAL_CERTIFICATE_FIRST_VERSION_CODE
+    );
+    expect(app.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(policy).not.toMatch(/minimum(App)?Version|force.?update/i);
   });
 });
