@@ -1,3 +1,5 @@
+import { hasSubmittedCriminalCertificate } from './driverDocumentPolicy';
+
 // Mirrors the secure backend precondition used by approveDriverSecure.
 // Keeping this check in the admin UI avoids a doomed callable request while the
 // backend remains the final authority against stale or manipulated clients.
@@ -16,6 +18,10 @@ export function requiresDuplicateApprovalReview(driver) {
     || driver?.duplicateCheckStatus === 'warning';
 }
 
+export function hasCriminalCertificateForDriverApproval(driver, driverId) {
+  return hasSubmittedCriminalCertificate(driver, driverId);
+}
+
 export function driverApprovalErrorReason(error) {
   return error?.details?.metadata?.reason || error?.metadata?.reason || null;
 }
@@ -27,6 +33,9 @@ export function driverApprovalErrorMessage(error) {
   }
   if (reason === 'DUPLICATE_REVIEW_REQUIRED') {
     return 'A aprovação exige revisar primeiro os possíveis dados duplicados.';
+  }
+  if (reason === 'CRIMINAL_CERTIFICATE_REQUIRED') {
+    return 'Envie e revise primeiro a certidão de antecedentes criminais.';
   }
   return 'Não foi possível aprovar o motorista.';
 }

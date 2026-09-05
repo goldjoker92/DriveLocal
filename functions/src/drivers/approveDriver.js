@@ -19,6 +19,10 @@ const riskC = require('../risk/constants');
 const { safeDriverView } = require('./eligibility');
 const { scanDriverDuplicates } = require('./duplicateCheck');
 const { COMMERCIAL_POLICY_VERSION } = require('./commercialPolicy');
+const {
+  hasSubmittedCriminalCertificate,
+  requiresCriminalCertificate,
+} = require('./documentPolicy');
 const C = require('./constants');
 
 // The source contains only a one-way fingerprint. A newly matching account changes
@@ -171,6 +175,19 @@ async function approveDriver({ db, request, context, clock }) {
       });
     }
 
+    if (!hasSubmittedCriminalCertificate(before, driverId)) {
+      logInfo(context, 'driver.approval.criminal_certificate_blocked', {
+        operation: 'approve_driver',
+        reasonCode: 'CRIMINAL_CERTIFICATE_REQUIRED',
+        documentPolicyVersion: before.driverDocumentPolicyVersion || null,
+        certificateStatus: before.criminalCertificateStatus || null,
+      });
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+        internalMessage: `driver criminal certificate required for ${driverId}`,
+        safeMetadata: { reason: 'CRIMINAL_CERTIFICATE_REQUIRED' },
+      });
+    }
+
     const serviceAreaId = validateIdentifier(before.serviceAreaId, 'serviceAreaId');
     const counterRef = db.collection(C.COUNTERS).doc(serviceAreaId);
     const counterSnap = await tx.get(counterRef);
@@ -220,6 +237,12 @@ async function approveDriver({ db, request, context, clock }) {
     if (before.walletAvailableCentavos == null) update.walletAvailableCentavos = 0;
     if (before.walletLedgerVersion == null) update.walletLedgerVersion = 'v1';
     if (before.isBlocked == null) update.isBlocked = false;
+    if (requiresCriminalCertificate(before)) {
+      update.criminalCertificateStatus = 'approved';
+      update.criminalCertificateReviewedAtMs = nowMs;
+      update.criminalCertificateReviewedAt = admin.firestore.FieldValue.serverTimestamp();
+      update.criminalCertificateReviewedBy = adminUid;
+    }
 
     tx.set(counterRef, {
       serviceAreaId,
@@ -247,6 +270,8 @@ async function approveDriver({ db, request, context, clock }) {
       beforeSummary: {
         verificationStatus: outcome.before.verificationStatus || null,
         driverPhotoReviewStatus: outcome.before.driverPhotoReviewStatus || null,
+        criminalCertificateStatus: outcome.before.criminalCertificateStatus || null,
+        driverDocumentPolicyVersion: outcome.before.driverDocumentPolicyVersion || null,
         duplicateConflictCount: conflicts.length,
       },
       afterSummary: {
@@ -258,6 +283,8 @@ async function approveDriver({ db, request, context, clock }) {
         commissionFreeDays: C.FREE_PERIOD_DAYS,
         subscriptionGraceRideLimit: outcome.after.founderEligible ? 0 : C.FREE_RIDE_LIMIT,
         driverPhotoPublicVersion: outcome.after.driverPhotoPublicVersion || null,
+        criminalCertificateStatus: outcome.after.criminalCertificateStatus || null,
+        driverDocumentPolicyVersion: outcome.after.driverDocumentPolicyVersion || null,
         duplicateCheckStatus: outcome.after.duplicateCheckStatus,
         duplicateOverrideSource: reviewedOverrideReason
           ? 'closed_risk_cases'

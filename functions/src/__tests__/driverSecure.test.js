@@ -67,6 +67,93 @@ describe('secure driver domain — approval / founder', () => {
     expect(approved.verificationStatus).toBe('approved');
   });
 
+  it('keeps an existing legacy driver approvable without a criminal certificate', async () => {
+    const db = makeFakeFirestore();
+    seedAdmin(db);
+    seedDriver(db, 'legacy-driver', { verificationStatus: 'pending_review' });
+
+    const approved = await approveDriver({
+      db,
+      request: adminReq({ driverId: 'legacy-driver' }),
+      context: ctx,
+      clock: fixedClock(T0),
+    });
+
+    expect(approved.verificationStatus).toBe('approved');
+    expect(approved.criminalCertificateStatus).toBeUndefined();
+  });
+
+  it('blocks a new-policy driver until the criminal certificate is submitted', async () => {
+    const db = makeFakeFirestore();
+    seedAdmin(db);
+    seedDriver(db, 'new-driver', {
+      verificationStatus: 'pending_review',
+      driverDocumentPolicyVersion: 'criminal-certificate-v1',
+      criminalCertificateStatus: 'missing',
+    });
+
+    await expect(approveDriver({
+      db,
+      request: adminReq({ driverId: 'new-driver' }),
+      context: ctx,
+      clock: fixedClock(T0),
+    })).rejects.toMatchObject({
+      code: 'INVALID_STATE_TRANSITION',
+      safeMetadata: { reason: 'CRIMINAL_CERTIFICATE_REQUIRED' },
+    });
+    expect(db._store.get('counters/HORIZONTE_CE_BR')).toBeUndefined();
+  });
+
+  it('approves and records review metadata for a valid new-policy certificate', async () => {
+    const db = makeFakeFirestore();
+    seedAdmin(db);
+    const version = 'certificate_12345678_abcd1234';
+    seedDriver(db, 'new-driver', {
+      verificationStatus: 'pending_review',
+      driverDocumentPolicyVersion: 'criminal-certificate-v1',
+      criminalCertificateStatus: 'submitted',
+      criminalCertificateVersion: version,
+      criminalCertificateContentType: 'application/pdf',
+      criminalCertificateSizeBytes: 4321,
+      criminalCertificatePath: `drivers/new-driver/criminal-certificate/${version}/certificate.pdf`,
+    });
+
+    const approved = await approveDriver({
+      db,
+      request: adminReq({ driverId: 'new-driver' }),
+      context: ctx,
+      clock: fixedClock(T0),
+    });
+
+    expect(approved.verificationStatus).toBe('approved');
+    // The callable intentionally keeps private document metadata out of its
+    // response. Assert the server-owned profile update directly instead.
+    expect(db._store.get('drivers/new-driver')).toMatchObject({
+      criminalCertificateStatus: 'approved',
+      criminalCertificateReviewedAtMs: T0,
+      criminalCertificateReviewedBy: ADMIN,
+    });
+  });
+
+  it('keeps idempotent replay working for an already-approved marked driver', async () => {
+    const db = makeFakeFirestore();
+    seedAdmin(db);
+    seedDriver(db, 'approved-driver', {
+      verificationStatus: 'approved',
+      approvalNumber: 42,
+      driverDocumentPolicyVersion: 'criminal-certificate-v1',
+      criminalCertificateStatus: 'missing',
+    });
+
+    const replay = await approveDriver({
+      db,
+      request: adminReq({ driverId: 'approved-driver' }),
+      context: ctx,
+      clock: fixedClock(T0),
+    });
+    expect(replay.approvalNumber).toBe(42);
+  });
+
   it('T1: founder positions 1 and 100, non-founder 101 (one city)', async () => {
     const db = makeFakeFirestore();
     seedAdmin(db);

@@ -24,6 +24,10 @@ import {
   computeRenewedExpirationMs,
   getSubscriptionMonthlyCentavos,
 } from '../utils/driverSubscription';
+import {
+  hasSubmittedCriminalCertificate,
+  requiresCriminalCertificate,
+} from '../utils/driverDocumentPolicy';
 
 // Profile fields that must all be filled for profileStatus to be "complete".
 const REQUIRED_PROFILE_FIELDS = [
@@ -396,6 +400,28 @@ export async function updateDocumentUrl(driverId, docType, url) {
   });
 }
 
+// Registers only private storage metadata. Unlike legacy image documents, the
+// criminal certificate never persists a tokenized download URL in Firestore.
+export async function updateCriminalCertificate(driverId, file) {
+  if (!driverId || !file?.path || !file?.version || !file?.contentType) {
+    throw new Error('updateCriminalCertificate: metadados inválidos');
+  }
+  console.log('[CRIMINAL_CERTIFICATE] metadata.registration_started', {
+    contentType: file.contentType,
+    sizeBytes: file.sizeBytes,
+  });
+  await updateDoc(doc(db, 'drivers', driverId), {
+    criminalCertificatePath: file.path,
+    criminalCertificateVersion: file.version,
+    criminalCertificateContentType: file.contentType,
+    criminalCertificateSizeBytes: file.sizeBytes,
+    criminalCertificateStatus: 'submitted',
+    criminalCertificateUploadedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  console.log('[CRIMINAL_CERTIFICATE] metadata.registration_succeeded');
+}
+
 // Checks that every required document has status "submitted".
 export function checkAllDocumentsSubmitted(driver) {
   const d = driver || {};
@@ -405,6 +431,10 @@ export function checkAllDocumentsSubmitted(driver) {
     const fields = DOC_FIELD_MAP[docType];
     return d[fields.status] !== 'submitted';
   });
+
+  if (requiresCriminalCertificate(d) && !hasSubmittedCriminalCertificate(d, d.uid)) {
+    missing.push('criminal_certificate');
+  }
 
   console.log('[DRIVER] checkAllDocuments missing=', JSON.stringify(missing));
   return { allSubmitted: missing.length === 0, missing };

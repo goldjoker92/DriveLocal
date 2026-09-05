@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
+import { DRIVER_DOCUMENT_POLICY_VERSION } from '../utils/driverDocumentPolicy';
 import { disablePushNotifications } from './notificationsService';
 import {
   getDriverTrackingSession,
@@ -738,6 +739,10 @@ function buildInitialDriverProfile(user, email) {
     vehicleStatus: 'incomplete',
     documentsStatus: 'missing',
     selfieStatus: 'missing',
+    // Only accounts created by this release receive the marker. Existing driver
+    // documents are never migrated or blocked retroactively.
+    driverDocumentPolicyVersion: DRIVER_DOCUMENT_POLICY_VERSION,
+    criminalCertificateStatus: 'missing',
     duplicateCheckStatus: 'clear',
     serviceAreaId: SERVICE_AREA_HORIZONTE_CE_BR,
     availabilityStatus: 'offline',

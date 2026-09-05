@@ -27,6 +27,7 @@ import {
   activateDriverSubscription,
   resetDriverSubscription,
 } from '../../services/driverService';
+import { getPrivateDriverDocumentUrl } from '../../services/storageService';
 // Sensitive driver mutations go through secure admin callables (BLOCK 11+12):
 // the server derives the admin identity, allocates founder status atomically,
 // and guards active-ride safety on suspension. The client sends no adminUid.
@@ -46,9 +47,11 @@ import { showConfirmAlert } from '../../utils/alertUtils';
 import {
   driverApprovalErrorReason,
   driverApprovalErrorMessage,
+  hasCriminalCertificateForDriverApproval,
   hasPhotoApprovedForDriverApproval,
   requiresDuplicateApprovalReview,
 } from '../../utils/adminDriverApproval';
+import { requiresCriminalCertificate } from '../../utils/driverDocumentPolicy';
 
 // Documents affichables avec leur champ URL sur le document driver.
 const DOC_LINKS = [
@@ -57,6 +60,12 @@ const DOC_LINKS = [
   { label: '📷 CNH verso', field: 'cnhVersoUrl' },
   { label: '📷 CRLV', field: 'crlvUrl' },
   { label: '📷 Foto do veículo', field: 'vehiclePhotoUrl' },
+  {
+    label: '📄 Antecedentes criminais',
+    field: 'criminalCertificatePath',
+    privatePath: true,
+    policyOnly: true,
+  },
 ];
 
 // Formate un Timestamp/Date en "28/06/2026 às 14:33".
@@ -217,6 +226,17 @@ export default function DriverDetail() {
         reason: 'DRIVER_PHOTO_APPROVAL_REQUIRED',
       });
       setError('Aprove primeiro a foto do motorista.');
+      return;
+    }
+    if (!hasCriminalCertificateForDriverApproval(driver, driverId)) {
+      console.log('[ADMIN_DRIVER_DETAIL] approval blocked', {
+        driverId,
+        vehicleType: driver?.vehicleType || null,
+        verificationStatus: driver?.verificationStatus || null,
+        criminalCertificateStatus: driver?.criminalCertificateStatus || null,
+        reason: 'CRIMINAL_CERTIFICATE_REQUIRED',
+      });
+      setError('Envie e revise primeiro a certidão de antecedentes criminais.');
       return;
     }
     const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
@@ -441,12 +461,24 @@ export default function DriverDetail() {
   }
 
   // Ouvre l'URL d'un document dans le navigateur (MVP).
-  function openDoc(url) {
-    if (url) Linking.openURL(url);
+  async function openDoc(value, privatePath = false) {
+    if (!value) return;
+    try {
+      const url = privatePath ? await getPrivateDriverDocumentUrl(value) : value;
+      await Linking.openURL(url);
+    } catch (openError) {
+      console.log('[ADMIN_DRIVER_DETAIL] document open failed', {
+        privatePath,
+        code: openError?.code || openError?.name || 'unknown',
+      });
+      setError('Não foi possível abrir o documento.');
+    }
   }
 
   const status = driver && driver.verificationStatus;
   const photoApprovedForFinalApproval = hasPhotoApprovedForDriverApproval(driver, driverId);
+  const criminalCertificateRequired = requiresCriminalCertificate(driver);
+  const criminalCertificateReady = hasCriminalCertificateForDriverApproval(driver, driverId);
   const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
   // Founder protection (Iteration 2B): founder drivers must show benefit info
   // only — never the subscription test buttons, and their fields stay untouched.
@@ -476,6 +508,13 @@ export default function DriverDetail() {
               />
             </>
           ) : null}
+          {criminalCertificateRequired && !criminalCertificateReady ? (
+            <InfoBanner
+              tone="warning"
+              title="Certidão de antecedentes necessária"
+              body="O motorista desta versão precisa enviar a certidão antes da aprovação."
+            />
+          ) : null}
           {duplicateReviewRequired ? (
             <InfoBanner
               tone="warning"
@@ -496,6 +535,7 @@ export default function DriverDetail() {
             onPress={handleApprove}
             disabled={submitting
               || !photoApprovedForFinalApproval
+              || !criminalCertificateReady
               || (duplicateReviewRequired && !reason.trim())}
           />
           <AppButton
@@ -680,6 +720,16 @@ export default function DriverDetail() {
               <AdminTableRow label="documentsStatus" value={driver.documentsStatus || '—'} />
               <AdminTableRow label="selfieStatus" value={driver.selfieStatus || '—'} />
               <AdminTableRow label="duplicateCheckStatus" value={driver.duplicateCheckStatus || '—'} />
+              <AdminTableRow
+                label="Política de documentos"
+                value={criminalCertificateRequired ? 'Certidão criminal v1' : 'Legado — sem bloqueio retroativo'}
+              />
+              {criminalCertificateRequired ? (
+                <AdminTableRow
+                  label="criminalCertificateStatus"
+                  value={driver.criminalCertificateStatus || 'missing'}
+                />
+              ) : null}
             </AppCard>
 
             {/* ASSINATURA / OPERAÇÃO — bloc compact (Iteration 2B). */}
@@ -699,15 +749,15 @@ export default function DriverDetail() {
             {/* DOCUMENTOS */}
             <AppCard>
               <SectionTitle>DOCUMENTOS</SectionTitle>
-              {DOC_LINKS.map((d) => {
-                const url = driver[d.field];
+              {DOC_LINKS.filter((d) => !d.policyOnly || criminalCertificateRequired).map((d) => {
+                const value = driver[d.field];
                 return (
                   <AdminTableRow
                     key={d.field}
                     label={d.label}
                     right={
-                      url ? (
-                        <Pressable onPress={() => openDoc(url)} hitSlop={8}>
+                      value ? (
+                        <Pressable onPress={() => openDoc(value, d.privatePath)} hitSlop={8}>
                           <Text style={[{ fontFamily, color: colors.primary }, typography.bodyBold]}>
                             Ver documento
                           </Text>
