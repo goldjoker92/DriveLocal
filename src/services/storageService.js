@@ -9,6 +9,10 @@ import {
   validateDriverPhotoAsset,
 } from '../utils/driverPhoto';
 import { logDriverPhotoEvent } from '../utils/driverPhotoLog';
+import {
+  CRIMINAL_CERTIFICATE_MAX_SIZE_BYTES,
+  classifyCriminalCertificateAsset,
+} from '../utils/driverDocumentPolicy';
 
 const NS = '[STORAGE]';
 const MAX_WIDTH = 1200;
@@ -42,6 +46,8 @@ async function logFileSize(uri, label) {
 async function assertFileSize(uri) {
   const size = await logFileSize(uri, 'prepared');
   if (size > MAX_SIZE_BYTES) throw new Error('Arquivo muito grande (máx. 5 MB).');
+  if (size <= 0) throw new Error('Arquivo vazio ou indisponível.');
+  return size;
 }
 
 export async function compressImage(uri) {
@@ -113,6 +119,51 @@ export async function uploadDriverDocument({ driverId, docType, uri, mime, onPro
   // Never print the tokenized download URL in logs.
   console.log(NS, `uploadDriverDocument success docType=${docType}`);
   return { url, path, contentType };
+}
+
+export async function uploadDriverCriminalCertificate({
+  driverId,
+  uri,
+  mime,
+  fileName,
+  onProgress,
+}) {
+  if (!driverId) throw new Error('uploadDriverCriminalCertificate: driverId manquant');
+  if (!uri) throw new Error('uploadDriverCriminalCertificate: uri manquant');
+  if (Platform.OS === 'web') throw new Error('Upload indisponível na web — use o app Android.');
+
+  const type = classifyCriminalCertificateAsset({ mime, fileName, uri });
+  const version = `certificate_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const preparedUri = type.image ? await compressImage(uri) : uri;
+  const sizeBytes = await assertFileSize(preparedUri);
+  if (sizeBytes >= CRIMINAL_CERTIFICATE_MAX_SIZE_BYTES) {
+    throw new Error('Arquivo muito grande (máx. 5 MB).');
+  }
+
+  console.log('[CRIMINAL_CERTIFICATE] upload.started', {
+    contentType: type.contentType,
+    sizeBytes,
+  });
+  const path = `drivers/${driverId}/criminal-certificate/${version}/${type.fileName}`;
+  await uploadPreparedImage({
+    path,
+    uri: preparedUri,
+    contentType: type.contentType,
+    onProgress,
+  });
+  console.log('[CRIMINAL_CERTIFICATE] upload.succeeded', {
+    contentType: type.contentType,
+    sizeBytes,
+  });
+  return { path, version, contentType: type.contentType, sizeBytes };
+}
+
+export async function getPrivateDriverDocumentUrl(path) {
+  const safePath = String(path || '');
+  if (!/^drivers\/[A-Za-z0-9_-]+\/criminal-certificate\/[A-Za-z0-9_-]+\/certificate\.(pdf|jpg)$/.test(safePath)) {
+    throw new Error('Caminho de documento privado inválido.');
+  }
+  return getDownloadURL(ref(storage, safePath));
 }
 
 // Generates both private review source and the exact square passenger image.

@@ -3,9 +3,10 @@
 // their existing camera/gallery upload behavior.
 
 import { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import Header from '../../components/Header';
@@ -16,19 +17,33 @@ import { radius, spacing } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
 import { DRIVER_PHOTO_STATUS, driverPhotoStatus, rejectionReasonLabel } from '../../constants/driverPhoto';
 import { auth, db } from '../../config/firebase';
-import { getDriver, submitForReview, updateDocumentUrl } from '../../services/driverService';
-import { uploadDriverDocument } from '../../services/storageService';
+import {
+  getDriver,
+  submitForReview,
+  updateCriminalCertificate,
+  updateDocumentUrl,
+} from '../../services/driverService';
+import {
+  uploadDriverCriminalCertificate,
+  uploadDriverDocument,
+} from '../../services/storageService';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
+import {
+  CRIMINAL_CERTIFICATE_ACCEPTED_MIME_TYPES,
+  CRIMINAL_CERTIFICATE_ISSUER_URL,
+  requiresCriminalCertificate,
+} from '../../utils/driverDocumentPolicy';
 
 const STATUS_FIELD = {
   cnh_frente: 'cnhFrenteStatus',
   cnh_verso: 'cnhVersoStatus',
   crlv: 'crlvStatus',
   vehicle_photo: 'vehiclePhotoStatus',
+  criminal_certificate: 'criminalCertificateStatus',
 };
 
-function buildDocList() {
-  return [
+function buildDocList(driver) {
+  const documents = [
     {
       type: 'selfie',
       label: 'Foto de motorista',
@@ -40,6 +55,15 @@ function buildDocList() {
     { type: 'crlv', label: 'CRLV', note: 'Documento do veículo.' },
     { type: 'vehicle_photo', label: 'Foto do veículo', note: 'Foto do veículo com a placa visível.' },
   ];
+  if (requiresCriminalCertificate(driver)) {
+    documents.push({
+      type: 'criminal_certificate',
+      label: 'Certidão de antecedentes criminais',
+      note: 'Emita gratuitamente no portal oficial e envie em PDF, JPG, PNG ou WebP.',
+      criminalCertificate: true,
+    });
+  }
+  return documents;
 }
 
 function PhotoStatus({ state, driver }) {
@@ -146,10 +170,22 @@ export default function Documents() {
     });
   }
 
+  async function pickFromFiles() {
+    return DocumentPicker.getDocumentAsync({
+      type: CRIMINAL_CERTIFICATE_ACCEPTED_MIME_TYPES,
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+  }
+
   async function startUpload(docType, source) {
     try {
       console.log(`[DOCUMENTS] picking ${docType} source=${source}`);
-      const result = source === 'camera' ? await pickFromCamera() : await pickFromGallery();
+      const result = source === 'camera'
+        ? await pickFromCamera()
+        : source === 'gallery'
+          ? await pickFromGallery()
+          : await pickFromFiles();
       if (result.canceled || !result.assets?.[0]) return;
       await doUpload(docType, result.assets[0]);
     } catch (error) {
@@ -161,15 +197,27 @@ export default function Documents() {
   async function doUpload(docType, asset) {
     patchDoc(docType, { status: 'uploading', progress: 0, error: '' });
     try {
-      const { url } = await uploadDriverDocument({
-        driverId: uid,
-        docType,
-        uri: asset.uri,
-        mime: asset.mimeType,
-        onProgress: (progress) => patchDoc(docType, { status: 'uploading', progress }),
-      });
-      await updateDocumentUrl(uid, docType, url);
-      patchDoc(docType, { status: 'done', progress: 100, url });
+      if (docType === 'criminal_certificate') {
+        const file = await uploadDriverCriminalCertificate({
+          driverId: uid,
+          uri: asset.uri,
+          mime: asset.mimeType,
+          fileName: asset.name || asset.fileName,
+          onProgress: (progress) => patchDoc(docType, { status: 'uploading', progress }),
+        });
+        await updateCriminalCertificate(uid, file);
+        patchDoc(docType, { status: 'done', progress: 100 });
+      } else {
+        const { url } = await uploadDriverDocument({
+          driverId: uid,
+          docType,
+          uri: asset.uri,
+          mime: asset.mimeType,
+          onProgress: (progress) => patchDoc(docType, { status: 'uploading', progress }),
+        });
+        await updateDocumentUrl(uid, docType, url);
+        patchDoc(docType, { status: 'done', progress: 100, url });
+      }
     } catch (error) {
       console.log(`[DOCUMENTS] upload failed docType=${docType}`, error?.message || 'unknown');
       patchDoc(docType, { status: 'error', error: error?.message });
@@ -186,6 +234,15 @@ export default function Documents() {
       router.push({ pathname: '/(driver)/driver-photo', params: { returnTo: 'documents' } });
       return;
     }
+    if (item.criminalCertificate) {
+      Alert.alert('Como deseja enviar?', undefined, [
+        { text: 'Arquivo PDF ou imagem', onPress: () => startUpload(item.type, 'file') },
+        { text: 'Câmera', onPress: () => startUpload(item.type, 'camera') },
+        { text: 'Galeria', onPress: () => startUpload(item.type, 'gallery') },
+        { text: 'Cancelar', style: 'cancel' },
+      ]);
+      return;
+    }
     Alert.alert('Como deseja enviar?', undefined, [
       { text: 'Câmera', onPress: () => startUpload(item.type, 'camera') },
       { text: 'Galeria', onPress: () => startUpload(item.type, 'gallery') },
@@ -193,7 +250,20 @@ export default function Documents() {
     ]);
   }
 
-  const docList = buildDocList();
+  async function openCriminalCertificateIssuer() {
+    try {
+      console.log('[CRIMINAL_CERTIFICATE] issuer.open_requested');
+      await Linking.openURL(CRIMINAL_CERTIFICATE_ISSUER_URL);
+      console.log('[CRIMINAL_CERTIFICATE] issuer.open_succeeded');
+    } catch (error) {
+      console.log('[CRIMINAL_CERTIFICATE] issuer.open_failed', {
+        code: error?.code || error?.name || 'unknown',
+      });
+      setSubmitError('Não foi possível abrir o portal oficial. Tente novamente.');
+    }
+  }
+
+  const docList = buildDocList(driver);
   const allSubmitted = docList.every((item) => docState[item.type]?.status === 'done');
 
   async function handleSubmit() {
@@ -231,6 +301,15 @@ export default function Documents() {
                 <AppCard key={item.type}>
                   <Text style={styles.title}>{item.label}</Text>
                   {item.note ? <Text style={styles.muted}>{item.note}</Text> : null}
+
+                  {item.criminalCertificate ? (
+                    <AppButton
+                      title="Emitir gratuitamente no portal oficial"
+                      variant="secondary"
+                      onPress={openCriminalCertificateIssuer}
+                      disabled={state.status === 'uploading'}
+                    />
+                  ) : null}
 
                   {item.profilePhoto ? (
                     <PhotoStatus state={state} driver={driver} />

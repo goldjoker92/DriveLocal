@@ -29,6 +29,15 @@ service firebase.storage {
         request.resource.contentType.matches('image/(jpeg|jpg)');
     }
 
+    function validCriminalCertificateWrite(fileName) {
+      return request.resource != null &&
+        request.resource.size > 0 &&
+        request.resource.size < 5 * 1024 * 1024 &&
+        ((fileName == 'certificate.pdf' && request.resource.contentType == 'application/pdf') ||
+         (fileName == 'certificate.jpg' &&
+          request.resource.contentType == 'image/jpeg'));
+    }
+
     // Once a version is registered in drivers/{uid}, its source files become
     // immutable. A malicious/old client cannot replace the bytes after the admin
     // has opened the candidate. A replacement always receives a new version path.
@@ -38,6 +47,12 @@ service firebase.storage {
           .data.get('driverPhotoCandidateVersion', '') == version;
     }
 
+    function criminalCertificateVersionRegistered(driverId, version) {
+      return firestore.exists(/databases/(default)/documents/drivers/$(driverId)) &&
+        firestore.get(/databases/(default)/documents/drivers/$(driverId))
+          .data.get('criminalCertificateVersion', '') == version;
+    }
+
     // Dedicated private profile-photo package. The backend later publishes it as
     // JPEG, so mismatched PNG/WebP bytes with a .jpg name are rejected here.
     match /drivers/{driverId}/profile-photo/{version}/{fileName} {
@@ -45,6 +60,16 @@ service firebase.storage {
         fileName in ['original.jpg', 'public-candidate.jpg'] &&
         validProfilePhotoWrite() &&
         !candidateVersionRegistered(driverId, version);
+      allow read: if isOwner(driverId) || isAdmin();
+    }
+
+    // Private, versioned criminal certificate. Registering its version in the
+    // driver profile locks the bytes; every replacement uses a new random path.
+    match /drivers/{driverId}/criminal-certificate/{version}/{fileName} {
+      allow write: if isOwner(driverId) &&
+        version.matches('[A-Za-z0-9_-]{8,80}') &&
+        validCriminalCertificateWrite(fileName) &&
+        !criminalCertificateVersionRegistered(driverId, version);
       allow read: if isOwner(driverId) || isAdmin();
     }
 

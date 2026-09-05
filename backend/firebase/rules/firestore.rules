@@ -26,9 +26,21 @@ service cloud.firestore {
         'vehiclePlate', 'vehicleYear', 'profilePhotoUrl',
         'verificationStatus', 'profileStatus', 'vehicleStatus',
         'documentsStatus', 'selfieStatus', 'duplicateCheckStatus',
+        'driverDocumentPolicyVersion', 'criminalCertificateStatus',
         'availabilityStatus', 'availabilitySessionId', 'availabilityUpdatedAt',
         'createdAt', 'updatedAt'
       ];
+    }
+
+    function driverDocumentRolloutCreateValid() {
+      let hasPolicy = request.resource.data.keys().hasAny(['driverDocumentPolicyVersion']);
+      let hasCertificateStatus = request.resource.data.keys().hasAny(['criminalCertificateStatus']);
+      // Old installed clients remain able to create their legacy profile. The new
+      // release always writes both fields atomically and cannot invent a policy.
+      return (!hasPolicy && !hasCertificateStatus) ||
+        (hasPolicy && hasCertificateStatus &&
+         request.resource.data.driverDocumentPolicyVersion == 'criminal-certificate-v1' &&
+         request.resource.data.criminalCertificateStatus == 'missing');
     }
 
     function driverInitialCreateValid(driverId) {
@@ -45,7 +57,8 @@ service cloud.firestore {
         request.resource.data.availabilitySessionId == null &&
         request.resource.data.availabilityUpdatedAt == request.time &&
         request.resource.data.createdAt == request.time &&
-        request.resource.data.updatedAt == request.time;
+        request.resource.data.updatedAt == request.time &&
+        driverDocumentRolloutCreateValid();
     }
 
     function driverUpdateSafe() {
@@ -118,9 +131,47 @@ service cloud.firestore {
         request.resource.data.selfieUrl is string;
     }
 
+    function requiresCriminalCertificate() {
+      return request.resource.data.get('driverDocumentPolicyVersion', 'legacy') ==
+        'criminal-certificate-v1';
+    }
+
+    function criminalCertificateMetadataValid(driverId) {
+      let version = request.resource.data.get('criminalCertificateVersion', '');
+      let contentType = request.resource.data.get('criminalCertificateContentType', '');
+      let fileName = contentType == 'application/pdf' ? 'certificate.pdf' : 'certificate.jpg';
+      let base = 'drivers/' + driverId + '/criminal-certificate/' + version;
+      return version is string && version.matches('[A-Za-z0-9_-]{8,80}') &&
+        contentType in ['application/pdf', 'image/jpeg'] &&
+        request.resource.data.criminalCertificateSizeBytes is int &&
+        request.resource.data.criminalCertificateSizeBytes > 0 &&
+        request.resource.data.criminalCertificateSizeBytes < 5 * 1024 * 1024 &&
+        request.resource.data.criminalCertificatePath == base + '/' + fileName;
+    }
+
+    function criminalCertificateSubmitted(driverId) {
+      return request.resource.data.get('criminalCertificateStatus', 'missing') in ['submitted', 'approved'] &&
+        criminalCertificateMetadataValid(driverId);
+    }
+
+    function driverCriminalCertificateUpdateValid(driverId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return resource.data.get('driverDocumentPolicyVersion', 'legacy') == 'criminal-certificate-v1' &&
+        request.resource.data.driverDocumentPolicyVersion == 'criminal-certificate-v1' &&
+        changed.hasOnly([
+          'criminalCertificatePath', 'criminalCertificateVersion',
+          'criminalCertificateContentType', 'criminalCertificateSizeBytes',
+          'criminalCertificateStatus', 'criminalCertificateUploadedAt', 'updatedAt'
+        ]) &&
+        request.resource.data.criminalCertificateStatus == 'submitted' &&
+        request.resource.data.criminalCertificateUploadedAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
+        criminalCertificateMetadataValid(driverId);
+    }
+
     // A driver may submit the package while the profile photo is pending. The
     // secure approveDriver callable separately requires public photo approval.
-    function requiredDriverDocumentsSubmitted() {
+    function requiredDriverDocumentsSubmitted(driverId) {
       return request.resource.data.profileStatus == 'complete' &&
         request.resource.data.vehicleStatus == 'complete' &&
         (newPhotoPackageSubmitted() || legacySelfieSubmitted()) &&
@@ -131,7 +182,8 @@ service cloud.firestore {
         request.resource.data.crlvStatus == 'submitted' &&
         request.resource.data.crlvUrl is string &&
         request.resource.data.vehiclePhotoStatus == 'submitted' &&
-        request.resource.data.vehiclePhotoUrl is string;
+        request.resource.data.vehiclePhotoUrl is string &&
+        (!requiresCriminalCertificate() || criminalCertificateSubmitted(driverId));
     }
 
     function driverDocumentsSubmissionValid() {
@@ -141,7 +193,7 @@ service cloud.firestore {
         request.resource.data.documentsStatus == 'submitted' &&
         request.resource.data.submittedAt == request.time &&
         request.resource.data.updatedAt == request.time &&
-        requiredDriverDocumentsSubmitted();
+        requiredDriverDocumentsSubmitted(request.auth.uid);
     }
 
     function driverReviewTransitionValid() {
@@ -155,7 +207,7 @@ service cloud.firestore {
         request.resource.data.duplicateCheckStatus == 'pending_admin_review' &&
         request.resource.data.submittedAt == request.time &&
         request.resource.data.updatedAt == request.time &&
-        requiredDriverDocumentsSubmitted();
+        requiredDriverDocumentsSubmitted(request.auth.uid);
     }
 
     function driverAdminReviewSafe() {
@@ -272,6 +324,7 @@ service cloud.firestore {
              .hasOnly(driverUpdateSafe()) &&
            driverOperationalUpdateValid()) ||
           driverPhotoCandidateUpdateValid(driverId) ||
+          driverCriminalCertificateUpdateValid(driverId) ||
           driverDocumentsSubmissionValid() ||
           driverReviewTransitionValid()
         ));

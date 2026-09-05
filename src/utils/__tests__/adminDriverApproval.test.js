@@ -1,6 +1,7 @@
 const {
   driverApprovalErrorReason,
   driverApprovalErrorMessage,
+  hasCriminalCertificateForDriverApproval,
   hasPhotoApprovedForDriverApproval,
   requiresDuplicateApprovalReview,
 } = require('../adminDriverApproval');
@@ -49,6 +50,15 @@ describe.each(['moto', 'car'])('admin final approval — %s', (vehicleType) => {
 });
 
 describe('admin driver approval errors', () => {
+  it('keeps legacy approvals unchanged and blocks only an incomplete new-policy record', () => {
+    expect(hasCriminalCertificateForDriverApproval({ uid: 'legacy' }, 'legacy')).toBe(true);
+    expect(hasCriminalCertificateForDriverApproval({
+      uid: 'new-driver',
+      driverDocumentPolicyVersion: 'criminal-certificate-v1',
+      criminalCertificateStatus: 'missing',
+    }, 'new-driver')).toBe(false);
+  });
+
   it('turns the backend photo precondition into an actionable message', () => {
     expect(driverApprovalErrorMessage({
       code: 'functions/failed-precondition',
@@ -68,6 +78,12 @@ describe('admin driver approval errors', () => {
   it('keeps a safe fallback for unknown callable failures', () => {
     expect(driverApprovalErrorMessage({ code: 'functions/internal' }))
       .toBe('Não foi possível aprovar o motorista.');
+  });
+
+  it('explains the server-side criminal certificate precondition', () => {
+    expect(driverApprovalErrorMessage({
+      details: { metadata: { reason: 'CRIMINAL_CERTIFICATE_REQUIRED' } },
+    })).toBe('Envie e revise primeiro a certidão de antecedentes criminais.');
   });
 
   it('wires the precheck, direct photo-review action and structured diagnostics', () => {

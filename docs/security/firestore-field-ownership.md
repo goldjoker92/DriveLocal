@@ -19,6 +19,9 @@ Read: owner or admin. Delete: never (client).
 | profilePhotoUrl, profileStatus, vehicleStatus | C-create, C-update |
 | documentsStatus, selfieStatus, cnhFrenteStatus, cnhVersoStatus, crlvStatus, vehiclePhotoStatus | C-update (client sets `submitted` during onboarding) |
 | selfieUrl, cnhFrenteUrl, cnhVersoUrl, crlvUrl, vehiclePhotoUrl | C-update |
+| driverDocumentPolicyVersion, criminalCertificateStatus | C-create as the atomic `criminal-certificate-v1` rollout marker plus `missing`; marker is immutable |
+| criminalCertificatePath, criminalCertificateVersion, criminalCertificateContentType, criminalCertificateSizeBytes, criminalCertificateUploadedAt | Conditional C-update only for marked profiles; private, versioned certificate metadata |
+| criminalCertificateReviewedAt, criminalCertificateReviewedAtMs, criminalCertificateReviewedBy | **server** after final admin approval |
 | motofreteStatus, motofreteUrl | Legacy C-update during the mobile rollout only; ignored by current onboarding and admin review |
 | availabilityStatus, availabilityUpdatedAt | C-update |
 | updatedAt | C-create, C-update |

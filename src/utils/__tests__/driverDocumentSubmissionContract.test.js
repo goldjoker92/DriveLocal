@@ -72,7 +72,7 @@ describe('driver document submission contract', () => {
     const rules = source('backend/firebase/rules/firestore.rules');
     const safeFunction = rules.slice(
       rules.indexOf('function driverUpdateSafe()'),
-      rules.indexOf('function requiredDriverDocumentsSubmitted()')
+      rules.indexOf('function driverPhotoCandidateFields()')
     );
 
     expect(safeFunction).not.toContain("'documentsStatus'");

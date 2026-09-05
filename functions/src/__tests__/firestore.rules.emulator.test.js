@@ -164,6 +164,36 @@ describeEmu('firestore rules (emulator)', () => {
     }));
   });
 
+  it('requires and accepts certificate metadata only for a new-policy driver', async () => {
+    await seedCompleteMotoApplication({
+      driverDocumentPolicyVersion: 'criminal-certificate-v1',
+      criminalCertificateStatus: 'missing',
+    });
+    const driverRef = doc(asDriverA(), 'drivers', DRIVER_A);
+
+    await rut.assertFails(updateDoc(driverRef, {
+      documentsStatus: 'submitted',
+      submittedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+
+    const version = 'certificate_12345678_abcd1234';
+    await rut.assertSucceeds(updateDoc(driverRef, {
+      criminalCertificatePath: `drivers/${DRIVER_A}/criminal-certificate/${version}/certificate.pdf`,
+      criminalCertificateVersion: version,
+      criminalCertificateContentType: 'application/pdf',
+      criminalCertificateSizeBytes: 2048,
+      criminalCertificateStatus: 'submitted',
+      criminalCertificateUploadedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    await rut.assertSucceeds(updateDoc(driverRef, {
+      documentsStatus: 'submitted',
+      submittedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
   // 2. Driver cannot edit wallet.
   it('driver cannot edit walletBalanceCentavos', async () => {
     await rut.assertFails(
