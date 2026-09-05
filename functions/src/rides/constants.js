@@ -105,6 +105,11 @@ module.exports = Object.freeze({
   DEFAULT_SEARCH_RADIUS_METERS: 50_000,
   LOCATION_MAX_AGE_MS: 5 * 60 * 1000,
   AVAILABILITY_SESSION_MAX_AGE_MS: 7 * 60 * 1000,
+  // A driver whose lease merely expired is NOT logged out: his app republishes a
+  // point and he becomes dispatchable again on his own. Only a session with no
+  // sign of life for this much longer is treated as abandoned and closed, so a
+  // tunnel, an indoor stop or a short doze never ends a working driver's shift.
+  WORK_SESSION_ABANDONED_MAX_AGE_MS: 30 * 60 * 1000,
 
   MIN_WALLET_BALANCE_CENTAVOS: 300,
 

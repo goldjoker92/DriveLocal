@@ -19,9 +19,11 @@ import {
   stopDriverOnlineTracking,
   updateActiveRideTrackingStatus,
 } from '../../services/driverLocationTracking';
+import { reportBackgroundIncident } from '../../services/driverBackgroundReliabilityStore';
 import { getRobotDriverState } from '../../services/robotDriverEngine';
 import { listenToMyOffer } from '../../services/ridesService';
 import { deriveDriverActiveRideCard } from '../../utils/driverActiveRideCard';
+import { BACKGROUND_INCIDENT_REASONS } from '../../utils/driverBackgroundReliability';
 
 const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000;
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
@@ -143,6 +145,12 @@ export default function DriverLayout() {
       atMs: Date.now(),
     });
     try {
+      // The server closed a work session the driver never stopped himself: on
+      // Android this is almost always the background service being killed.
+      // Counted so the cockpit can offer the battery-optimization guidance.
+      await reportBackgroundIncident(
+        BACKGROUND_INCIDENT_REASONS.WORK_SESSION_REVOKED
+      ).catch(() => undefined);
       await stopDriverOnlineTracking();
       if (!onActiveRideScreen) router.replace('/driver-home');
     } finally {

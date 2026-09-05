@@ -187,6 +187,26 @@ function makeFakeFirestore() {
         limit: (n) => makeQuery(collectionName, [], n, []),
       };
     },
+    // Minimal WriteBatch: queued writes are applied on commit(), like Firestore.
+    batch() {
+      const queued = [];
+      return {
+        set(ref, data, opts) {
+          queued.push({ ref, data, opts });
+          return this;
+        },
+        async commit() {
+          for (const write of queued) {
+            const prev = store.get(write.ref._key);
+            const next = write.opts && write.opts.merge && prev
+              ? { ...prev, ...write.data }
+              : { ...write.data };
+            const [collectionName, docId] = write.ref._key.split('/');
+            store.set(write.ref._key, normalizeTestDocument(collectionName, docId, next));
+          }
+        },
+      };
+    },
     async runTransaction(fn) {
       const tx = {
         async get(ref) {

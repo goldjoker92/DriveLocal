@@ -14,6 +14,8 @@ import { auth, db } from '../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../config/runtimeEnvironment';
 import { safeTrackingPayload } from '../utils/rideTracking';
 import { shouldPublishDriverLocation } from '../utils/driverLocationPolicy';
+import { BACKGROUND_INCIDENT_REASONS } from '../utils/driverBackgroundReliability';
+import { reportBackgroundIncident } from './driverBackgroundReliabilityStore';
 
 export const DRIVER_LOCATION_TASK = 'drivelocal-driver-live-location-v1';
 const SESSION_KEY = '@drivelocal/driver-location-session-v1';
@@ -638,6 +640,11 @@ export async function refreshDriverOnlineHeartbeat() {
       reason: 'native_task_missing',
       result: 'restarted',
     });
+    // Android stopped our service: count it so the cockpit can explain the
+    // battery-optimization exemption instead of leaving the driver puzzled.
+    await reportBackgroundIncident(
+      BACKGROUND_INCIDENT_REASONS.NATIVE_TASK_REPAIRED
+    ).catch(() => undefined);
   }
 
   const published = await publishImmediate(session, { force: false });

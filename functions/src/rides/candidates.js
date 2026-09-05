@@ -60,6 +60,9 @@ function emptyDiagnostics(radius) {
     rejectedBusy: 0,
     rejectedMissingWorkSession: 0,
     rejectedStaleWorkSession: 0,
+    // Subset of rejectedStaleWorkSession with no sign of life for far longer:
+    // the only sessions the caller is allowed to close.
+    abandonedWorkSessionCount: 0,
     rejectedMissingLocation: 0,
     rejectedStaleLocation: 0,
     rejectedOutsideRadius: 0,
@@ -115,13 +118,21 @@ async function queryCandidateDrivers({ db, serviceAreaId, vehicleType, maxCandid
  *
  * @param {Array<{id:string, data:object}>} candidates
  * @param {{pickup:object, searchRadiusMeters:number, clock:{now:()=>number}}} args
- * @returns {{eligible:Array<{driverId:string,data:object,distanceToPickupMeters:number,locationFreshness:string,locationAgeMs:number,availabilitySessionId:string}>, diagnostics:object}}
+ * @returns {{eligible:Array<{driverId:string,data:object,distanceToPickupMeters:number,locationFreshness:string,locationAgeMs:number,availabilitySessionId:string}>, diagnostics:object, abandonedWorkSessionDriverIds:Array<string>}}
  */
 function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadiusMeters, clock }) {
   const nowMs = Number(clock.now());
   const radius = Number(searchRadiusMeters) > 0 ? Number(searchRadiusMeters) : C.DEFAULT_SEARCH_RADIUS_METERS;
   const diagnostics = emptyDiagnostics(radius);
   const eligible = [];
+  // Abandoned work sessions: still flagged online, with no published point for
+  // far longer than the lease, so the app is gone (killed, swiped, battery
+  // optimization). The caller closes only those, so the driver's app stops
+  // claiming "disponível" while dispatch ignores him. A merely expired lease is
+  // deliberately left open: the running app republishes a point and the driver
+  // becomes dispatchable again by himself. Collected here, never written here:
+  // this selector stays pure.
+  const abandonedWorkSessionDriverIds = [];
 
   for (const c of candidates || []) {
     diagnostics.candidateCount += 1;
@@ -139,8 +150,15 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
       diagnostics.rejectedMissingWorkSession += 1;
       continue;
     }
-    if (availabilityAgeMs(d, nowMs) > C.AVAILABILITY_SESSION_MAX_AGE_MS) {
+    const workSessionAgeMs = availabilityAgeMs(d, nowMs);
+    if (workSessionAgeMs > C.AVAILABILITY_SESSION_MAX_AGE_MS) {
       diagnostics.rejectedStaleWorkSession += 1;
+      if (workSessionAgeMs > C.WORK_SESSION_ABANDONED_MAX_AGE_MS) {
+        // Reached only after the offline and activeRideId checks above, so
+        // closing this session can never interrupt an ongoing ride.
+        diagnostics.abandonedWorkSessionCount += 1;
+        abandonedWorkSessionDriverIds.push(c.id);
+      }
       continue;
     }
 
@@ -196,7 +214,7 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
 
   diagnostics.eligibleCount = eligible.length;
   diagnostics.rejectedCount = diagnostics.candidateCount - diagnostics.eligibleCount;
-  return { eligible, diagnostics };
+  return { eligible, diagnostics, abandonedWorkSessionDriverIds };
 }
 
 function selectEligibleDrivers(candidates, args) {
