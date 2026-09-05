@@ -390,6 +390,64 @@ describe('exact pickup privacy & coordinate gating', () => {
     expect(db2._store.get(`${C.DRIVER_OFFERS}/${v2.rideId}_A`).exactPickup).toBeUndefined();
   });
 
+  // A driver who never stopped working keeps his session. His lease is expired so
+  // he is not dispatched right now, but his app republishes a point and he
+  // becomes dispatchable again without touching anything.
+  it('E4: a late-publishing driver is skipped but keeps his work session', async () => {
+    const db = makeFakeFirestore();
+    seedCity(db);
+    // Lease is 7 min; 10 min without a point is late, not abandoned.
+    seedDriver(db, 'late', {
+      availabilityUpdatedAtMs: T0 - 10 * 60 * 1000,
+      locationUpdatedAtMs: T0 - 10 * 60 * 1000,
+    });
+
+    const view = await createRide(db, fixedClock(T0), fakeRouting());
+    expect(view.status).toBe(C.RIDE_STATUS.NO_DRIVER_AVAILABLE);
+
+    const late = db._store.get(`${C.DRIVERS}/late`);
+    expect(late.availabilityStatus).toBe('online');
+    expect(late.availabilitySessionId).toBe('work_late_session_123456789');
+    expect(late.locationAvailabilitySessionId).toBe('work_late_session_123456789');
+    expect(late.availabilityClosedReason).toBeUndefined();
+  });
+
+  // Production incident 2026-09-05: three moto drivers stayed availabilityStatus
+  // "online" with a long-dead session, so every moto request answered
+  // no_driver_available instantly while their own app still showed "disponível".
+  it('E4b: a session abandoned for 45 min is closed so the app stops lying', async () => {
+    const db = makeFakeFirestore();
+    seedCity(db);
+    seedDriver(db, 'ghost', {
+      availabilityUpdatedAtMs: T0 - 45 * 60 * 1000,
+      locationUpdatedAtMs: T0 - 45 * 60 * 1000,
+    });
+
+    const view = await createRide(db, fixedClock(T0), fakeRouting());
+    expect(view.status).toBe(C.RIDE_STATUS.NO_DRIVER_AVAILABLE);
+
+    const ghost = db._store.get(`${C.DRIVERS}/ghost`);
+    expect(ghost.availabilityStatus).toBe('offline');
+    expect(ghost.availabilitySessionId).toBeNull();
+    expect(ghost.locationAvailabilitySessionId).toBeNull();
+    expect(ghost.availabilityClosedReason).toBe('work_session_lease_expired');
+  });
+
+  it('E5: a genuinely available driver keeps his session and receives the offer', async () => {
+    const db = makeFakeFirestore();
+    seedCity(db);
+    seedDriver(db, 'live');
+
+    const view = await createRide(db, fixedClock(T0), fakeRouting());
+    expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
+    expect(offersFor(db, view.rideId)).toContain(`${view.rideId}_live`);
+
+    const live = db._store.get(`${C.DRIVERS}/live`);
+    expect(live.availabilityStatus).toBe('online');
+    expect(live.availabilitySessionId).toBe('work_live_session_123456789');
+    expect(live.availabilityClosedReason).toBeUndefined();
+  });
+
   it('E3: a free-text address without resolved coordinates cannot request a ride', async () => {
     const db = makeFakeFirestore();
     seedCity(db);

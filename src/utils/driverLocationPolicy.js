@@ -2,9 +2,13 @@
 // useful enough to write; Firebase and Expo dependencies deliberately stay out.
 
 export const DRIVER_LOCATION_POLICIES = Object.freeze({
+  // The server work-session lease lasts 7 min. A 4 min idle heartbeat left no
+  // margin: a single missed native cycle already made an available driver
+  // undispatchable. 150 s tolerates two consecutive misses without touching the
+  // server freshness rule, at the cost of ~24 instead of ~15 writes per hour.
   online_idle: Object.freeze({
     minGapMs: 30_000,
-    maxAgeMs: 4 * 60_000,
+    maxAgeMs: 150_000,
     minDistanceMeters: 100,
   }),
   online_moving: Object.freeze({

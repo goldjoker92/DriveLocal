@@ -14,6 +14,7 @@ import AppButton from '../../components/AppButton';
 import AdminTableRow from '../../components/AdminTableRow';
 import DriverCockpitProfileCard from '../../components/DriverCockpitProfileCard';
 import DriverCockpitDashboardCard from '../../components/DriverCockpitDashboardCard';
+import DriverBatteryTipCard from '../../components/DriverBatteryTipCard';
 import { colors } from '../../constants/colors';
 import { spacing, radius } from '../../constants/spacing';
 import { typography, fontFamily } from '../../constants/typography';
@@ -633,6 +634,10 @@ export default function DriverHome() {
               online={isAvailable}
               onPhotoPress={openDriverPhoto}
             />
+
+            {/* Renders itself only after Android actually killed our background
+                service at least once; silent otherwise. */}
+            <DriverBatteryTipCard />
 
             {photoIssue ? (
               <AppCard style={styles.compactWarningCard}>

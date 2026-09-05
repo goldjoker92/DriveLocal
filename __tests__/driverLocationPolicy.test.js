@@ -38,12 +38,12 @@ describe('adaptive driver location policy', () => {
     expect(result).toMatchObject({ publish: true, reason: 'new_session' });
   });
 
-  it('keeps an idle driver quiet until the four-minute heartbeat', () => {
+  it('keeps an idle driver quiet until the 150-second heartbeat', () => {
     const beforeHeartbeat = shouldPublishDriverLocation({
       session: SESSION,
       payload: payload(),
       lastPublish: last(),
-      nowMs: 1_000_000 + 3 * 60_000,
+      nowMs: 1_000_000 + 2 * 60_000,
     });
     expect(beforeHeartbeat.publish).toBe(false);
 
@@ -51,7 +51,7 @@ describe('adaptive driver location policy', () => {
       session: SESSION,
       payload: payload(),
       lastPublish: last(),
-      nowMs: 1_000_000 + 4 * 60_000,
+      nowMs: 1_000_000 + 150_000,
     });
     expect(heartbeat).toMatchObject({ publish: true, reason: 'heartbeat', mode: 'online_idle' });
   });

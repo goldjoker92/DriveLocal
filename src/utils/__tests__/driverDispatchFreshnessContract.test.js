@@ -25,7 +25,9 @@ describe('driver dispatch freshness contract', () => {
     expect(policy).toContain('online_moving');
     expect(policy).toContain('driver_arrived');
     expect(policy).toContain('in_progress');
-    expect(policy).toContain('maxAgeMs: 4 * 60_000');
+    // Idle heartbeat must stay well below the 7 min server work-session lease so
+    // one missed native cycle cannot make an available driver undispatchable.
+    expect(policy).toContain('maxAgeMs: 150_000');
     expect(policy).toContain('minDistanceMeters: 100');
     expect(policy).toContain('minDistanceMeters: 20');
     expect(policy).toContain('shouldPublishDriverLocation');
