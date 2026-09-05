@@ -18,6 +18,7 @@ jest.mock('expo-notifications', () => ({
   AndroidImportance: { MAX: 5, HIGH: 4 },
   AndroidNotificationVisibility: { PUBLIC: 1 },
   setNotificationChannelAsync: jest.fn(async () => undefined),
+  getNotificationChannelAsync: jest.fn(),
   getPermissionsAsync: jest.fn(),
   requestPermissionsAsync: jest.fn(),
   getDevicePushTokenAsync: jest.fn(),
@@ -36,10 +37,13 @@ const {
   DRIVER_ARRIVAL_VIBRATION_PATTERN,
   NOTIFICATION_CHANNELS,
   NOTIFICATION_SOUNDS,
+  RIDE_OFFER_CHANNEL_CAPABILITIES,
+  RIDE_OFFER_VIBRATION_PATTERN,
 } = require('../../constants/notificationChannels');
 const {
   ensureAndroidChannels,
   getPushNotificationDiagnosticState,
+  isRideOfferV2ChannelReady,
   registerForPushNotifications,
 } = require('../notificationsService');
 
@@ -49,6 +53,7 @@ describe('notification readiness diagnostics', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    Notifications.setNotificationChannelAsync.mockResolvedValue(undefined);
     storage = new Map();
     mockSyncToken = jest.fn(async () => ({ data: { enabled: true } }));
     httpsCallable.mockReturnValue(mockSyncToken);
@@ -70,12 +75,43 @@ describe('notification readiness diagnostics', () => {
       type: 'fcm',
       data: 'SECRET_FCM_TOKEN_MUST_NOT_BE_PERSISTED',
     });
+    Notifications.getNotificationChannelAsync.mockResolvedValue({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      sound: 'custom',
+      importance: Notifications.AndroidImportance.MAX,
+      enableVibrate: true,
+    });
   });
 
-  it('creates a dedicated MAX arrival channel with independent sound and vibration', async () => {
-    await ensureAndroidChannels();
+  it('keeps V1 and creates verified V2 plus the existing arrival channel', async () => {
+    await expect(ensureAndroidChannels()).resolves.toBe(
+      RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+    );
 
-    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledTimes(3);
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledTimes(4);
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+      NOTIFICATION_CHANNELS.RIDE_OFFERS,
+      expect.objectContaining({
+        name: 'Corridas disponíveis',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [...RIDE_OFFER_VIBRATION_PATTERN],
+        enableVibrate: true,
+      }),
+    );
+    const legacyCall = Notifications.setNotificationChannelAsync.mock.calls.find(
+      ([channelId]) => channelId === NOTIFICATION_CHANNELS.RIDE_OFFERS,
+    );
+    expect(legacyCall[1]).not.toHaveProperty('sound');
+    expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      expect.objectContaining({
+        importance: Notifications.AndroidImportance.MAX,
+        sound: NOTIFICATION_SOUNDS.RIDE_OFFER,
+        vibrationPattern: [...RIDE_OFFER_VIBRATION_PATTERN],
+        enableVibrate: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      }),
+    );
     expect(Notifications.setNotificationChannelAsync).toHaveBeenCalledWith(
       NOTIFICATION_CHANNELS.DRIVER_ARRIVAL,
       expect.objectContaining({
@@ -89,6 +125,27 @@ describe('notification readiness diagnostics', () => {
     );
   });
 
+  it('requires Android to confirm custom sound, high importance and vibration', () => {
+    expect(isRideOfferV2ChannelReady({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      sound: 'custom',
+      importance: Notifications.AndroidImportance.MAX,
+      enableVibrate: true,
+    })).toBe(true);
+    expect(isRideOfferV2ChannelReady({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      sound: null,
+      importance: Notifications.AndroidImportance.MAX,
+      enableVibrate: true,
+    })).toBe(false);
+    expect(isRideOfferV2ChannelReady({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      sound: 'custom',
+      importance: 1,
+      enableVibrate: true,
+    })).toBe(false);
+  });
+
   it('persists only a safe registration receipt, never the FCM token', async () => {
     const token = await registerForPushNotifications('driver');
 
@@ -98,6 +155,8 @@ describe('notification readiness diagnostics', () => {
       token: 'SECRET_FCM_TOKEN_MUST_NOT_BE_PERSISTED',
       platform: 'android',
       role: 'driver',
+      rideOfferChannelCapability:
+        RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
     });
 
     const persistedValues = AsyncStorage.setItem.mock.calls.map((call) => String(call[1]));
@@ -109,7 +168,63 @@ describe('notification readiness diagnostics', () => {
       status: 'registered',
       permissionGranted: true,
       role: 'driver',
+      rideOfferChannelCapability:
+        RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
     });
+  });
+
+  it('keeps registration on V1 when Android cannot verify the V2 sound', async () => {
+    Notifications.getNotificationChannelAsync.mockResolvedValue({
+      id: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      sound: null,
+      importance: Notifications.AndroidImportance.MAX,
+      enableVibrate: true,
+    });
+
+    await expect(registerForPushNotifications('driver')).resolves.toBe(
+      'SECRET_FCM_TOKEN_MUST_NOT_BE_PERSISTED',
+    );
+    expect(mockSyncToken).toHaveBeenCalledWith(expect.objectContaining({
+      rideOfferChannelCapability: RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
+    }));
+  });
+
+  it('keeps registration on V1 when creating V2 throws', async () => {
+    Notifications.setNotificationChannelAsync.mockImplementation(async (channelId) => {
+      if (channelId === NOTIFICATION_CHANNELS.RIDE_OFFERS_V2) {
+        const error = new Error('native channel failure');
+        error.code = 'ERR_CHANNEL_SETUP';
+        throw error;
+      }
+      return undefined;
+    });
+
+    await expect(registerForPushNotifications('driver')).resolves.toBe(
+      'SECRET_FCM_TOKEN_MUST_NOT_BE_PERSISTED',
+    );
+    expect(mockSyncToken).toHaveBeenCalledWith(expect.objectContaining({
+      rideOfferChannelCapability: RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
+    }));
+  });
+
+  it('retries the legacy token payload when an older backend rejects capability', async () => {
+    const oldBackendError = new Error('unknown field');
+    oldBackendError.code = 'functions/invalid-argument';
+    mockSyncToken
+      .mockRejectedValueOnce(oldBackendError)
+      .mockResolvedValueOnce({ data: { enabled: true } });
+
+    await expect(registerForPushNotifications('driver')).resolves.toBe(
+      'SECRET_FCM_TOKEN_MUST_NOT_BE_PERSISTED',
+    );
+    expect(mockSyncToken).toHaveBeenCalledTimes(2);
+    expect(mockSyncToken.mock.calls[0][0]).toHaveProperty(
+      'rideOfferChannelCapability',
+      RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+    );
+    expect(mockSyncToken.mock.calls[1][0]).not.toHaveProperty(
+      'rideOfferChannelCapability',
+    );
   });
 
   it('returns a settings-grade diagnostic after a permanent permission denial', async () => {

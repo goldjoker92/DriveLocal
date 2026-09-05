@@ -92,13 +92,26 @@ function safeCollapseKey(event) {
     .slice(0, 64);
 }
 
-function androidNotificationForEvent(event) {
+function safeRideOfferChannelCapability(value) {
+  return value === C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
+    ? C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
+    : C.RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1;
+}
+
+function androidNotificationForEvent(event, options = {}) {
   const isOffer = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED;
   const isDriverArrival = event.eventType === C.NOTIFICATION_EVENT.RIDE_ARRIVED;
+  const rideOfferChannelCapability = safeRideOfferChannelCapability(
+    options.rideOfferChannelCapability
+  );
+  const usesV2OfferChannel = isOffer
+    && rideOfferChannelCapability === C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2;
   const channelId = isDriverArrival
     ? C.NOTIFICATION_CHANNELS.DRIVER_ARRIVAL
     : isOffer
-      ? C.NOTIFICATION_CHANNELS.RIDE_OFFERS
+      ? usesV2OfferChannel
+        ? C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V2
+        : C.NOTIFICATION_CHANNELS.RIDE_OFFERS
       : C.NOTIFICATION_CHANNELS.RIDE_STATUS;
 
   const common = {
@@ -109,7 +122,7 @@ function androidNotificationForEvent(event) {
   if (!isDriverArrival) {
     return {
       ...common,
-      sound: 'default',
+      sound: usesV2OfferChannel ? C.NOTIFICATION_SOUNDS.RIDE_OFFER : 'default',
       defaultVibrateTimings: true,
     };
   }
@@ -124,7 +137,7 @@ function androidNotificationForEvent(event) {
   };
 }
 
-function buildMulticastMessage(event, tokens) {
+function buildMulticastMessage(event, tokens, options = {}) {
   const presentation = presentationForEvent(event);
 
   return {
@@ -135,9 +148,17 @@ function buildMulticastMessage(event, tokens) {
       priority: 'high',
       ttl: 10 * 60 * 1000,
       collapseKey: safeCollapseKey(event),
-      notification: androidNotificationForEvent(event),
+      notification: androidNotificationForEvent(event, options),
     },
   };
+}
+
+function buildTokenMessage(event, target) {
+  const multicast = buildMulticastMessage(event, [target.token], {
+    rideOfferChannelCapability: target.rideOfferChannelCapability,
+  });
+  const { tokens: _tokens, ...message } = multicast;
+  return { ...message, token: target.token };
 }
 
 /**
@@ -159,7 +180,15 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
   const targets = [];
   snap.forEach((d) => {
     const t = d.data() || {};
-    if (t.platform === 'android' && t.token) targets.push({ ref: d.ref, token: t.token });
+    if (t.platform === 'android' && t.token) {
+      targets.push({
+        ref: d.ref,
+        token: t.token,
+        rideOfferChannelCapability: safeRideOfferChannelCapability(
+          t.rideOfferChannelCapability
+        ),
+      });
+    }
   });
 
   if (targets.length === 0) {
@@ -176,8 +205,30 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
     return { status: C.NOTIFICATION_STATUS.FAILED, successCount: 0, failureCount: 0 };
   }
 
-  const resp = await messaging.sendEachForMulticast(
-    buildMulticastMessage(event, targets.map((t) => t.token))
+  const isOffer = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED;
+  const v2TargetCount = isOffer
+    ? targets.filter((target) => (
+        target.rideOfferChannelCapability
+          === C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
+      )).length
+    : 0;
+  const legacyTargetCount = isOffer ? targets.length - v2TargetCount : 0;
+
+  if (isOffer) {
+    logInfo(context, 'notification.offer_channels_selected', {
+      operation: 'notify',
+      notificationId: event.notificationId,
+      v2TargetCount,
+      legacyTargetCount,
+      targetCount: targets.length,
+    });
+  }
+
+  // sendEach accepts one message per token in a single provider operation. This
+  // lets V1 and V2 devices coexist without duplicate notifications or two
+  // partially successful multicast calls during the migration.
+  const resp = await messaging.sendEach(
+    targets.map((target) => buildTokenMessage(event, target))
   );
 
   let successCount = 0;
@@ -222,6 +273,7 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
     eventType: event.eventType,
     successCount,
     failureCount,
+    ...(isOffer ? { v2TargetCount, legacyTargetCount } : {}),
   });
   return { status, successCount, failureCount };
 }
@@ -229,11 +281,13 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
 module.exports = {
   processRideNotificationEvent,
   buildMulticastMessage,
+  buildTokenMessage,
   androidNotificationForEvent,
   presentationForEvent,
   dataPayload,
   safeAndroidTag,
   safeCollapseKey,
+  safeRideOfferChannelCapability,
   INVALID_TOKEN_CODES,
   PRESENTATION,
 };

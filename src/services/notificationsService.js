@@ -25,6 +25,8 @@ import {
   DRIVER_ARRIVAL_VIBRATION_PATTERN,
   NOTIFICATION_CHANNELS,
   NOTIFICATION_SOUNDS,
+  RIDE_OFFER_CHANNEL_CAPABILITIES,
+  RIDE_OFFER_VIBRATION_PATTERN,
 } from "../constants/notificationChannels";
 
 const INSTALLATION_ID_KEY = "drivelocal.installationId";
@@ -39,6 +41,12 @@ function safeReasonCode(value) {
   const text = String(value || "unknown").trim();
   const normalized = text.replace(/[^A-Za-z0-9_.:/-]/g, "_").slice(0, 80);
   return normalized || "unknown";
+}
+
+function safeRideOfferChannelCapability(value) {
+  return value === RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
+    ? RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
+    : RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1;
 }
 
 function traceNotificationReadiness(event, details = {}, level = "log") {
@@ -59,6 +67,9 @@ async function writeNotificationRegistrationState(status, details = {}) {
     appVersion: details.appVersion || null,
     canAskAgain: typeof details.canAskAgain === "boolean" ? details.canAskAgain : null,
     reasonCode: details.reasonCode ? safeReasonCode(details.reasonCode) : null,
+    rideOfferChannelCapability: safeRideOfferChannelCapability(
+      details.rideOfferChannelCapability,
+    ),
   };
 
   try {
@@ -83,6 +94,9 @@ async function readNotificationRegistrationState() {
       appVersion: parsed.appVersion || null,
       canAskAgain: typeof parsed.canAskAgain === "boolean" ? parsed.canAskAgain : null,
       reasonCode: parsed.reasonCode ? safeReasonCode(parsed.reasonCode) : null,
+      rideOfferChannelCapability: safeRideOfferChannelCapability(
+        parsed.rideOfferChannelCapability,
+      ),
     };
   } catch (_error) {
     return null;
@@ -116,7 +130,8 @@ async function getInstallationId() {
  *
  * Android notification channels must exist before notifications are delivered.
  *
- * - Ride offers use MAX importance because they are time-sensitive.
+ * - The legacy ride-offer channel remains untouched as a permanent fallback.
+ * - V2 adds a bundled sound only when Android confirms the channel is usable.
  * - Driver arrival has its own MAX channel, bundled sound and strong vibration.
  * - Other ride status updates remain on the existing HIGH channel.
  *
@@ -124,15 +139,77 @@ async function getInstallationId() {
  * application change a channel's name and description after the channel exists;
  * its sound and vibration remain under the user's system settings.
  */
+export function isRideOfferV2ChannelReady(channel) {
+  return Boolean(
+    channel
+      && channel.id === NOTIFICATION_CHANNELS.RIDE_OFFERS_V2
+      && channel.sound === "custom"
+      && Number(channel.importance) >= Number(Notifications.AndroidImportance.HIGH)
+      && channel.enableVibrate === true,
+  );
+}
+
+async function ensureRideOfferV2Channel() {
+  try {
+    await Notifications.setNotificationChannelAsync(
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+      {
+        name: "Novas corridas (som DriveLocal)",
+        description: "Alerta prioritário para novas ofertas de corrida.",
+        importance: Notifications.AndroidImportance.MAX,
+        sound: NOTIFICATION_SOUNDS.RIDE_OFFER,
+        vibrationPattern: [...RIDE_OFFER_VIBRATION_PATTERN],
+        enableVibrate: true,
+        enableLights: true,
+        lightColor: "#2563EB",
+        showBadge: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      },
+    );
+
+    const channel = await Notifications.getNotificationChannelAsync(
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+    );
+    if (isRideOfferV2ChannelReady(channel)) {
+      traceNotificationReadiness("ride_offer_channel.v2_ready", {
+        capability: RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+        importance: Number(channel.importance),
+        sound: "custom",
+        vibrationEnabled: true,
+      });
+      return RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2;
+    }
+
+    traceNotificationReadiness("ride_offer_channel.fallback_v1", {
+      capability: RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
+      reason: "v2_verification_failed",
+      channelPresent: Boolean(channel),
+      importance: Number(channel?.importance || 0),
+      sound: channel?.sound || "none",
+      vibrationEnabled: channel?.enableVibrate === true,
+    }, "warn");
+  } catch (error) {
+    traceNotificationReadiness("ride_offer_channel.fallback_v1", {
+      capability: RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
+      reason: "v2_setup_failed",
+      reasonCode: safeReasonCode(error?.code || error?.name || "unknown"),
+    }, "warn");
+  }
+
+  return RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1;
+}
+
 export async function ensureAndroidChannels() {
-  if (Platform.OS !== "android") return;
+  if (Platform.OS !== "android") {
+    return RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1;
+  }
 
   await Notifications.setNotificationChannelAsync(
     NOTIFICATION_CHANNELS.RIDE_OFFERS,
     {
       name: "Corridas disponíveis",
       importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
+      vibrationPattern: [...RIDE_OFFER_VIBRATION_PATTERN],
       enableVibrate: true,
     },
   );
@@ -162,6 +239,10 @@ export async function ensureAndroidChannels() {
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     },
   );
+
+  // V2 is deliberately last and isolated: a custom-sound problem must never
+  // prevent permission/token registration through the working legacy channel.
+  return ensureRideOfferV2Channel();
 }
 
 const appVersion =
@@ -223,6 +304,7 @@ export async function getPushNotificationDiagnosticState({
       registeredAtMs: stored.atMs,
       ageMs,
       role: stored.role,
+      rideOfferChannelCapability: stored.rideOfferChannelCapability,
     };
   }
 
@@ -233,6 +315,7 @@ export async function getPushNotificationDiagnosticState({
     registeredAtMs: stored.atMs,
     reasonCode: stored.reasonCode,
     role: stored.role,
+    rideOfferChannelCapability: stored.rideOfferChannelCapability,
   };
 }
 
@@ -247,6 +330,7 @@ export async function registerForPushNotifications(role) {
   const startedAt = Date.now();
   const normalizedRole = safeRole(role);
   let stage = "preflight";
+  let rideOfferChannelCapability = RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1;
 
   traceNotificationReadiness("registration.requested", {
     role: normalizedRole,
@@ -267,7 +351,7 @@ export async function registerForPushNotifications(role) {
     }
 
     stage = "channels";
-    await ensureAndroidChannels();
+    rideOfferChannelCapability = await ensureAndroidChannels();
 
     stage = "permission";
     const currentPermissions = await Notifications.getPermissionsAsync();
@@ -320,22 +404,46 @@ export async function registerForPushNotifications(role) {
       "syncNotificationTokenSecure",
     );
 
-    await syncNotificationToken({
+    const tokenRegistrationPayload = {
       token,
       installationId,
       platform: "android",
       appVersion,
       role: normalizedRole,
-    });
+      rideOfferChannelCapability,
+    };
+
+    try {
+      await syncNotificationToken(tokenRegistrationPayload);
+    } catch (error) {
+      const code = String(error?.code || "").toLowerCase();
+      const oldBackendRejectedCapability = code === "functions/invalid-argument"
+        || code === "invalid-argument";
+      if (!oldBackendRejectedCapability) throw error;
+
+      // Deploy-order fallback: an older backend rejects the new optional field.
+      // Retrying the exact legacy payload keeps existing notifications working.
+      traceNotificationReadiness("registration.capability_fallback", {
+        role: normalizedRole,
+        reason: "backend_capability_not_supported",
+        capability: RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
+      }, "warn");
+      const { rideOfferChannelCapability: _unsupported, ...legacyPayload } =
+        tokenRegistrationPayload;
+      await syncNotificationToken(legacyPayload);
+      rideOfferChannelCapability = RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1;
+    }
 
     await writeNotificationRegistrationState("registered", {
       role: normalizedRole,
       appVersion,
+      rideOfferChannelCapability,
     });
     traceNotificationReadiness("registration.succeeded", {
       role: normalizedRole,
       durationMs: Date.now() - startedAt,
       result: "registered",
+      rideOfferChannelCapability,
     });
 
     return token;

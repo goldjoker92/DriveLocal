@@ -37,13 +37,21 @@ module.exports = Object.freeze({
   ]),
 
   NOTIFICATION_CHANNELS: Object.freeze({
+    // Immutable legacy id: every old/missing capability must continue here.
     RIDE_OFFERS: 'drivelocal-ride-offers',
+    RIDE_OFFERS_V2: 'drivelocal-ride-offers-v2',
     RIDE_STATUS: 'drivelocal-ride-status',
     DRIVER_ARRIVAL: 'drivelocal-driver-arrival-v1',
   }),
 
   NOTIFICATION_SOUNDS: Object.freeze({
+    RIDE_OFFER: 'drivelocal_ride_offer.wav',
     DRIVER_ARRIVAL: 'drivelocal_driver_arrived.wav',
+  }),
+
+  RIDE_OFFER_CHANNEL_CAPABILITIES: Object.freeze({
+    LEGACY_V1: 'legacy_v1',
+    CUSTOM_SOUND_V2: 'custom_sound_v2',
   }),
 
   DRIVER_ARRIVAL_VIBRATION_PATTERN: Object.freeze([

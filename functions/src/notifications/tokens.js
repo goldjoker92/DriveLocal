@@ -6,7 +6,12 @@
 const admin = require('firebase-admin');
 const { createHash } = require('crypto');
 const { AppError, ERROR_CODES } = require('../errors/appError');
-const { assertShape, validateNonEmptyString, validateIdentifier } = require('../validation/validators');
+const {
+  assertShape,
+  validateEnum,
+  validateNonEmptyString,
+  validateIdentifier,
+} = require('../validation/validators');
 const { logInfo } = require('../logging/logger');
 const C = require('../rides/constants');
 
@@ -24,7 +29,7 @@ async function syncNotificationToken({ db, request, context, clock }) {
   }
   const payload = assertShape(request && request.data, {
     required: ['installationId', 'platform'],
-    optional: ['token', 'appVersion', 'role', 'enabled'],
+    optional: ['token', 'appVersion', 'role', 'enabled', 'rideOfferChannelCapability'],
   });
   const installationId = validateIdentifier(payload.installationId, 'installationId');
   if (payload.platform !== 'android') {
@@ -42,6 +47,16 @@ async function syncNotificationToken({ db, request, context, clock }) {
   }
 
   const token = validateNonEmptyString(payload.token, 'token');
+  // Missing capability means an old app (or a deliberate client fallback).
+  // Persisting LEGACY_V1 explicitly also makes an app downgrade safe: a former
+  // V2 value cannot survive a later sync from a V1-only binary.
+  const rideOfferChannelCapability = payload.rideOfferChannelCapability === undefined
+    ? C.RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1
+    : validateEnum(
+        payload.rideOfferChannelCapability,
+        Object.values(C.RIDE_OFFER_CHANNEL_CAPABILITIES),
+        'rideOfferChannelCapability'
+      );
   await ref.set(
     {
       uid,
@@ -50,14 +65,20 @@ async function syncNotificationToken({ db, request, context, clock }) {
       platform: 'android',
       appVersion: payload.appVersion ? String(payload.appVersion).slice(0, 40) : null,
       role: payload.role ? String(payload.role).slice(0, 20) : null,
+      rideOfferChannelCapability,
       active: true,
       lastSeenAtMs: nowMs,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
   );
-  logInfo(context, 'notification.token_synced', { operation: 'token_sync', enabled: true, tokenHash: tokenHash(token) });
-  return { active: true };
+  logInfo(context, 'notification.token_synced', {
+    operation: 'token_sync',
+    enabled: true,
+    tokenHash: tokenHash(token),
+    rideOfferChannelCapability,
+  });
+  return { active: true, rideOfferChannelCapability };
 }
 
 module.exports = { syncNotificationToken, tokenHash };
