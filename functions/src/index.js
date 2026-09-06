@@ -89,6 +89,9 @@ exports.acceptedPassengerIdentityTrigger = acceptedPassengerIdentityTrigger;
 
 const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
+// Admin-only fleet message. The one server-side channel to drivers who never
+// update the app and cannot be reached any other way.
+exports.sendDriverBroadcastSecure = notificationCallables.sendDriverBroadcastSecure;
 exports.processRideNotificationEvent = notificationCallables.processRideNotificationEvent;
 
 const supportCallables = require('./support/callables');

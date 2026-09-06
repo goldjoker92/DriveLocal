@@ -62,6 +62,14 @@ const PRESENTATION = Object.freeze({
 });
 
 function presentationForEvent(event) {
+  if (event?.eventType === C.NOTIFICATION_EVENT.DRIVER_BROADCAST) {
+    // Admin-authored copy, validated and bounded at send time. Falls back to a
+    // neutral line so a malformed event can never render an empty notification.
+    return {
+      title: String(event.broadcastTitle || 'DriveLocal').slice(0, 60),
+      body: String(event.broadcastBody || 'Abra o app para ver o aviso.').slice(0, 160),
+    };
+  }
   if (event?.eventType === C.NOTIFICATION_EVENT.RIDE_QUICK_MESSAGE) {
     return quickMessagePresentation(event.messageCode);
   }

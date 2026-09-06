@@ -86,6 +86,9 @@ module.exports = Object.freeze({
     RIDE_CANCELLED: 'ride_cancelled',
     RIDE_DISPUTED: 'ride_disputed',
     RIDE_QUICK_MESSAGE: 'ride_quick_message',
+    // Admin message to the whole driver fleet. Carries its own copy instead of
+    // a static presentation, and rides on the STATUS channel, never the offer one.
+    DRIVER_BROADCAST: 'driver_broadcast',
   }),
 
   NOTIFICATION_STATUS: Object.freeze({
