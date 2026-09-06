@@ -116,9 +116,11 @@ describe('available driver stays dispatchable (work-session lease simulation)', 
   });
 
   it('still refuses a genuinely stale driver, so ghost dispatch stays impossible', () => {
+    // The widened launch windows deliberately tolerate a ~12 min gap, so a
+    // genuinely abandoned app now has to be simulated past the 20 min lease.
     const { undispatchableAtMs, driver } = simulate({
-      durationMs: 30 * 60_000,
-      outage: { fromMs: START_MS + 200_000, toMs: START_MS + 900_000 },
+      durationMs: 60 * 60_000,
+      outage: { fromMs: START_MS + 200_000, toMs: START_MS + 1_900_000 },
     });
 
     expect(undispatchableAtMs.length).toBeGreaterThan(0);
@@ -126,7 +128,7 @@ describe('available driver stays dispatchable (work-session lease simulation)', 
     // ghost-online state observed in production.
     expect(driver.availabilityStatus).toBe('online');
 
-    const staleMs = START_MS + 800_000;
+    const staleMs = START_MS + 1_600_000;
     const { dispatchable, diagnostics } = isDispatchable(
       applyPublishedPoint(baseDriver(), START_MS + 180_000),
       staleMs
