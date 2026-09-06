@@ -9,6 +9,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import DriverActiveRideCard from '../../components/DriverActiveRideCard';
 import DriverKeepAwakeGuard from '../../components/DriverKeepAwakeGuard';
 import DriverDispatchVisibilityBanner from '../../components/DriverDispatchVisibilityBanner';
+import DriverAnnouncementBanner from '../../components/DriverAnnouncementBanner';
 import { auth, db } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
@@ -376,6 +377,10 @@ export default function DriverLayout() {
           hasActiveRide={Boolean(activeRideId)}
           onRecover={refreshDriverOnlineHeartbeat}
         />
+        {/* Admin message to the fleet. Shown on every driver screen so it cannot
+            be missed, never during an accepted ride, and dismissed by the driver
+            himself with "Entendi". */}
+        <DriverAnnouncementBanner hasActiveRide={Boolean(activeRideId)} />
       </SafeAreaView>
       {activeRideCardVisible ? (
         <SafeAreaView style={styles.activeRideArea} edges={['top']}>

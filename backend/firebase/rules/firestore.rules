@@ -405,6 +405,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Admin announcement shown in the driver app until acknowledged. One shared
+    // document, published only through the callable, so a client can never
+    // forge a platform message.
+    match /driverAnnouncements/{announcementDocId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     match /cityPrivateConfig/{serviceAreaId} {
       allow read, write: if false;
     }
