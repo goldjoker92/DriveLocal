@@ -100,6 +100,18 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     clock,
   });
 
+  // Incremental waves: a driver is offered a given ride exactly once. Re-offering
+  // would re-notify him for a ride he already declined or ignored, and would cost
+  // a write plus a push on every wave.
+  const alreadyOffered = new Set(
+    Array.isArray(ride.offeredDriverIds) ? ride.offeredDriverIds : []
+  );
+  const freshlyEligible = alreadyOffered.size === 0
+    ? eligible
+    : eligible.filter((candidate) => !alreadyOffered.has(candidate.driverId));
+  diagnostics.alreadyOfferedCount = alreadyOffered.size;
+  diagnostics.newlyReachableCount = freshlyEligible.length;
+
   logInfo(context, 'ride.dispatch.candidates_evaluated', {
     ...base,
     ...diagnostics,
@@ -114,11 +126,17 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     base,
   });
 
-  if (eligible.length === 0) {
+  // No eligible driver right now is NOT a final answer. The ride stays in
+  // SEARCHING for the whole search window: the passenger sees a genuine search
+  // instead of an instant "no driver", and a driver who comes online seconds
+  // later is reached by the next wave. Only the sweep task, at the end of the
+  // window, is allowed to conclude that nobody came.
+  if (freshlyEligible.length === 0) {
     await rideRef.set(
       {
-        status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE,
-        reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS,
+        status: C.RIDE_STATUS.SEARCHING,
+        reasonCode: C.REASON.SEARCH_CONTINUES,
+        lastDispatchWaveAtMs: clock.now(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true }
@@ -126,12 +144,12 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     logInfo(context, 'ride.dispatch.no_candidates', {
       ...base,
       ...diagnostics,
-      normalizedStatus: C.RIDE_STATUS.NO_DRIVER_AVAILABLE,
-      reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS,
+      normalizedStatus: C.RIDE_STATUS.SEARCHING,
+      reasonCode: C.REASON.SEARCH_CONTINUES,
     });
     return {
-      status: C.RIDE_STATUS.NO_DRIVER_AVAILABLE,
-      reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS,
+      status: C.RIDE_STATUS.SEARCHING,
+      reasonCode: C.REASON.SEARCH_CONTINUES,
       offersCreated: 0,
     };
   }
@@ -140,12 +158,27 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     const { createdCount } = await createTargetedOffers({
       db,
       ride,
-      eligible,
+      eligible: freshlyEligible,
       offerTtlSeconds,
       traceId: context && context.traceId,
       context,
       clock,
     });
+    // Remember who was served so later waves stay incremental. Bounded so the
+    // ride document can never grow without limit.
+    const nextOfferedDriverIds = [
+      ...alreadyOffered,
+      ...freshlyEligible.map((candidate) => candidate.driverId),
+    ].slice(0, C.MAX_TRACKED_OFFERED_DRIVERS);
+    await rideRef.set(
+      {
+        offeredDriverIds: nextOfferedDriverIds,
+        lastDispatchWaveAtMs: clock.now(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
     logInfo(context, 'ride.dispatch.offers_created', {
       ...base,
       freshEligibleCount: diagnostics.freshEligibleCount,

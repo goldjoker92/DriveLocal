@@ -14,13 +14,13 @@ const driverUpdatedAt = (atMs) => ({ availabilityUpdatedAtMs: atMs });
 
 describe('driver work session windows', () => {
   it('mirrors the backend thresholds', () => {
-    expect(WORK_SESSION_DISPATCH_LEASE_MS).toBe(7 * 60 * 1000);
+    expect(WORK_SESSION_DISPATCH_LEASE_MS).toBe(20 * 60 * 1000);
     // functions/src/rides/constants.js WORK_SESSION_ABANDONED_MAX_AGE_MS
-    expect(WORK_SESSION_ABANDONED_MAX_AGE_MS).toBe(30 * 60 * 1000);
+    expect(WORK_SESSION_ABANDONED_MAX_AGE_MS).toBe(45 * 60 * 1000);
   });
 
   it('keeps a late-publishing driver recoverable while skipping him for offers', () => {
-    const lateBy10Min = driverUpdatedAt(T0 - 10 * 60 * 1000);
+    const lateBy10Min = driverUpdatedAt(T0 - 25 * 60 * 1000);
 
     expect(remoteWorkSessionDispatchable(lateBy10Min, T0)).toBe(false);
     expect(remoteWorkSessionRecoverable(lateBy10Min, T0)).toBe(true);
@@ -34,7 +34,7 @@ describe('driver work session windows', () => {
   });
 
   it('stops claiming availability once the session is abandoned', () => {
-    expect(remoteWorkSessionRecoverable(driverUpdatedAt(T0 - 31 * 60 * 1000), T0)).toBe(false);
+    expect(remoteWorkSessionRecoverable(driverUpdatedAt(T0 - 46 * 60 * 1000), T0)).toBe(false);
     // Exactly at the boundary the session is still honored.
     expect(remoteWorkSessionRecoverable(
       driverUpdatedAt(T0 - WORK_SESSION_ABANDONED_MAX_AGE_MS),

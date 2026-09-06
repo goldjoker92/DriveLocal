@@ -59,7 +59,7 @@ describe('hourly driver supply analytics', () => {
 
   it('excludes stale location/session, financial review and unusable wallet', () => {
     const staleLocation = eligibleDriver({ locationUpdatedAtMs: AT_18H - 2 * 3600000 });
-    const staleSession = eligibleDriver({ availabilityUpdatedAtMs: AT_18H - 10 * 60 * 1000 });
+    const staleSession = eligibleDriver({ availabilityUpdatedAtMs: AT_18H - 25 * 60 * 1000 });
     const review = eligibleDriver({ financialReviewRequired: true });
     const emptyWallet = eligibleDriver({
       commissionFreeUntil: AT_18H - 1,

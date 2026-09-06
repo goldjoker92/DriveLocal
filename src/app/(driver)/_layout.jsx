@@ -8,6 +8,8 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { doc, onSnapshot } from 'firebase/firestore';
 import DriverActiveRideCard from '../../components/DriverActiveRideCard';
 import DriverKeepAwakeGuard from '../../components/DriverKeepAwakeGuard';
+import DriverDispatchVisibilityBanner from '../../components/DriverDispatchVisibilityBanner';
+import DriverAnnouncementBanner from '../../components/DriverAnnouncementBanner';
 import { auth, db } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
@@ -56,6 +58,9 @@ export default function DriverLayout() {
   const lastOfferId = useRef(null);
   const reconciliationBusy = useRef(false);
   const [activeRideId, setActiveRideId] = useState(null);
+  // Kept alongside the derived screen status: the banner needs the raw session
+  // timestamps to tell the driver whether dispatch can still see him.
+  const [driverDoc, setDriverDoc] = useState(null);
   const [availabilityStatus, setAvailabilityStatus] = useState('offline');
   const [activeOffer, setActiveOffer] = useState(null);
   const onRobotScreen = segments.includes('robot-driver');
@@ -212,9 +217,11 @@ export default function DriverLayout() {
         if (!snapshot.exists()) {
           setActiveRideId(null);
           setAvailabilityStatus('offline');
+          setDriverDoc(null);
           return;
         }
         const remote = snapshot.data();
+        setDriverDoc(remote || null);
         // activeRideId is the authoritative pointer for restoring the exact accepted
         // offer, including non-terminal payment disputes after a process restart.
         setActiveRideId(remote?.activeRideId || null);
@@ -361,6 +368,20 @@ export default function DriverLayout() {
         availabilityStatus={availabilityStatus}
         activeRideId={activeRideId}
       />
+      {/* Silent while dispatch can see the driver. Speaks up before he concludes
+          on his own that the platform simply has no rides. */}
+      <SafeAreaView style={styles.visibilityArea} edges={['top']} pointerEvents="box-none">
+        <DriverDispatchVisibilityBanner
+          driver={driverDoc}
+          availabilityStatus={driverDoc?.availabilityStatus}
+          hasActiveRide={Boolean(activeRideId)}
+          onRecover={refreshDriverOnlineHeartbeat}
+        />
+        {/* Admin message to the fleet. Shown on every driver screen so it cannot
+            be missed, never during an accepted ride, and dismissed by the driver
+            himself with "Entendi". */}
+        <DriverAnnouncementBanner hasActiveRide={Boolean(activeRideId)} />
+      </SafeAreaView>
       {activeRideCardVisible ? (
         <SafeAreaView style={styles.activeRideArea} edges={['top']}>
           <DriverActiveRideCard
@@ -395,6 +416,7 @@ export default function DriverLayout() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  visibilityArea: { paddingHorizontal: spacing.md },
   stackContainer: { flex: 1 },
   activeRideArea: {
     paddingHorizontal: spacing.md,

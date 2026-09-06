@@ -151,3 +151,16 @@ export async function listDriversByStatus(status, max = DEFAULT_LIMIT) {
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ driverId: d.id, ...d.data() }));
 }
+
+// --- Driver communication ---------------------------------------------------
+// Two complementary channels. The announcement is the reliable one: it stays in
+// every driver's app until he taps "Entendi". The push is a single shot that a
+// swipe, a reboot or muted notifications can lose, so it is used to make drivers
+// open the app, not to carry the message itself.
+export const publishDriverAnnouncement = ({ title, body, tone = 'info' }) =>
+  call('publishDriverAnnouncementSecure', { title, body, tone });
+
+export const clearDriverAnnouncement = () => call('clearDriverAnnouncementSecure', {});
+
+export const sendDriverBroadcast = ({ campaignId, title, body }) =>
+  call('sendDriverBroadcastSecure', { campaignId, title, body });

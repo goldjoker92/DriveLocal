@@ -58,6 +58,7 @@ const INITIAL_EXPANDED = Object.freeze({
   vehicles: false,
   demand: false,
   peaks: false,
+  communication: false,
   operations: false,
 });
 
@@ -927,6 +928,25 @@ export default function Dashboard() {
               Ainda não há dados suficientes para este período.
             </Text>
           ) : null}
+        </DisclosureSection>
+
+        {/* The only direct channel to the fleet: drivers rarely update the app
+            and there is no reliable way to reach them outside it. */}
+        <DisclosureSection
+          icon="📣"
+          title="Comunicação"
+          subtitle="Avisos que ficam no app do motorista até ele confirmar."
+          expanded={expanded.communication}
+          onToggle={() => toggleSection('communication')}
+        >
+          <ActionRow
+            icon="📣"
+            title="Avisar motoristas"
+            count="›"
+            detail="Mensagem fixa no app até o motorista confirmar"
+            tone="primary"
+            onPress={() => openRoute('/driver-message', 'communication_driver_message')}
+          />
         </DisclosureSection>
 
         <DisclosureSection

@@ -171,6 +171,10 @@ async function authenticatedUid() {
 
 function reportThrottle(mode, reason, session = null) {
   const nowMs = Date.now();
+  // Throttling saves a Firestore write, not the session: renew presence anyway,
+  // otherwise a stationary driver whose points are all throttled would age out
+  // of dispatch while working.
+  if (session) publishSessionHeartbeat(session).catch(() => undefined);
   if (nowMs - lastThrottleLogAtMs < 5_000) return;
   lastThrottleLogAtMs = nowMs;
   writeSafeStatus(`${mode}_throttled`, { reason }).catch(() => undefined);
@@ -209,10 +213,68 @@ async function publishRideLocation(session, payload, nowMs) {
   );
 }
 
+/**
+ * Renews the work session WITHOUT a usable GPS point.
+ *
+ * availabilityUpdatedAt is what proves to dispatch that a driver is working, and
+ * until now it was only ever written alongside a published position. A tunnel, a
+ * covered parking, an indoor stop or simply a fix too poor to pass
+ * safeTrackingPayload therefore froze the session, and after the server lease
+ * the driver silently stopped receiving offers while his app still said
+ * "disponível". Production incident 2026-09-05.
+ *
+ * Deliberately does NOT touch `location` or `locationUpdatedAt`: the last known
+ * position stays as it was and keeps ageing, so dispatch still applies its own
+ * freshness rules. This only says "the app is alive and this session is mine".
+ *
+ * @param {object} session local work session
+ * @returns {Promise<boolean>} true when the heartbeat was written
+ */
+async function publishSessionHeartbeat(session) {
+  const currentUid = await authenticatedUid();
+  if (!currentUid || currentUid !== session?.driverId) return false;
+
+  // Same guard as a position publish: a queued event from an ended session must
+  // never revive it.
+  const currentSession = await readSession();
+  if (!sameSession(currentSession, session) || currentSession?.trackingPaused === true) {
+    return false;
+  }
+
+  try {
+    await setDoc(
+      doc(db, 'drivers', session.driverId),
+      {
+        locationAvailabilitySessionId: session.availabilitySessionId,
+        availabilityUpdatedAtMs: Date.now(),
+        availabilityUpdatedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    traceTracking('heartbeat.published', session, { result: 'session_renewed' });
+    return true;
+  } catch (error) {
+    // Best effort: a failed heartbeat must never interrupt tracking. The next
+    // native sample tries again.
+    traceTracking('heartbeat.failed', session, {
+      reason: error?.code || error?.message || 'unknown',
+      result: 'session_not_renewed',
+    }, 'warn');
+    return false;
+  }
+}
+
 async function publishLocationUnlocked(session, locationObject, { force = false } = {}) {
   const payload = safeTrackingPayload(locationObject);
   const currentUid = await authenticatedUid();
   if (!payload || !currentUid || currentUid !== session?.driverId) {
+    // An unusable point is NOT an absent driver. When the app is running and the
+    // session is ours, renew presence so a GPS gap can no longer remove a
+    // working driver from dispatch.
+    if (!payload && currentUid && currentUid === session?.driverId) {
+      await publishSessionHeartbeat(session);
+    }
     traceTracking('publish.rejected', session, {
       reason: !payload ? 'invalid_payload' : !currentUid ? 'unauthenticated' : 'authenticated_driver_mismatch',
       result: 'dropped',
@@ -648,7 +710,10 @@ export async function refreshDriverOnlineHeartbeat() {
   }
 
   const published = await publishImmediate(session, { force: false });
-  return { status: published ? 'published' : 'throttled' };
+  // Even with no usable fix the driver must come back to dispatch: renewing the
+  // session is what makes him visible again, the position only refines where.
+  if (!published) await publishSessionHeartbeat(session);
+  return { status: published ? 'published' : 'heartbeat_only' };
 }
 
 export async function beginDevLocationSimulation({ driverId, vehicleType, rideId }) {

@@ -114,11 +114,15 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
   const preview = pickupPreview(ride.pickup);
   const offerIds = [];
 
-  // Persist every deterministic offer first. In production, a genuine task
-  // enqueue failure fails dispatch closed rather than leaving an endless search.
+  // All offers of one wave are written in a SINGLE batch. Sequentially awaiting
+  // one write per driver made the last driver ring seconds after the first
+  // inside a short decision window, and a failure halfway through left part of
+  // the wave persisted with no notification at all.
+  // MAX_CANDIDATES (100) stays far below the 500-operation Firestore batch limit.
+  const offerBatch = db.batch();
   for (const cand of eligible) {
     const id = offerId(ride.rideId, cand.driverId);
-    await db.collection(C.DRIVER_OFFERS).doc(id).set({
+    offerBatch.set(db.collection(C.DRIVER_OFFERS).doc(id), {
       rideId: ride.rideId,
       driverId: cand.driverId,
       serviceAreaId: ride.serviceAreaId,
@@ -137,28 +141,47 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
     });
     offerIds.push(id);
   }
+  await offerBatch.commit();
 
-  await scheduleOfferExpiry({ rideId: ride.rideId, expiresAtMs, traceId, context });
-
-  // Notify only after server expiry is guaranteed (or deliberately skipped by
-  // the isolated Jest environment).
+  // Notify BEFORE scheduling expiry. The previous order meant a Cloud Tasks
+  // hiccup threw before a single push was sent: the offers existed in Firestore,
+  // every eligible driver was reachable, and the passenger still saw a failure.
+  // Notifications are batched for the same reason as the offers above.
+  const eventBatch = db.batch();
   for (let index = 0; index < eligible.length; index += 1) {
     const cand = eligible[index];
-    const id = offerIds[index];
-    await enqueueEvent(
-      db,
-      buildNotificationEvent({
-        rideId: ride.rideId,
-        eventType: C.NOTIFICATION_EVENT.OFFER_CREATED,
-        recipientUid: cand.driverId,
-        recipientRole: 'driver',
-        route: '/ride-request',
-        offerId: id,
-        dedupeSuffix: cand.driverId,
-        traceId: traceId || null,
-        nowMs,
-      })
-    );
+    const event = buildNotificationEvent({
+      rideId: ride.rideId,
+      eventType: C.NOTIFICATION_EVENT.OFFER_CREATED,
+      recipientUid: cand.driverId,
+      recipientRole: 'driver',
+      route: '/ride-request',
+      offerId: offerIds[index],
+      dedupeSuffix: cand.driverId,
+      traceId: traceId || null,
+      nowMs,
+      // Lets the sender cap the FCM ttl at the real life of the offer instead of
+      // the generic 10 minutes, so a phone that reconnects late is never woken
+      // up for a ride that was assigned or closed long ago.
+      expiresAtMs,
+    });
+    eventBatch.set(db.collection(C.NOTIFICATION_EVENTS).doc(event.id), event.data);
+  }
+  await eventBatch.commit();
+
+  // Expiry is now a safety net, not a precondition. dispatchSweepTask closes an
+  // elapsed search every minute on its own, so a Cloud Tasks outage must never
+  // discard a wave whose offers are already persisted and notified.
+  try {
+    await scheduleOfferExpiry({ rideId: ride.rideId, expiresAtMs, traceId, context });
+  } catch (error) {
+    logWarning(context, 'ride.offer_expiry.enqueue_degraded', {
+      operation: 'enqueue_offer_expiry',
+      rideId: ride.rideId,
+      offersCreated: offerIds.length,
+      reasonCode: 'SWEEP_WILL_CLOSE_SEARCH',
+      internalMessage: error?.message || 'unknown task enqueue error',
+    });
   }
 
   return { createdCount: offerIds.length, offerIds };

@@ -74,6 +74,10 @@ exports.resolvePlaceSuggestionSecure = placeCallables.resolvePlaceSuggestionSecu
 
 const { expireRideOffersTask } = require('./rides/expireOffersTask');
 exports.expireRideOffersTask = expireRideOffersTask;
+// Continuous search: runs the next dispatch wave and closes elapsed searches
+// without depending on Cloud Tasks.
+const { dispatchSweepTask } = require('./rides/dispatchSweepTask');
+exports.dispatchSweepTask = dispatchSweepTask;
 const {
   cancellationNotificationStatusTrigger,
 } = require('./rides/cancellationNotificationStatus');
@@ -85,6 +89,13 @@ exports.acceptedPassengerIdentityTrigger = acceptedPassengerIdentityTrigger;
 
 const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
+// Admin-only fleet message. The one server-side channel to drivers who never
+// update the app and cannot be reached any other way.
+exports.sendDriverBroadcastSecure = notificationCallables.sendDriverBroadcastSecure;
+// Persistent fleet message: stays in the app until each driver acknowledges it,
+// unlike a push which is a single shot nobody can confirm was read.
+exports.publishDriverAnnouncementSecure = notificationCallables.publishDriverAnnouncementSecure;
+exports.clearDriverAnnouncementSecure = notificationCallables.clearDriverAnnouncementSecure;
 exports.processRideNotificationEvent = notificationCallables.processRideNotificationEvent;
 
 const supportCallables = require('./support/callables');

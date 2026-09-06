@@ -185,19 +185,25 @@ describe('dispatch targeting', () => {
     expect(offered).not.toContain(`${view.rideId}_car`);
     expect(offered).not.toContain(`${view.rideId}_blocked`);
     expect(offered).not.toContain(`${view.rideId}_unapproved`);
-    expect(offered).not.toContain(`${view.rideId}_stale`);
+    // A 10-minute-old point is now INSIDE the widened location window and is
+    // deliberately served: losing a real working driver to an Android battery
+    // restriction costs far more than an offer he can simply decline.
+    expect(offered).toContain(`${view.rideId}_stale`);
     expect(offered).not.toContain(`${view.rideId}_old-session`);
     expect(offered).not.toContain(`${view.rideId}_busy`);
     expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
   });
 
-  it('T5: no eligible driver yields a controlled no_driver_available result', async () => {
+  it('T5: no eligible driver keeps the ride searching instead of refusing at once', async () => {
     const db = makeFakeFirestore();
     seedCity(db);
     seedDriver(db, 'offline', { availabilityStatus: 'offline' });
     const view = await createRide(db, fixedClock(T0), fakeRouting());
-    expect(view.status).toBe(C.RIDE_STATUS.NO_DRIVER_AVAILABLE);
-    expect(view.reasonCode).toBe(C.REASON.NO_ELIGIBLE_DRIVERS);
+    // The passenger must see a real search, exactly like the apps he already
+    // uses. Only the sweep task, at the end of the window, may conclude that
+    // nobody came - a driver going online seconds later is still reachable.
+    expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
+    expect(view.reasonCode).toBe(C.REASON.SEARCH_CONTINUES);
     expect(offersFor(db, view.rideId).length).toBe(0);
   });
 });
@@ -403,7 +409,7 @@ describe('exact pickup privacy & coordinate gating', () => {
     });
 
     const view = await createRide(db, fixedClock(T0), fakeRouting());
-    expect(view.status).toBe(C.RIDE_STATUS.NO_DRIVER_AVAILABLE);
+    expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
 
     const late = db._store.get(`${C.DRIVERS}/late`);
     expect(late.availabilityStatus).toBe('online');
@@ -415,16 +421,16 @@ describe('exact pickup privacy & coordinate gating', () => {
   // Production incident 2026-09-05: three moto drivers stayed availabilityStatus
   // "online" with a long-dead session, so every moto request answered
   // no_driver_available instantly while their own app still showed "disponível".
-  it('E4b: a session abandoned for 45 min is closed so the app stops lying', async () => {
+  it('E4b: a session abandoned for 90 min is closed so the app stops lying', async () => {
     const db = makeFakeFirestore();
     seedCity(db);
     seedDriver(db, 'ghost', {
-      availabilityUpdatedAtMs: T0 - 45 * 60 * 1000,
-      locationUpdatedAtMs: T0 - 45 * 60 * 1000,
+      availabilityUpdatedAtMs: T0 - 90 * 60 * 1000,
+      locationUpdatedAtMs: T0 - 90 * 60 * 1000,
     });
 
     const view = await createRide(db, fixedClock(T0), fakeRouting());
-    expect(view.status).toBe(C.RIDE_STATUS.NO_DRIVER_AVAILABLE);
+    expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
 
     const ghost = db._store.get(`${C.DRIVERS}/ghost`);
     expect(ghost.availabilityStatus).toBe('offline');
