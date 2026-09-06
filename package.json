@@ -1,7 +1,7 @@
 {
   "name": "drivelocal",
   "main": "./index.js",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "dependencies": {
     "@expo/ui": "~56.0.22",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -65,6 +65,8 @@
     "release:ensure-prod-email-auth": "node scripts/release/ensure-prod-email-auth.js",
     "release:ensure-prod-android-api-key": "node scripts/release/ensure-prod-android-api-key.js",
     "release:prod-auth-smoke": "node scripts/release/prod-auth-smoke.js",
+    "dispatch:smoke:prod": "node scripts/release/dispatch-smoke.js --project drivelocal-prod",
+    "dispatch:smoke:dev": "node scripts/release/dispatch-smoke.js --project drivelocal-dev",
     "release:closed-test-gate": "npm run release:check && npm run release:ensure-prod-email-auth && npm run release:ensure-prod-android-api-key && npm run release:prod-auth-smoke",
     "validate:service-area": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
     "validate:env:dev": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
