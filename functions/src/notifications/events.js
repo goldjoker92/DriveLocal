@@ -20,7 +20,7 @@ function eventId(rideId, eventType, suffix) {
 /**
  * @param {{rideId:string, eventType:string, recipientUid:string, recipientRole:string,
  *          route:string, offerId?:string, messageCode?:string, traceId?:string,
- *          nowMs:number, dedupeSuffix?:string}} p
+ *          nowMs:number, dedupeSuffix?:string, expiresAtMs?:number}} p
  */
 function buildNotificationEvent(p) {
   const id = eventId(p.rideId, p.eventType, p.dedupeSuffix || p.recipientRole);
@@ -31,6 +31,9 @@ function buildNotificationEvent(p) {
       eventType: p.eventType,
       rideId: p.rideId,
       offerId: p.offerId || null,
+      // Optional wall-clock deadline of what the notification is about (an offer
+      // expiry today). Absent on every other event, which keeps the default ttl.
+      ...(Number(p.expiresAtMs) > 0 ? { expiresAtMs: Number(p.expiresAtMs) } : {}),
       ...(p.messageCode ? { messageCode: p.messageCode } : {}),
       recipientUid: p.recipientUid,
       recipientRole: p.recipientRole,

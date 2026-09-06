@@ -132,6 +132,13 @@ function androidNotificationForEvent(event, options = {}) {
       ...common,
       sound: usesSoundOfferChannel ? C.NOTIFICATION_SOUNDS.RIDE_OFFER : 'default',
       defaultVibrateTimings: true,
+      // A ride offer is as time-critical as an arrival and must be allowed to
+      // interrupt: max priority drives the heads-up banner on Android 7 and
+      // below, where the channel importance does not exist, and public
+      // visibility lets a locked screen show it. Both were already set for
+      // arrival; leaving them off for offers was an oversight, not a decision.
+      // Everything else stays on the standard status channel.
+      ...(isOffer ? { priority: 'max', visibility: 'public' } : {}),
     };
   }
 
@@ -145,8 +152,30 @@ function androidNotificationForEvent(event, options = {}) {
   };
 }
 
+// Generic ceiling for status updates, which stay useful for a while.
+const DEFAULT_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * How long FCM may keep retrying delivery. An offer is worthless once it has
+ * expired: a phone that reconnects five minutes later must NOT be woken up for
+ * a ride that was assigned or closed long ago. Events without a deadline keep
+ * the generic ceiling.
+ *
+ * @param {object} event
+ * @param {number} nowMs
+ * @returns {number} ttl in milliseconds, never negative
+ */
+function ttlMsForEvent(event, nowMs) {
+  const expiresAtMs = Number(event?.expiresAtMs || 0);
+  if (!(expiresAtMs > 0)) return DEFAULT_TTL_MS;
+  // Already expired: 0 tells FCM "deliver now if the device is reachable,
+  // otherwise drop it" rather than storing a dead offer.
+  return Math.max(0, Math.min(DEFAULT_TTL_MS, expiresAtMs - Number(nowMs || 0)));
+}
+
 function buildMulticastMessage(event, tokens, options = {}) {
   const presentation = presentationForEvent(event);
+  const nowMs = Number(options.nowMs) > 0 ? Number(options.nowMs) : Date.now();
 
   return {
     tokens,
@@ -154,16 +183,17 @@ function buildMulticastMessage(event, tokens, options = {}) {
     data: dataPayload(event),
     android: {
       priority: 'high',
-      ttl: 10 * 60 * 1000,
+      ttl: ttlMsForEvent(event, nowMs),
       collapseKey: safeCollapseKey(event),
       notification: androidNotificationForEvent(event, options),
     },
   };
 }
 
-function buildTokenMessage(event, target) {
+function buildTokenMessage(event, target, options = {}) {
   const multicast = buildMulticastMessage(event, [target.token], {
     rideOfferChannelCapability: target.rideOfferChannelCapability,
+    nowMs: options.nowMs,
   });
   const { tokens: _tokens, ...message } = multicast;
   return { ...message, token: target.token };
@@ -236,7 +266,7 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
   // lets V1 and V2 devices coexist without duplicate notifications or two
   // partially successful multicast calls during the migration.
   const resp = await messaging.sendEach(
-    targets.map((target) => buildTokenMessage(event, target))
+    targets.map((target) => buildTokenMessage(event, target, { nowMs }))
   );
 
   let successCount = 0;
@@ -296,6 +326,8 @@ module.exports = {
   safeAndroidTag,
   safeCollapseKey,
   safeRideOfferChannelCapability,
+  ttlMsForEvent,
+  DEFAULT_TTL_MS,
   INVALID_TOKEN_CODES,
   PRESENTATION,
 };
