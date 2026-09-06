@@ -73,6 +73,11 @@ module.exports = Object.freeze({
   NOTIFICATION_EVENT: Object.freeze({
     OFFER_CREATED: 'offer_created',
     RIDE_ASSIGNED: 'ride_assigned',
+    // Sent when a search ends with nobody found. Before continuous search the
+    // refusal was instant and the passenger was still looking at his screen;
+    // now he waits up to SEARCH_TTL_SECONDS and may well have put the phone
+    // away, so the outcome has to reach him.
+    RIDE_NO_DRIVER: 'ride_no_driver',
     RIDE_ARRIVED: 'ride_arrived',
     RIDE_STARTED: 'ride_started',
     RIDE_AWAITING_PAYMENT: 'ride_awaiting_payment',

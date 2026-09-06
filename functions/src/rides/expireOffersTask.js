@@ -6,6 +6,7 @@
 const admin = require('firebase-admin');
 const { onTaskDispatched } = require('firebase-functions/tasks');
 const { logInfo, logWarning } = require('../logging/logger');
+const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const C = require('./constants');
 
 const REGION = 'southamerica-east1';
@@ -33,6 +34,7 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
         expiredOfferCount: 0,
         liveOfferCount: 0,
         passengerStateCleared: false,
+        passengerNotified: false,
       };
     }
 
@@ -43,6 +45,7 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
         expiredOfferCount: 0,
         liveOfferCount: 0,
         passengerStateCleared: false,
+        passengerNotified: false,
       };
     }
 
@@ -77,6 +80,7 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
         expiredOfferCount: expiredDocs.length,
         liveOfferCount,
         passengerStateCleared: false,
+        passengerNotified: false,
       };
     }
 
@@ -100,11 +104,35 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
       passengerStateCleared = true;
     }
 
+    // Tell the passenger the search is over. Enqueued in the SAME transaction as
+    // the status change, like every other ride notification, so a failed
+    // transaction can never leave a "no driver" push without the matching ride
+    // state. Routed to /passenger-home, which every installed client version
+    // already allows and which needs no rideId - so this reaches old builds too.
+    let passengerNotified = false;
+    if (ride.passengerId) {
+      enqueueEventTx(
+        tx,
+        db,
+        buildNotificationEvent({
+          rideId,
+          eventType: C.NOTIFICATION_EVENT.RIDE_NO_DRIVER,
+          recipientUid: ride.passengerId,
+          recipientRole: 'passenger',
+          route: '/passenger-home',
+          traceId: (context && context.traceId) || null,
+          nowMs,
+        })
+      );
+      passengerNotified = true;
+    }
+
     return {
       outcome: 'search_closed',
       expiredOfferCount: expiredDocs.length,
       liveOfferCount: 0,
       passengerStateCleared,
+      passengerNotified,
     };
   });
 
@@ -114,6 +142,7 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
     expiredOfferCount: result.expiredOfferCount,
     liveOfferCount: result.liveOfferCount,
     passengerStateCleared: result.passengerStateCleared,
+    passengerNotified: result.passengerNotified,
     outcome: result.outcome,
   });
 

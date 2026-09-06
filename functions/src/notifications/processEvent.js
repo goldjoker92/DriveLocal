@@ -27,6 +27,10 @@ const PRESENTATION = Object.freeze({
     title: 'Motorista encontrado',
     body: 'Seu motorista está a caminho do embarque.',
   },
+  [C.NOTIFICATION_EVENT.RIDE_NO_DRIVER]: {
+    title: 'Nenhum motorista disponível',
+    body: 'Não encontramos motorista agora. Toque para pedir de novo.',
+  },
   [C.NOTIFICATION_EVENT.RIDE_ARRIVED]: {
     title: '🚗 Seu motorista chegou!',
     body: 'Ele está esperando no local de embarque.',
