@@ -35,8 +35,11 @@ describe('Horizonte launch dispatch policy', () => {
     expect(config.dispatchMode).toBe('citywide_launch');
     expect(config.searchRadiusMeters).toBe(50_000);
     expect(config.maxCandidates).toBe(100);
-    expect(config.offerTtlSeconds).toBe(45);
-    expect(C.LOCATION_MAX_AGE_MS).toBe(5 * 60 * 1000);
+    expect(config.offerTtlSeconds).toBe(C.OFFER_TTL_SECONDS);
+    // The offer must span the whole search window: a late FCM delivery can no
+    // longer eat most of the driver's decision time.
+    expect(config.offerTtlSeconds).toBe(C.SEARCH_TTL_SECONDS);
+    expect(C.LOCATION_MAX_AGE_MS).toBe(15 * 60 * 1000);
   });
 
   it('ignores a legacy narrow Firestore config until density mode is explicit', () => {
@@ -51,7 +54,7 @@ describe('Horizonte launch dispatch policy', () => {
       source: 'backend_launch_fallback',
       searchRadiusMeters: 50_000,
       maxCandidates: 100,
-      offerTtlSeconds: 45,
+      offerTtlSeconds: C.OFFER_TTL_SECONDS,
     });
   });
 

@@ -99,6 +99,8 @@ module.exports = Object.freeze({
 
   REASON: Object.freeze({
     NO_ELIGIBLE_DRIVERS: 'NO_ELIGIBLE_DRIVERS',
+    // Nobody reachable on this wave, but the search window is still open.
+    SEARCH_CONTINUES: 'SEARCH_CONTINUES',
     OFFER_BATCH_FAILED: 'OFFER_BATCH_FAILED',
     OFFERS_CREATED: 'OFFERS_CREATED',
   }),
@@ -106,17 +108,38 @@ module.exports = Object.freeze({
   // Horizonte launch policy: broadcast to every eligible online driver in the
   // municipality (bounded for safety), give enough time to answer, and tolerate
   // short Android delivery delays without treating a working driver as offline.
-  OFFER_TTL_SECONDS: 45,
+  // Android routinely delays FCM delivery by 10-15s on doze-prone devices, so a
+  // 45s offer left a working driver ~30s of real decision time. The offer now
+  // spans the whole search window: a driver who answers late still wins the ride.
+  OFFER_TTL_SECONDS: 90,
   SEARCH_TTL_SECONDS: 90,
   MAX_CANDIDATES: 100,
   DEFAULT_SEARCH_RADIUS_METERS: 50_000,
-  LOCATION_MAX_AGE_MS: 5 * 60 * 1000,
-  AVAILABILITY_SESSION_MAX_AGE_MS: 7 * 60 * 1000,
+  // Launch reality: the work session is refreshed ONLY by a published GPS point
+  // (see driverLocationTracking.driverLocationUpdate). Any Android battery
+  // restriction that suspends the location task therefore silently removes a
+  // working driver from dispatch while his app still shows "disponível".
+  // Until the client publishes a GPS-independent heartbeat, these windows are
+  // deliberately generous: in a town the size of Horizonte a 15-minute-old point
+  // is still useful, the driver can always decline, and losing a real driver
+  // costs far more than offering him a ride he refuses.
+  LOCATION_MAX_AGE_MS: 15 * 60 * 1000,
+  AVAILABILITY_SESSION_MAX_AGE_MS: 20 * 60 * 1000,
   // A driver whose lease merely expired is NOT logged out: his app republishes a
   // point and he becomes dispatchable again on his own. Only a session with no
   // sign of life for this much longer is treated as abandoned and closed, so a
   // tunnel, an indoor stop or a short doze never ends a working driver's shift.
-  WORK_SESSION_ABANDONED_MAX_AGE_MS: 30 * 60 * 1000,
+  WORK_SESSION_ABANDONED_MAX_AGE_MS: 45 * 60 * 1000,
+
+  // Continuous search. A ride is NEVER closed at t=0 for lack of drivers: the
+  // passenger sees a real search, exactly like the apps he already uses, and a
+  // driver who comes online mid-search is picked up by the next wave.
+  // Waves are incremental: an offer is written ONCE per driver, later waves only
+  // target drivers who were not reachable before, so cost stays near zero.
+  DISPATCH_WAVE_INTERVAL_MS: 25 * 1000,
+  // Drivers already offered this ride, kept on the ride document so a wave costs
+  // no extra reads. Bounded to stay far below the 1 MiB document limit.
+  MAX_TRACKED_OFFERED_DRIVERS: 200,
 
   MIN_WALLET_BALANCE_CENTAVOS: 300,
 

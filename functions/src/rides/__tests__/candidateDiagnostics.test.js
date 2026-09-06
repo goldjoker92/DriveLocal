@@ -35,13 +35,13 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
     const candidates = [
       candidate('fresh'),
       candidate('stale-recoverable', {
-        locationUpdatedAtMs: NOW - 6 * 60 * 1000,
+        locationUpdatedAtMs: NOW - 16 * 60 * 1000,
       }),
       candidate('stale-too-old', {
-        locationUpdatedAtMs: NOW - 8 * 60 * 1000,
+        locationUpdatedAtMs: NOW - 25 * 60 * 1000,
       }),
       candidate('work-session-too-old', {
-        availabilityUpdatedAtMs: NOW - 8 * 60 * 1000,
+        availabilityUpdatedAtMs: NOW - 25 * 60 * 1000,
       }),
       candidate('session-mismatch', {
         locationAvailabilitySessionId: 'work_previous_session_987654321',
@@ -75,8 +75,8 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
       rejectedStaleLocation: 1,
       rejectedSubscriptionRequired: 1,
       searchRadiusMeters: 50_000,
-      locationMaxAgeMs: 5 * 60 * 1000,
-      availabilitySessionMaxAgeMs: 7 * 60 * 1000,
+      locationMaxAgeMs: 15 * 60 * 1000,
+      availabilitySessionMaxAgeMs: 20 * 60 * 1000,
       staleFallbackMaxAgeMs: ONLINE_STALE_FALLBACK_MAX_AGE_MS,
     });
   });
@@ -85,7 +85,7 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
     const { eligible, diagnostics } = selectEligibleDriversWithDiagnostics([
       candidate('ghost-online', {
         locationUpdatedAtMs: NOW - 60_000,
-        availabilityUpdatedAtMs: NOW - 20 * 60 * 1000,
+        availabilityUpdatedAtMs: NOW - 35 * 60 * 1000,
       }),
     ], {
       pickup,
