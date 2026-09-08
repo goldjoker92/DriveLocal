@@ -49,7 +49,7 @@ async function syncNotificationToken({ db, request, context, clock }) {
   const token = validateNonEmptyString(payload.token, 'token');
   // Missing capability means an old app (or a deliberate client fallback).
   // Persisting LEGACY_V1 explicitly also makes an app downgrade safe: a former
-  // V2 value cannot survive a later sync from a V1-only binary.
+  // custom-sound value cannot survive a later sync from a V1-only binary.
   const rideOfferChannelCapability = payload.rideOfferChannelCapability === undefined
     ? C.RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1
     : validateEnum(

@@ -46,6 +46,9 @@ function safeReasonCode(value) {
 // Any unknown value degrades to LEGACY_V1: a wrong capability would route an
 // offer to a channel that does not exist on the device.
 function safeRideOfferChannelCapability(value) {
+  if (value === RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4) {
+    return RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4;
+  }
   if (value === RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3) {
     return RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3;
   }
@@ -137,7 +140,7 @@ async function getInstallationId() {
  * Android notification channels must exist before notifications are delivered.
  *
  * - The legacy ride-offer channel remains untouched as a permanent fallback.
- * - V2 adds a bundled sound only when Android confirms the channel is usable.
+ * - V4 adds the repeated 30-second sound only after Android confirms it is usable.
  * - Driver arrival has its own MAX channel, bundled sound and strong vibration.
  * - Other ride status updates remain on the existing HIGH channel.
  *
@@ -148,7 +151,7 @@ async function getInstallationId() {
 export function isRideOfferSoundChannelReady(channel) {
   return Boolean(
     channel
-      && channel.id === NOTIFICATION_CHANNELS.RIDE_OFFERS_V3
+      && channel.id === NOTIFICATION_CHANNELS.RIDE_OFFERS_V4
       && channel.sound === "custom"
       && Number(channel.importance) >= Number(Notifications.AndroidImportance.HIGH)
       && channel.enableVibrate === true,
@@ -156,29 +159,33 @@ export function isRideOfferSoundChannelReady(channel) {
 }
 
 // Android keeps a deleted channel's settings if the same id is recreated later,
-// so the superseded channel is removed but never recreated. Best effort: failing
-// to clean it up only leaves an unused entry in the driver's Android settings.
-async function removeSupersededRideOfferChannel() {
+// so superseded channels are removed but never recreated. Best effort: one failed
+// cleanup must not prevent the other channel or token registration from succeeding.
+async function removeSupersededRideOfferChannels() {
   if (typeof Notifications.deleteNotificationChannelAsync !== "function") return;
-  try {
-    await Notifications.deleteNotificationChannelAsync(
-      NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
-    );
-    traceNotificationReadiness("ride_offer_channel.superseded_removed", {
-      channelId: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
-    });
-  } catch (error) {
-    traceNotificationReadiness("ride_offer_channel.superseded_remove_failed", {
-      channelId: NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
-      reasonCode: safeReasonCode(error?.code || error?.name || "unknown"),
-    }, "warn");
+  const supersededChannelIds = [
+    NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+    NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
+  ];
+  for (const channelId of supersededChannelIds) {
+    try {
+      await Notifications.deleteNotificationChannelAsync(channelId);
+      traceNotificationReadiness("ride_offer_channel.superseded_removed", {
+        channelId,
+      });
+    } catch (error) {
+      traceNotificationReadiness("ride_offer_channel.superseded_remove_failed", {
+        channelId,
+        reasonCode: safeReasonCode(error?.code || error?.name || "unknown"),
+      }, "warn");
+    }
   }
 }
 
 async function ensureRideOfferSoundChannel() {
   try {
     await Notifications.setNotificationChannelAsync(
-      NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V4,
       {
         name: "Novas corridas (som DriveLocal)",
         description: "Alerta prioritário para novas ofertas de corrida.",
@@ -194,22 +201,22 @@ async function ensureRideOfferSoundChannel() {
     );
 
     const channel = await Notifications.getNotificationChannelAsync(
-      NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V4,
     );
     if (isRideOfferSoundChannelReady(channel)) {
-      traceNotificationReadiness("ride_offer_channel.v3_ready", {
-        capability: RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3,
+      traceNotificationReadiness("ride_offer_channel.v4_ready", {
+        capability: RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4,
         importance: Number(channel.importance),
         sound: "custom",
         vibrationEnabled: true,
       });
-      await removeSupersededRideOfferChannel();
-      return RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3;
+      await removeSupersededRideOfferChannels();
+      return RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4;
     }
 
     traceNotificationReadiness("ride_offer_channel.fallback_v1", {
       capability: RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
-      reason: "v3_verification_failed",
+      reason: "v4_verification_failed",
       channelPresent: Boolean(channel),
       importance: Number(channel?.importance || 0),
       sound: channel?.sound || "none",
@@ -218,7 +225,7 @@ async function ensureRideOfferSoundChannel() {
   } catch (error) {
     traceNotificationReadiness("ride_offer_channel.fallback_v1", {
       capability: RIDE_OFFER_CHANNEL_CAPABILITIES.LEGACY_V1,
-      reason: "v3_setup_failed",
+      reason: "v4_setup_failed",
       reasonCode: safeReasonCode(error?.code || error?.name || "unknown"),
     }, "warn");
   }
@@ -267,7 +274,7 @@ export async function ensureAndroidChannels() {
     },
   );
 
-  // V2 is deliberately last and isolated: a custom-sound problem must never
+  // V4 is deliberately last and isolated: a custom-sound problem must never
   // prevent permission/token registration through the working legacy channel.
   return ensureRideOfferSoundChannel();
 }

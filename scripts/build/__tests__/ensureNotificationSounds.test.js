@@ -7,6 +7,7 @@ const {
   CHANNEL_COUNT,
   DRIVER_ARRIVAL_SOUND_BASENAME,
   DRIVER_OFFER_DURATION_SECONDS,
+  DRIVER_OFFER_PATTERN_SECONDS,
   DRIVER_OFFER_SOUND_BASENAME,
   DURATION_SECONDS,
   SAMPLE_RATE,
@@ -15,6 +16,20 @@ const {
   ensureDriverArrivalNotificationSound,
   ensureDriverOfferNotificationSound,
 } = require('../ensureNotificationSounds');
+
+function peakAmplitudeInRange(buffer, startSeconds, endSeconds) {
+  const bytesPerSample = BITS_PER_SAMPLE / 8;
+  const firstSample = Math.floor(startSeconds * SAMPLE_RATE);
+  const finalSample = Math.min(
+    Math.ceil(endSeconds * SAMPLE_RATE),
+    (buffer.length - 44) / bytesPerSample,
+  );
+  let peak = 0;
+  for (let sample = firstSample; sample < finalSample; sample += 1) {
+    peak = Math.max(peak, Math.abs(buffer.readInt16LE(44 + sample * bytesPerSample)));
+  }
+  return peak;
+}
 
 describe('driver arrival notification sound', () => {
   test('creates a deterministic PCM WAV suitable for the Expo notifications plugin', () => {
@@ -65,7 +80,20 @@ describe('driver ride-offer notification sound', () => {
     expect(first.readUInt16LE(22)).toBe(CHANNEL_COUNT);
     expect(first.readUInt32LE(24)).toBe(SAMPLE_RATE);
     expect(first.readUInt16LE(34)).toBe(BITS_PER_SAMPLE);
-    expect(first.length).toBeGreaterThan(SAMPLE_RATE * DRIVER_OFFER_DURATION_SECONDS);
+    const expectedSampleCount = Math.ceil(SAMPLE_RATE * DRIVER_OFFER_DURATION_SECONDS);
+    const expectedByteLength =
+      44 + expectedSampleCount * CHANNEL_COUNT * (BITS_PER_SAMPLE / 8);
+    expect(first.length).toBe(expectedByteLength);
+    expect(DRIVER_OFFER_DURATION_SECONDS).toBe(30);
+    expect(DRIVER_OFFER_DURATION_SECONDS / DRIVER_OFFER_PATTERN_SECONDS).toBe(12);
+  });
+
+  test('keeps the alert audible near the beginning, middle and end of 30 seconds', () => {
+    const wave = createDriverOfferWaveBuffer();
+
+    expect(peakAmplitudeInRange(wave, 0, 1)).toBeGreaterThan(1_000);
+    expect(peakAmplitudeInRange(wave, 14, 15)).toBeGreaterThan(1_000);
+    expect(peakAmplitudeInRange(wave, 29, 30)).toBeGreaterThan(1_000);
   });
 
   test('writes the generated offer sound idempotently beneath the project directory', () => {

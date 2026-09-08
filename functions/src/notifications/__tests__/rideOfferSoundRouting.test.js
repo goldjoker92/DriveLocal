@@ -13,7 +13,7 @@ const {
 } = require('../processEvent');
 
 const T0 = 1_700_000_000_000;
-const context = { traceId: 'trace_offer_sound_v2' };
+const context = { traceId: 'trace_offer_sound_channels' };
 
 function offerEvent(overrides = {}) {
   return {
@@ -36,11 +36,11 @@ function tokenRequest(data) {
 }
 
 describe('driver offer channel capability storage', () => {
-  it('defaults missing capability to V1 and overwrites any former V2 value', async () => {
+  it('defaults missing capability to V1 and overwrites any former custom-sound value', async () => {
     const db = makeFakeFirestore();
     const ref = db.collection(C.NOTIFICATION_TOKENS).doc('driver-1_install-1');
     await ref.set({
-      rideOfferChannelCapability: C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+      rideOfferChannelCapability: C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4,
     });
 
     const result = await syncNotificationToken({
@@ -65,30 +65,36 @@ describe('driver offer channel capability storage', () => {
       });
   });
 
-  it('accepts only the explicit V2 capability', async () => {
+  it('accepts every known explicit sound capability and rejects unknown values', async () => {
     const db = makeFakeFirestore();
-    const base = {
-      installationId: 'install-2',
-      platform: 'android',
-      token: 'token-v2',
-    };
+    const capabilities = [
+      C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
+      C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3,
+      C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4,
+    ];
+
+    for (const [index, capability] of capabilities.entries()) {
+      await expect(syncNotificationToken({
+        db,
+        request: tokenRequest({
+          installationId: `install-${index + 2}`,
+          platform: 'android',
+          token: `token-${capability}`,
+          rideOfferChannelCapability: capability,
+        }),
+        context,
+        clock: fixedClock(T0),
+      })).resolves.toMatchObject({
+        rideOfferChannelCapability: capability,
+      });
+    }
 
     await expect(syncNotificationToken({
       db,
       request: tokenRequest({
-        ...base,
-        rideOfferChannelCapability: C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
-      }),
-      context,
-      clock: fixedClock(T0),
-    })).resolves.toMatchObject({
-      rideOfferChannelCapability: C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
-    });
-
-    await expect(syncNotificationToken({
-      db,
-      request: tokenRequest({
-        ...base,
+        installationId: 'install-unknown',
+        platform: 'android',
+        token: 'token-unknown',
         rideOfferChannelCapability: 'untrusted_future_value',
       }),
       context,
@@ -127,9 +133,8 @@ describe('driver offer sound routing', () => {
     expect(legacy.android.notification.tag).toBe(v2.android.notification.tag);
   });
 
-  // V3 exists because an Android channel's sound cannot be changed after
-  // creation. Devices stuck on a soundless V2 move to a fresh id, while app
-  // versions still installed keep being routed to the channel they do have.
+  // Android channel sounds cannot be changed after creation. V4 owns the
+  // 30-second alert, while older app versions keep their V2/V3 routing.
   it('routes each capability to the offer channel that exists on the device', () => {
     const event = offerEvent();
     const byCapability = (capability) => buildTokenMessage(event, {
@@ -137,6 +142,10 @@ describe('driver offer sound routing', () => {
       rideOfferChannelCapability: capability,
     }).android.notification;
 
+    expect(byCapability(C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4)).toMatchObject({
+      channelId: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V4,
+      sound: C.NOTIFICATION_SOUNDS.RIDE_OFFER,
+    });
     expect(byCapability(C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3)).toMatchObject({
       channelId: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
       sound: C.NOTIFICATION_SOUNDS.RIDE_OFFER,
@@ -182,7 +191,7 @@ describe('driver offer sound routing', () => {
     });
   });
 
-  it('sends exactly one visual notification per mixed V1/V2 device', async () => {
+  it('sends exactly one visual notification per V1/V2/V3/V4 device', async () => {
     const db = makeFakeFirestore();
     const event = offerEvent();
     const eventRef = db.collection(C.NOTIFICATION_EVENTS).doc(event.notificationId);
@@ -193,13 +202,16 @@ describe('driver offer sound routing', () => {
       platform: 'android',
       active: true,
     });
-    await db.collection(C.NOTIFICATION_TOKENS).doc('v2').set({
-      uid: event.recipientUid,
-      token: 'token-v2',
-      platform: 'android',
-      active: true,
-      rideOfferChannelCapability: C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2,
-    });
+    for (const version of [2, 3, 4]) {
+      await db.collection(C.NOTIFICATION_TOKENS).doc(`v${version}`).set({
+        uid: event.recipientUid,
+        token: `token-v${version}`,
+        platform: 'android',
+        active: true,
+        rideOfferChannelCapability:
+          C.RIDE_OFFER_CHANNEL_CAPABILITIES[`CUSTOM_SOUND_V${version}`],
+      });
+    }
 
     const messaging = {
       sendEach: jest.fn(async (messages) => ({
@@ -217,20 +229,24 @@ describe('driver offer sound routing', () => {
 
     expect(result).toEqual({
       status: C.NOTIFICATION_STATUS.SENT,
-      successCount: 2,
+      successCount: 4,
       failureCount: 0,
     });
     expect(messaging.sendEach).toHaveBeenCalledTimes(1);
     const [messages] = messaging.sendEach.mock.calls[0];
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(4);
     expect(messages.map((message) => message.token).sort()).toEqual([
       'token-legacy',
       'token-v2',
+      'token-v3',
+      'token-v4',
     ]);
     expect(messages.map((message) => message.android.notification.channelId).sort())
       .toEqual([
         C.NOTIFICATION_CHANNELS.RIDE_OFFERS,
         C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
+        C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
+        C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V4,
       ].sort());
     messages.forEach((message) => {
       expect(message.notification).toEqual({

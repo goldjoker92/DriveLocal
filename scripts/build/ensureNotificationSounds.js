@@ -12,7 +12,8 @@ const SAMPLE_RATE = 22_050;
 const CHANNEL_COUNT = 1;
 const BITS_PER_SAMPLE = 16;
 const DURATION_SECONDS = 1.55;
-const DRIVER_OFFER_DURATION_SECONDS = 2.45;
+const DRIVER_OFFER_PATTERN_SECONDS = 2.5;
+const DRIVER_OFFER_DURATION_SECONDS = 30;
 
 const NOTES = Object.freeze([
   Object.freeze({ start: 0.00, duration: 0.34, frequency: 659.25, gain: 0.34 }),
@@ -21,8 +22,8 @@ const NOTES = Object.freeze([
 ]);
 
 // A distinct two-part call designed for small Android phone speakers. It is
-// intentionally original (not copied from another platform) and long enough to
-// attract attention without behaving like a looping alarm.
+// intentionally original (not copied from another platform) and repeats for the
+// full 30-second alert without changing the server-side offer/search window.
 const DRIVER_OFFER_NOTES = Object.freeze([
   Object.freeze({ start: 0.00, duration: 0.30, frequency: 783.99, gain: 0.48 }),
   Object.freeze({ start: 0.34, duration: 0.30, frequency: 987.77, gain: 0.52 }),
@@ -60,9 +61,10 @@ function sampleAt(timeSeconds) {
 }
 
 function driverOfferSampleAt(timeSeconds) {
+  const patternTimeSeconds = timeSeconds % DRIVER_OFFER_PATTERN_SECONDS;
   let mixed = 0;
   for (const note of DRIVER_OFFER_NOTES) {
-    const localTime = timeSeconds - note.start;
+    const localTime = patternTimeSeconds - note.start;
     const envelope = noteEnvelope(localTime, note.duration);
     if (envelope <= 0) continue;
 
@@ -186,6 +188,7 @@ module.exports = {
   DRIVER_ARRIVAL_SOUND_BASENAME,
   DRIVER_ARRIVAL_SOUND_RELATIVE_PATH,
   DRIVER_OFFER_DURATION_SECONDS,
+  DRIVER_OFFER_PATTERN_SECONDS,
   DRIVER_OFFER_SOUND_BASENAME,
   DRIVER_OFFER_SOUND_RELATIVE_PATH,
   DURATION_SECONDS,
