@@ -279,6 +279,64 @@ export async function ensureAndroidChannels() {
   return ensureRideOfferSoundChannel();
 }
 
+function normalizedNotificationMatchId(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function isMatchingRideOfferNotification(notification, { offerId, rideId }) {
+  const data = notification?.request?.content?.data || {};
+  if (String(data.eventType || "") !== "offer_created") return false;
+
+  const notificationOfferId = normalizedNotificationMatchId(data.offerId);
+  const notificationRideId = normalizedNotificationMatchId(data.rideId);
+  return Boolean(
+    (offerId && notificationOfferId === offerId)
+      || (rideId && notificationRideId === rideId),
+  );
+}
+
+/**
+ * Dismisses only the presented Android notification for one ride offer.
+ *
+ * This is deliberately best effort: notification cleanup must never turn an
+ * already accepted or declined server action into a client-visible failure.
+ */
+export async function dismissRideOfferNotifications({ offerId, rideId } = {}) {
+  const targetOfferId = normalizedNotificationMatchId(offerId);
+  const targetRideId = normalizedNotificationMatchId(rideId);
+  if (Platform.OS !== "android" || (!targetOfferId && !targetRideId)) return 0;
+
+  try {
+    const presented = await Notifications.getPresentedNotificationsAsync();
+    const identifiers = (presented || [])
+      .filter((notification) => isMatchingRideOfferNotification(notification, {
+        offerId: targetOfferId,
+        rideId: targetRideId,
+      }))
+      .map((notification) => normalizedNotificationMatchId(
+        notification?.request?.identifier,
+      ))
+      .filter(Boolean);
+
+    const results = await Promise.allSettled(
+      identifiers.map((identifier) => Notifications.dismissNotificationAsync(identifier)),
+    );
+    const dismissedCount = results.filter((result) => result.status === "fulfilled").length;
+    traceNotificationReadiness("ride_offer_notification.dismissed", {
+      matchedCount: identifiers.length,
+      dismissedCount,
+    });
+    return dismissedCount;
+  } catch (error) {
+    traceNotificationReadiness("ride_offer_notification.dismiss_failed", {
+      reasonCode: safeReasonCode(error?.code || error?.name || "unknown"),
+    }, "warn");
+    return 0;
+  }
+}
+
 const appVersion =
   Constants.expoConfig?.version ?? Constants.nativeAppVersion ?? null;
 

@@ -19,6 +19,7 @@ import { deriveRideOfferPresentation } from '../../utils/rideOfferPresentation';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { auth } from '../../config/firebase';
 import { getDriver } from '../../services/driverService';
+import { dismissRideOfferNotifications } from '../../services/notificationsService';
 import { acceptOffer, declineOffer, listenToMyOffer } from '../../services/ridesService';
 import { openGoogleMapsToPoint, openWazeToPoint } from '../../utils/maps';
 
@@ -41,6 +42,7 @@ export default function RideRequest() {
   const [accepted, setAccepted] = useState(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const lastLoggedOfferId = useRef(null);
+  const lastPresentedOffer = useRef(null);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -84,6 +86,17 @@ export default function RideRequest() {
         && nextOffer?.offerId !== requestedOfferId
         && nextOffer?.status !== 'accepted'
       ) return;
+
+      const previousPresentedOffer = lastPresentedOffer.current;
+      if (nextOffer?.status === 'offered') {
+        lastPresentedOffer.current = {
+          offerId: nextOffer.offerId,
+          rideId: nextOffer.rideId,
+        };
+      } else if (previousPresentedOffer) {
+        lastPresentedOffer.current = null;
+        dismissRideOfferNotifications(previousPresentedOffer).catch(() => undefined);
+      }
 
       setOffer(nextOffer);
       if (nextOffer?.offerId && lastLoggedOfferId.current !== nextOffer.offerId) {
@@ -147,6 +160,10 @@ export default function RideRequest() {
           error,
         }, 'warning');
       }
+      await dismissRideOfferNotifications({
+        offerId: offer.offerId,
+        rideId: offer.rideId,
+      });
       setOffer(null);
       router.replace('/driver-home');
     };
@@ -176,6 +193,10 @@ export default function RideRequest() {
 
     try {
       const result = await acceptOffer(offer.offerId);
+      await dismissRideOfferNotifications({
+        offerId: offer.offerId,
+        rideId: result?.rideId || offer.rideId,
+      });
       setAccepted(result);
       logRideClientEvent('ride.offer.accept_navigation_ready', {
         action: 'show_accepted_offer',
@@ -211,6 +232,10 @@ export default function RideRequest() {
 
     try {
       await declineOffer(offer.offerId, 'driver_declined');
+      await dismissRideOfferNotifications({
+        offerId: offer.offerId,
+        rideId: offer.rideId,
+      });
       router.replace('/driver-home');
     } catch (error) {
       logRideClientEvent('ride.offer.decline_ui_failed', {

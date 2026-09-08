@@ -20,6 +20,8 @@ jest.mock('expo-notifications', () => ({
   setNotificationChannelAsync: jest.fn(async () => undefined),
   getNotificationChannelAsync: jest.fn(),
   deleteNotificationChannelAsync: jest.fn(async () => undefined),
+  getPresentedNotificationsAsync: jest.fn(),
+  dismissNotificationAsync: jest.fn(async () => undefined),
   getPermissionsAsync: jest.fn(),
   requestPermissionsAsync: jest.fn(),
   getDevicePushTokenAsync: jest.fn(),
@@ -42,6 +44,7 @@ const {
   RIDE_OFFER_VIBRATION_PATTERN,
 } = require('../../constants/notificationChannels');
 const {
+  dismissRideOfferNotifications,
   ensureAndroidChannels,
   getPushNotificationDiagnosticState,
   isRideOfferSoundChannelReady,
@@ -55,6 +58,8 @@ describe('notification readiness diagnostics', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     Notifications.setNotificationChannelAsync.mockResolvedValue(undefined);
+    Notifications.getPresentedNotificationsAsync.mockResolvedValue([]);
+    Notifications.dismissNotificationAsync.mockResolvedValue(undefined);
     storage = new Map();
     mockSyncToken = jest.fn(async () => ({ data: { enabled: true } }));
     httpsCallable.mockReturnValue(mockSyncToken);
@@ -182,6 +187,59 @@ describe('notification readiness diagnostics', () => {
       importance: 1,
       enableVibrate: true,
     })).toBe(false);
+  });
+
+  it('dismisses only matching ride-offer notifications', async () => {
+    const notification = (identifier, data) => ({
+      request: {
+        identifier,
+        content: { data },
+      },
+    });
+    Notifications.getPresentedNotificationsAsync.mockResolvedValue([
+      notification('offer-exact', {
+        eventType: 'offer_created',
+        offerId: 'offer-1',
+        rideId: 'ride-1',
+      }),
+      notification('offer-same-ride', {
+        eventType: 'offer_created',
+        offerId: '',
+        rideId: 'ride-1',
+      }),
+      notification('other-offer', {
+        eventType: 'offer_created',
+        offerId: 'offer-2',
+        rideId: 'ride-2',
+      }),
+      notification('ride-status', {
+        eventType: 'ride_assigned',
+        offerId: 'offer-1',
+        rideId: 'ride-1',
+      }),
+    ]);
+
+    await expect(dismissRideOfferNotifications({
+      offerId: 'offer-1',
+      rideId: 'ride-1',
+    })).resolves.toBe(2);
+
+    expect(Notifications.dismissNotificationAsync).toHaveBeenCalledTimes(2);
+    expect(Notifications.dismissNotificationAsync).toHaveBeenCalledWith('offer-exact');
+    expect(Notifications.dismissNotificationAsync).toHaveBeenCalledWith('offer-same-ride');
+    expect(Notifications.dismissNotificationAsync).not.toHaveBeenCalledWith('other-offer');
+    expect(Notifications.dismissNotificationAsync).not.toHaveBeenCalledWith('ride-status');
+  });
+
+  it('never fails a ride decision when notification cleanup fails', async () => {
+    Notifications.getPresentedNotificationsAsync.mockRejectedValue(
+      Object.assign(new Error('native cleanup failed'), { code: 'ERR_NOTIFICATION_CLEANUP' }),
+    );
+
+    await expect(dismissRideOfferNotifications({
+      offerId: 'offer-1',
+      rideId: 'ride-1',
+    })).resolves.toBe(0);
   });
 
   it('persists only a safe registration receipt, never the FCM token', async () => {
