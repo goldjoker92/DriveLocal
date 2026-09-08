@@ -55,6 +55,20 @@ describe('block 17 compact timed offer contract', () => {
     expect(service).toContain("httpsCallable(functions, 'declineDriverOfferSecure')");
   });
 
+  it('stops only the resolved ride-offer alert on every terminal path', () => {
+    const screen = source('src/app/(driver)/ride-request.jsx');
+    const notifications = source('src/services/notificationsService.js');
+
+    expect(screen).toContain(
+      "import { dismissRideOfferNotifications } from '../../services/notificationsService'",
+    );
+    expect((screen.match(/dismissRideOfferNotifications\(/g) || [])).toHaveLength(4);
+    expect(notifications).toContain('getPresentedNotificationsAsync');
+    expect(notifications).toContain('dismissNotificationAsync(identifier)');
+    expect(notifications).toContain('String(data.eventType || "") !== "offer_created"');
+    expect(notifications).not.toContain('dismissAllNotificationsAsync');
+  });
+
   it('uses only coarse pickup data before acceptance', () => {
     const screen = source('src/app/(driver)/ride-request.jsx');
     const card = source('src/components/DriverTimedOfferCard.jsx');
