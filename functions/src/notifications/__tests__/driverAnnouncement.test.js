@@ -92,6 +92,20 @@ describe('publishing', () => {
     expect(result.announcementId).toBe(stored.announcementId);
   });
 
+  it('accepts the exact admin-screen payload, including the selected tone', async () => {
+    const db = fakeDb();
+    const result = await publishDriverAnnouncement({
+      db,
+      request: req('admin_1', { ...message, tone: 'warning' }),
+      context: {},
+      clock,
+    });
+
+    const stored = db._store.get(CURRENT);
+    expect(stored.tone).toBe('warning');
+    expect(result.tone).toBe('warning');
+  });
+
   it('mints a new id on every publish so a dismissed message cannot silence the fleet', async () => {
     const db = fakeDb();
     const first = await publishDriverAnnouncement({
