@@ -108,6 +108,7 @@ function safeCollapseKey(event) {
 // Anything unknown or missing degrades to the immutable legacy channel, which
 // every app version has.
 const RIDE_OFFER_CHANNEL_BY_CAPABILITY = Object.freeze({
+  [C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4]: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V4,
   [C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3]: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V3,
   [C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2]: C.NOTIFICATION_CHANNELS.RIDE_OFFERS_V2,
 });
@@ -256,26 +257,38 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
   }
 
   const isOffer = event.eventType === C.NOTIFICATION_EVENT.OFFER_CREATED;
-  const v2TargetCount = isOffer
-    ? targets.filter((target) => (
-        target.rideOfferChannelCapability
-          === C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
-      )).length
+  const targetCountForCapability = (capability) => (
+    isOffer
+      ? targets.filter((target) => target.rideOfferChannelCapability === capability).length
+      : 0
+  );
+  const v2TargetCount = targetCountForCapability(
+    C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V2
+  );
+  const v3TargetCount = targetCountForCapability(
+    C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V3
+  );
+  const v4TargetCount = targetCountForCapability(
+    C.RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4
+  );
+  const legacyTargetCount = isOffer
+    ? targets.length - v2TargetCount - v3TargetCount - v4TargetCount
     : 0;
-  const legacyTargetCount = isOffer ? targets.length - v2TargetCount : 0;
 
   if (isOffer) {
     logInfo(context, 'notification.offer_channels_selected', {
       operation: 'notify',
       notificationId: event.notificationId,
       v2TargetCount,
+      v3TargetCount,
+      v4TargetCount,
       legacyTargetCount,
       targetCount: targets.length,
     });
   }
 
   // sendEach accepts one message per token in a single provider operation. This
-  // lets V1 and V2 devices coexist without duplicate notifications or two
+  // lets every channel generation coexist without duplicate notifications or
   // partially successful multicast calls during the migration.
   const resp = await messaging.sendEach(
     targets.map((target) => buildTokenMessage(event, target, { nowMs }))
@@ -323,7 +336,7 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
     eventType: event.eventType,
     successCount,
     failureCount,
-    ...(isOffer ? { v2TargetCount, legacyTargetCount } : {}),
+    ...(isOffer ? { v2TargetCount, v3TargetCount, v4TargetCount, legacyTargetCount } : {}),
   });
   return { status, successCount, failureCount };
 }
