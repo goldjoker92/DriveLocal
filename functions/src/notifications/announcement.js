@@ -85,7 +85,12 @@ function validateTone(value) {
  */
 async function publishDriverAnnouncement({ db, request, context, clock }) {
   const adminUid = await requireAdmin(db, request);
-  const payload = assertShape(request && request.data, { required: ['title', 'body'] });
+  // The admin screen always sends `tone`, even when it is the default `info`.
+  // Keep the boundary strict while declaring that optional field explicitly.
+  const payload = assertShape(request && request.data, {
+    required: ['title', 'body'],
+    optional: ['tone'],
+  });
 
   const title = validateAnnouncementText(payload.title, 'title', MAX_TITLE_LENGTH);
   const body = validateAnnouncementText(payload.body, 'body', MAX_BODY_LENGTH);
