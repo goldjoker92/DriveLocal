@@ -11,6 +11,7 @@
 
 const { activeRiskRestrictionState } = require('../risk/restrictions');
 const { resolveCommercialPolicy, toMillis } = require('./commercialPolicy');
+const { normalizePixKey } = require('../pix/pixKey');
 
 /**
  * Minimal, safe projection of a driver document for callable responses.
@@ -60,6 +61,7 @@ function evaluateRideEligibility(d = {}, clock) {
   const financialReviewRequired = d.financialReviewRequired === true;
   const temporaryRestriction = activeRiskRestrictionState(d, now);
   const riskRestricted = financialReviewRequired || temporaryRestriction.active;
+  const pixKeyValidation = normalizePixKey(d.pixKey, d.pixKeyType);
 
   return {
     isFounder: commercial.founder,
@@ -75,11 +77,14 @@ function evaluateRideEligibility(d = {}, clock) {
     financialReviewRequired,
     riskRestricted,
     riskRestrictionUntilMs: temporaryRestriction.untilMs,
+    pixKeyValid: pixKeyValidation.valid,
+    pixKeyReasonCode: pixKeyValidation.reasonCode,
     // Derived on the fly — never persisted as an authoritative flag.
     canReceiveRides:
       approved
       && !blocked
       && !riskRestricted
+      && pixKeyValidation.valid
       && commercial.subscriptionCovered,
   };
 }
