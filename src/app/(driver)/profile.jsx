@@ -18,6 +18,7 @@ import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { getDriver, updateDriverProfile } from '../../services/driverService';
 import { validateCPF } from '../../utils/validation';
+import { normalizePixKey } from '../../utils/pixKey';
 import { goBackOrReplace } from '../../utils/navigation';
 
 const PIX_KEY_TYPES = ['CPF', 'Telefone', 'E-mail', 'Chave aleatória'];
@@ -115,12 +116,13 @@ export default function Profile() {
     }
 
     const cpfRes = validateCPF(cpf);
+    const pixResult = normalizePixKey(pixKey, pixKeyType);
     const nextErrors = {};
     if (!fullName.trim()) nextErrors.fullName = 'Informe seu nome completo.';
     if (!cpfRes.valid) nextErrors.cpf = cpfRes.message || 'CPF inválido.';
     if (!whatsApp.trim()) nextErrors.whatsApp = 'Informe seu WhatsApp.';
     if (!pixKeyType) nextErrors.pixKeyType = 'Escolha o tipo de chave Pix.';
-    if (!pixKey.trim()) nextErrors.pixKey = 'Informe sua chave Pix.';
+    if (pixKeyType && !pixResult.valid) nextErrors.pixKey = pixResult.message;
 
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
@@ -135,8 +137,8 @@ export default function Profile() {
         fullName: fullName.trim(),
         cpf: cpf.trim(),
         whatsApp: whatsApp.trim(),
-        pixKeyType,
-        pixKey: pixKey.trim(),
+        pixKeyType: pixResult.pixKeyType,
+        pixKey: pixResult.key,
       });
 
       console.log('[PROFILE] profile saved -> navigating to /vehicle');
