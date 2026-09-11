@@ -23,6 +23,8 @@ function driver(overrides = {}) {
     subscriptionExpiresAt: 0,
     freeRideCountUsed: 0,
     isBlocked: false,
+    pixKeyType: 'E-mail',
+    pixKey: 'commercial_driver@pix.test.drivelocal.local',
     financialReviewRequired: false,
     ...overrides,
   };
