@@ -1,4 +1,5 @@
 const { normalizePixKey } = require('../pix/pixKey');
+const { crc16 } = require('../pix/pixBrCode');
 const { syncDriverPixKeyForRide } = require('../pix/driverPixSync');
 const { evaluateRideEligibility } = require('../drivers/eligibility');
 const { makeFakeFirestore } = require('./helpers/fakeFirestore');
@@ -26,6 +27,16 @@ describe('Pix key normalization', () => {
     const result = normalizePixKey(input, type);
     expect(result.valid).toBe(false);
     expect(result.key).toBeNull();
+  });
+});
+
+describe('Pix BR Code compatibility', () => {
+  it('matches the Banco Central static-QR CRC reference vector', () => {
+    const payloadWithCrcHeader =
+      '00020126580014br.gov.bcb.pix0136123e4567-e12b-12d1-a456-426655440000'
+      + '5204000053039865802BR5913Fulano de Tal6008BRASILIA62070503***6304';
+
+    expect(crc16(payloadWithCrcHeader)).toBe('1D3D');
   });
 });
 
