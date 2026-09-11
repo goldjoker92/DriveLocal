@@ -76,8 +76,14 @@ export default function PixPayment() {
 
   async function onCopy() {
     if (!payload) return;
-    await copyToClipboard(payload);
-    setCopied(true);
+    const didCopy = await copyToClipboard(payload);
+    setCopied(didCopy);
+    if (!didCopy) {
+      setError('Não foi possível copiar o código Pix. Pressione o código para copiar manualmente.');
+      logRideClientEvent('pix.passenger.payload_copy_failed', { rideId }, 'error');
+      return;
+    }
+    setError('');
     logRideClientEvent('pix.passenger.payload_copied', { rideId });
   }
 
