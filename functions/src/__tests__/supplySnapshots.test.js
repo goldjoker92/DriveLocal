@@ -21,6 +21,8 @@ function eligibleDriver(overrides = {}) {
     approvedAtMs: AT_18H - 30 * DAY_MS,
     commissionFreeUntil: AT_18H + 30 * DAY_MS,
     isBlocked: false,
+    pixKeyType: 'E-mail',
+    pixKey: 'supply_driver@pix.test.drivelocal.local',
     availabilityStatus: 'online',
     availabilitySessionId,
     activeRideId: null,
