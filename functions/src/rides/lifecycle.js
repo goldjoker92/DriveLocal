@@ -240,19 +240,27 @@ async function finishRide({ db, request, context, clock }) {
       });
     }
 
-    const selectedPixKey = pix.pixKey || driverProfile.pixKey || ride.driverPixKey;
-    const selectedPixKeyType = pix.pixKeyType
-      || driverProfile.pixKeyType
-      || ride.driverPixKeyType
-      || null;
-    const pixKeySource = pix.pixKey
-      ? 'private_driver_data'
+    const pixCandidate = pix.pixKey
+      ? {
+          key: pix.pixKey,
+          keyType: pix.pixKeyType || null,
+          source: 'private_driver_data',
+        }
       : driverProfile.pixKey
-        ? 'driver_profile_compat'
+        ? {
+            key: driverProfile.pixKey,
+            keyType: driverProfile.pixKeyType || null,
+            source: 'driver_profile_compat',
+          }
         : ride.driverPixKey
-          ? 'ride_snapshot_compat'
-          : 'missing';
-    const normalizedPix = normalizePixKey(selectedPixKey, selectedPixKeyType);
+          ? {
+              key: ride.driverPixKey,
+              keyType: ride.driverPixKeyType || null,
+              source: 'ride_snapshot_compat',
+            }
+          : { key: null, keyType: null, source: 'missing' };
+    const pixKeySource = pixCandidate.source;
+    const normalizedPix = normalizePixKey(pixCandidate.key, pixCandidate.keyType);
     if (!normalizedPix.valid) {
       throw new AppError(ERROR_CODES.PIX_KEY_INVALID, {
         internalMessage: `invalid Pix key for driver ${driverId}`,
