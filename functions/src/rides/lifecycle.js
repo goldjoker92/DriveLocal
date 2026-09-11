@@ -21,6 +21,7 @@ const { logInfo } = require('../logging/logger');
 const { writeAuditLog } = require('../audit/auditLog');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const { buildPixPayload } = require('../pix/pixBrCode');
+const { normalizePixKey } = require('../pix/pixKey');
 const { bestEffortRiskSignal } = require('../risk/riskEngine');
 const riskC = require('../risk/constants');
 const driverC = require('../drivers/constants');
@@ -239,7 +240,11 @@ async function finishRide({ db, request, context, clock }) {
       });
     }
 
-    const pixKey = pix.pixKey || driverProfile.pixKey || ride.driverPixKey;
+    const selectedPixKey = pix.pixKey || driverProfile.pixKey || ride.driverPixKey;
+    const selectedPixKeyType = pix.pixKeyType
+      || driverProfile.pixKeyType
+      || ride.driverPixKeyType
+      || null;
     const pixKeySource = pix.pixKey
       ? 'private_driver_data'
       : driverProfile.pixKey
@@ -247,12 +252,17 @@ async function finishRide({ db, request, context, clock }) {
         : ride.driverPixKey
           ? 'ride_snapshot_compat'
           : 'missing';
-    if (!pixKey) {
-      throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, {
-        internalMessage: `no verified pix key for driver ${driverId}`,
-        safeMetadata: { pixKeySource },
+    const normalizedPix = normalizePixKey(selectedPixKey, selectedPixKeyType);
+    if (!normalizedPix.valid) {
+      throw new AppError(ERROR_CODES.PIX_KEY_INVALID, {
+        internalMessage: `invalid Pix key for driver ${driverId}`,
+        safeMetadata: {
+          pixKeySource,
+          reason: normalizedPix.reasonCode || 'PIX_KEY_INVALID',
+        },
       });
     }
+    const pixKey = normalizedPix.key;
 
     const nowMs = clock.now();
     const finalFareCentavos = Number(ride.estimatedFareCentavos || 0);
