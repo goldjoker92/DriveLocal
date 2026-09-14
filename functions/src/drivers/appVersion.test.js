@@ -1,6 +1,7 @@
 const {
   MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
   evaluateDriverBuildNumber,
+  resolveDriverBuildPolicy,
   driverHasFreshSupportedBuild,
 } = require('./appVersion');
 
@@ -11,6 +12,20 @@ describe('driver app version policy', () => {
     expect(evaluateDriverBuildNumber(16).supported).toBe(false);
     expect(evaluateDriverBuildNumber('17').supported).toBe(true);
     expect(evaluateDriverBuildNumber(18).supported).toBe(true);
+  });
+
+  test('stays compatible until enforcement is explicitly activated', () => {
+    expect(resolveDriverBuildPolicy({})).toEqual({
+      enforced: false,
+      minimumBuildNumber: 17,
+    });
+    expect(resolveDriverBuildPolicy({
+      enforceMinimumDriverBuild: true,
+      minimumDriverBuildNumber: 18,
+    })).toEqual({
+      enforced: true,
+      minimumBuildNumber: 18,
+    });
   });
 
   test('requires a fresh version proof bound to the same work session', () => {
