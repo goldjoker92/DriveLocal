@@ -70,7 +70,15 @@ function redirectToRequiredAppUpdate(error) {
     requiredBuildNumber: error?.details?.metadata?.minimumBuildNumber || null,
     result: 'update_required_screen',
   }, 'warn');
-  appRouter.replace('/update-required');
+  const minimumBuildNumber = Number(
+    error?.details?.metadata?.minimumBuildNumber || 0
+  );
+  appRouter.replace({
+    pathname: '/update-required',
+    params: minimumBuildNumber > 0
+      ? { minimumBuildNumber: String(minimumBuildNumber) }
+      : {},
+  });
   return true;
 }
 
