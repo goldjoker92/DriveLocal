@@ -145,7 +145,15 @@ export default function DriverLayout() {
       ).catch(() => undefined);
       await stopDriverOnlineTracking();
       if (updateRequired) {
-        router.replace('/update-required');
+        const minimumBuildNumber = Number(
+          remote?.availabilityRequiredBuildNumber || 0
+        );
+        router.replace({
+          pathname: '/update-required',
+          params: minimumBuildNumber > 0
+            ? { minimumBuildNumber: String(minimumBuildNumber) }
+            : {},
+        });
       } else if (!onActiveRideScreen) {
         router.replace('/driver-home');
       }
