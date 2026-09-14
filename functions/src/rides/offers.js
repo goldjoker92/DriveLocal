@@ -23,21 +23,25 @@ function coarse(value) {
   return Math.round(Number(value) * 1000) / 1000;
 }
 
-const STREET_PREFIX = /^(?:r(?:ua)?\\.?|av(?:enida)?\\.?|travessa|tv\\.?|rodovia|estrada|alameda|praça|praca|br-\\d+|ce-\\d+)\\b/i;
-const COUNTRY_OR_POSTAL = /^(?:brasil|brazil|\\d{5}-?\\d{3})$/i;
-const CITY_STATE = /^([^,]{2,80}?)\\s*-\\s*([A-Za-z]{2})$/;
+function offerId(rideId, driverId) {
+  return `${rideId}_${driverId}`;
+}
+
+const STREET_PREFIX = /^(?:r(?:ua)?\.?|av(?:enida)?\.?|travessa|tv\.?|rodovia|estrada|alameda|praça|praca|br-\d+|ce-\d+)\b/i;
+const COUNTRY_OR_POSTAL = /^(?:brasil|brazil|\d{5}-?\d{3})$/i;
+const CITY_STATE = /^([^,]{2,80}?)\s*-\s*([A-Za-z]{2})$/;
 
 function safeAreaPart(value) {
-  let text = String(value || '').normalize('NFKC').trim().replace(/\\s+/g, ' ');
+  let text = String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ');
   if (!text || COUNTRY_OR_POSTAL.test(text)) return null;
 
   // Google formatted addresses commonly use "123 - Bairro". Drop the number.
-  text = text.replace(/^(?:n(?:[º°.]|umero)?\\s*)?\\d+[A-Za-z0-9/-]*\\s*-\\s*/i, '');
+  text = text.replace(/^(?:n(?:[º°.]|umero)?\s*)?\d+[A-Za-z0-9/-]*\s*-\s*/i, '');
 
   // A street segment may end with the neighborhood: "Rua X - Centro".
   // Keep only the suffix; a bare street name fails closed.
   if (STREET_PREFIX.test(text)) {
-    const sections = text.split(/\\s+-\\s+/).filter(Boolean);
+    const sections = text.split(/\s+-\s+/).filter(Boolean);
     if (sections.length < 2) return null;
     text = sections[sections.length - 1].trim();
   }
@@ -45,7 +49,7 @@ function safeAreaPart(value) {
   if (
     !text
     || STREET_PREFIX.test(text)
-    || /\\b\\d{3,}\\b/.test(text)
+    || /\b\d{3,}\b/.test(text)
     || text.includes(',')
   ) {
     return null;
@@ -55,7 +59,7 @@ function safeAreaPart(value) {
 
 function publicAreaLabel(point, fallback) {
   const raw = typeof point?.label === 'string'
-    ? point.label.normalize('NFKC').trim().replace(/\\s+/g, ' ')
+    ? point.label.normalize('NFKC').trim().replace(/\s+/g, ' ')
     : '';
   if (!raw) return fallback;
 
