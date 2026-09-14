@@ -11,6 +11,22 @@ function readExtra() {
 
 const extra = readExtra();
 
+const nativeBuildNumber = Number(
+  Constants.nativeBuildVersion
+  || Constants.expoConfig?.android?.versionCode
+  || 0
+);
+
+export const APP_VERSION = String(
+  Constants.nativeAppVersion
+  || Constants.expoConfig?.version
+  || '0.0.0'
+);
+export const APP_BUILD_NUMBER = Number.isInteger(nativeBuildNumber)
+  && nativeBuildNumber > 0
+  ? nativeBuildNumber
+  : 0;
+
 export const APP_ENVIRONMENT = extra.appEnvironment === 'development'
   ? 'development'
   : 'production';
