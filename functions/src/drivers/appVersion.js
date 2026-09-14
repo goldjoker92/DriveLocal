@@ -34,9 +34,10 @@ function evaluateDriverBuildNumber(value, minimumBuildNumber = MIN_SUPPORTED_DRI
 
 function resolveDriverBuildPolicy(config = {}) {
   return {
-    enforced: config.enforceMinimumDriverBuild === true,
-    minimumBuildNumber: normalizeBuildNumber(config.minimumDriverBuildNumber)
-      || MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
+    enforced: config.enforced === true || config.enforceMinimumDriverBuild === true,
+    minimumBuildNumber: normalizeBuildNumber(
+      config.minimumBuildNumber || config.minimumDriverBuildNumber
+    ) || MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
   };
 }
 
