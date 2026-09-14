@@ -5,7 +5,10 @@
 // aggregate rejection diagnostics (never UIDs, coordinates or profile data).
 
 const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
-const { driverHasFreshSupportedBuild } = require('../drivers/appVersion');
+const {
+  driverHasFreshSupportedBuild,
+  resolveDriverBuildPolicy,
+} = require('../drivers/appVersion');
 const { haversineMeters } = require('../geo/geo');
 const C = require('./constants');
 
@@ -122,10 +125,13 @@ async function queryCandidateDrivers({ db, serviceAreaId, vehicleType, maxCandid
  * @param {{pickup:object, searchRadiusMeters:number, clock:{now:()=>number}}} args
  * @returns {{eligible:Array<{driverId:string,data:object,distanceToPickupMeters:number,locationFreshness:string,locationAgeMs:number,availabilitySessionId:string}>, diagnostics:object, abandonedWorkSessionDriverIds:Array<string>}}
  */
-function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadiusMeters, clock }) {
+function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadiusMeters, clock, driverBuildPolicy }) {
   const nowMs = Number(clock.now());
   const radius = Number(searchRadiusMeters) > 0 ? Number(searchRadiusMeters) : C.DEFAULT_SEARCH_RADIUS_METERS;
   const diagnostics = emptyDiagnostics(radius);
+  const buildPolicy = resolveDriverBuildPolicy(driverBuildPolicy || {});
+  diagnostics.minimumDriverBuildNumber = buildPolicy.minimumBuildNumber;
+  diagnostics.minimumDriverBuildEnforced = buildPolicy.enforced;
   const eligible = [];
   // Abandoned work sessions: still flagged online, with no published point for
   // far longer than the lease, so the app is gone (killed, swiped, battery
@@ -165,10 +171,11 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
       continue;
     }
 
-    if (!driverHasFreshSupportedBuild(
+    if (buildPolicy.enforced && !driverHasFreshSupportedBuild(
       d,
       nowMs,
-      C.AVAILABILITY_SESSION_MAX_AGE_MS
+      C.AVAILABILITY_SESSION_MAX_AGE_MS,
+      buildPolicy.minimumBuildNumber
     )) {
       diagnostics.rejectedUnsupportedAppBuild += 1;
       unsupportedAppBuildDriverIds.push(c.id);
