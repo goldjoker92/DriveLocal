@@ -11,7 +11,11 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
-import { DEV_RIDE_SIMULATOR_ENABLED } from '../config/runtimeEnvironment';
+import {
+  APP_BUILD_NUMBER,
+  APP_VERSION,
+  DEV_RIDE_SIMULATOR_ENABLED,
+} from '../config/runtimeEnvironment';
 import { safeTrackingPayload } from '../utils/rideTracking';
 import { shouldPublishDriverLocation } from '../utils/driverLocationPolicy';
 import { BACKGROUND_INCIDENT_REASONS } from '../utils/driverBackgroundReliability';
@@ -192,6 +196,11 @@ function driverLocationUpdate(session, payload, nowMs) {
     locationUpdatedAtMs: nowMs,
     locationUpdatedAt: serverTimestamp(),
     locationAvailabilitySessionId: session.availabilitySessionId,
+    availabilityClientBuildNumber: APP_BUILD_NUMBER,
+    availabilityClientVersion: APP_VERSION,
+    availabilityClientSessionId: session.availabilitySessionId,
+    availabilityClientUpdatedAtMs: nowMs,
+    availabilityClientUpdatedAt: serverTimestamp(),
     availabilityUpdatedAtMs: nowMs,
     availabilityUpdatedAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -241,12 +250,18 @@ async function publishSessionHeartbeat(session) {
     return false;
   }
 
+  const nowMs = Date.now();
   try {
     await setDoc(
       doc(db, 'drivers', session.driverId),
       {
         locationAvailabilitySessionId: session.availabilitySessionId,
-        availabilityUpdatedAtMs: Date.now(),
+        availabilityClientBuildNumber: APP_BUILD_NUMBER,
+        availabilityClientVersion: APP_VERSION,
+        availabilityClientSessionId: session.availabilitySessionId,
+        availabilityClientUpdatedAtMs: nowMs,
+        availabilityClientUpdatedAt: serverTimestamp(),
+        availabilityUpdatedAtMs: nowMs,
         availabilityUpdatedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       },
