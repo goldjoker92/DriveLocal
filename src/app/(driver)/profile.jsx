@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppInput from '../../components/AppInput';
@@ -18,9 +18,17 @@ import { typography, fontFamily } from '../../constants/typography';
 import { auth } from '../../config/firebase';
 import { getDriver, updateDriverProfile } from '../../services/driverService';
 import { validateCPF } from '../../utils/validation';
+import { validateAndNormalizePixKey } from '../../utils/pixKey';
 import { goBackOrReplace } from '../../utils/navigation';
 
 const PIX_KEY_TYPES = ['CPF', 'Telefone', 'E-mail', 'Chave aleatória'];
+
+const PIX_KEY_INPUT = {
+  CPF: { placeholder: '000.000.000-00', keyboardType: 'number-pad' },
+  Telefone: { placeholder: '+55 85 99999-9999', keyboardType: 'phone-pad' },
+  'E-mail': { placeholder: 'nome@exemplo.com', keyboardType: 'email-address' },
+  'Chave aleatória': { placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', keyboardType: 'default' },
+};
 
 function FieldHint({ message, tone = 'danger' }) {
   if (!message) return null;
@@ -61,6 +69,8 @@ function PixKeyTypeSelect({ value, onChange }) {
 
 export default function Profile() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const returnToCockpit = params.returnTo === 'home';
   const [fullName, setFullName] = useState('');
   const [cpf, setCpf] = useState('');
   const [whatsApp, setWhatsApp] = useState('');
@@ -115,12 +125,13 @@ export default function Profile() {
     }
 
     const cpfRes = validateCPF(cpf);
+    const pixRes = validateAndNormalizePixKey(pixKey, pixKeyType);
     const nextErrors = {};
     if (!fullName.trim()) nextErrors.fullName = 'Informe seu nome completo.';
     if (!cpfRes.valid) nextErrors.cpf = cpfRes.message || 'CPF inválido.';
     if (!whatsApp.trim()) nextErrors.whatsApp = 'Informe seu WhatsApp.';
     if (!pixKeyType) nextErrors.pixKeyType = 'Escolha o tipo de chave Pix.';
-    if (!pixKey.trim()) nextErrors.pixKey = 'Informe sua chave Pix.';
+    if (!pixRes.valid) nextErrors.pixKey = pixRes.message;
 
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
@@ -136,11 +147,12 @@ export default function Profile() {
         cpf: cpf.trim(),
         whatsApp: whatsApp.trim(),
         pixKeyType,
-        pixKey: pixKey.trim(),
+        pixKey: pixRes.value,
       });
 
-      console.log('[PROFILE] profile saved -> navigating to /vehicle');
-      router.replace('/(driver)/vehicle');
+      setPixKey(pixRes.value);
+      console.log('[PROFILE] profile saved');
+      router.replace(returnToCockpit ? '/(driver)/driver-home' : '/(driver)/vehicle');
     } catch (e) {
       console.log('[PROFILE] save error', e.message);
       setErrors({ form: 'Não foi possível salvar. Tente novamente.' });
@@ -190,14 +202,25 @@ export default function Profile() {
             <FieldHint message={errors.whatsApp} />
             <FieldHint message={warnings.whatsApp} tone="warning" />
 
-            <PixKeyTypeSelect value={pixKeyType} onChange={setPixKeyType} />
+            <PixKeyTypeSelect
+              value={pixKeyType}
+              onChange={(nextType) => {
+                setPixKeyType(nextType);
+                setPixKey('');
+                setErrors((current) => ({ ...current, pixKey: '' }));
+              }}
+            />
             <FieldHint message={errors.pixKeyType} />
 
             <AppInput
               label="Chave Pix"
               value={pixKey}
-              onChangeText={setPixKey}
-              placeholder="Sua chave Pix"
+              onChangeText={(text) => {
+                setPixKey(text);
+                setErrors((current) => ({ ...current, pixKey: '' }));
+              }}
+              placeholder={PIX_KEY_INPUT[pixKeyType]?.placeholder || 'Sua chave Pix'}
+              keyboardType={PIX_KEY_INPUT[pixKeyType]?.keyboardType || 'default'}
               autoCapitalize="none"
             />
             <FieldHint message={errors.pixKey} />

@@ -10,6 +10,7 @@ const {
   resolveDriverBuildPolicy,
 } = require('../drivers/appVersion');
 const { haversineMeters } = require('../geo/geo');
+const { validateAndNormalizePixKey } = require('../pix/pixKey');
 const C = require('./constants');
 
 // Kept as a compatibility export for analytics/tests. The fallback is now bounded
@@ -65,6 +66,7 @@ function emptyDiagnostics(radius) {
     rejectedMissingWorkSession: 0,
     rejectedStaleWorkSession: 0,
     rejectedUnsupportedAppBuild: 0,
+    rejectedInvalidPixKey: 0,
     // Subset of rejectedStaleWorkSession with no sign of life for far longer:
     // the only sessions the caller is allowed to close.
     abandonedWorkSessionCount: 0,
@@ -180,6 +182,14 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
       diagnostics.rejectedUnsupportedAppBuild += 1;
       unsupportedAppBuildDriverIds.push(c.id);
       continue;
+    }
+
+    if (buildPolicy.enforced && buildPolicy.minimumBuildNumber >= 17) {
+      const pixKey = validateAndNormalizePixKey(d.pixKey, d.pixKeyType);
+      if (!pixKey.valid) {
+        diagnostics.rejectedInvalidPixKey += 1;
+        continue;
+      }
     }
 
     const evalResult = evaluateRideEligibility(d, clock);

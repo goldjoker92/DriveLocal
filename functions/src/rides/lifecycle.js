@@ -240,6 +240,11 @@ async function finishRide({ db, request, context, clock }) {
     }
 
     const pixKey = pix.pixKey || driverProfile.pixKey || ride.driverPixKey;
+    const pixKeyType = pix.pixKey
+      ? pix.pixKeyType
+      : driverProfile.pixKey
+        ? driverProfile.pixKeyType
+        : ride.driverPixKeyType;
     const pixKeySource = pix.pixKey
       ? 'private_driver_data'
       : driverProfile.pixKey
@@ -257,17 +262,30 @@ async function finishRide({ db, request, context, clock }) {
     const nowMs = clock.now();
     const finalFareCentavos = Number(ride.estimatedFareCentavos || 0);
     const finalCommissionCentavos = Number(ride.estimatedCommissionCentavos || 0);
-    const payload = buildPixPayload({
-      pixKey,
-      amountCentavos: finalFareCentavos,
-      merchantName: pix.pixOwnerName
-        || pix.fullName
-        || driverProfile.fullName
-        || driverProfile.displayName
-        || 'DriveLocal',
-      city: 'Horizonte',
-      txid: `DL${rideId}`.slice(0, 25),
-    });
+    let payload;
+    try {
+      payload = buildPixPayload({
+        pixKey,
+        pixKeyType,
+        amountCentavos: finalFareCentavos,
+        merchantName: pix.pixOwnerName
+          || pix.fullName
+          || driverProfile.fullName
+          || driverProfile.displayName
+          || 'DriveLocal',
+        city: 'Horizonte',
+        txid: `DL${rideId}`.slice(0, 25),
+      });
+    } catch (error) {
+      throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, {
+        internalMessage: 'invalid Pix charge data for driver ' + driverId + ': ' + (error?.code || error?.message),
+        safeMetadata: {
+          reason: error?.code || 'PIX_CONFIGURATION_INVALID',
+          pixKeySource,
+          message: 'Atualize sua chave Pix no perfil e tente finalizar novamente.',
+        },
+      });
+    }
 
     tx.set(rideRef, {
       status: C.RIDE_STATUS.AWAITING_PAYMENT,

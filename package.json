@@ -10,6 +10,8 @@
     "expo": "~56.0.16",
     "expo-asset": "~56.0.20",
     "expo-audio": "~56.0.12",
+    "expo-brightness": "~56.0.5",
+    "expo-clipboard": "~56.0.4",
     "expo-constants": "~56.0.21",
     "expo-dev-client": "~56.0.23",
     "expo-device": "~56.0.4",
@@ -79,7 +81,9 @@
     "deploy:firebase:dev": "firebase deploy --only functions,firestore:rules,firestore:indexes,storage --project drivelocal-dev",
     "deploy:firebase:prod": "node -e \"if(process.env.CONFIRM_PRODUCTION_DEPLOY!=='DRIVELOCAL_PRODUCTION'){console.error('prod deploy requires CONFIRM_PRODUCTION_DEPLOY=DRIVELOCAL_PRODUCTION');process.exit(1)}\" && firebase deploy --only functions,firestore:rules,firestore:indexes,storage --project drivelocal-prod",
     "verify:firebase:dev": "firebase functions:list --project drivelocal-dev",
-    "verify:firebase:prod": "firebase functions:list --project drivelocal-prod"
+    "verify:firebase:prod": "firebase functions:list --project drivelocal-prod",
+    "pix-keys:audit:prod": "node functions/scripts/audit-driver-pix-keys.js --project drivelocal-prod",
+    "pix-keys:audit:dev": "node functions/scripts/audit-driver-pix-keys.js --project drivelocal-dev"
   },
   "jest": {
     "preset": "jest-expo",

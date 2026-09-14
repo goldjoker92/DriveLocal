@@ -38,6 +38,7 @@ import {
   stopDriverOnlineTracking,
 } from '../../services/driverLocationTracking';
 import { getRobotDriverState, stopRobotDriver } from '../../services/robotDriverEngine';
+import { validateAndNormalizePixKey } from '../../utils/pixKey';
 import {
   AVAILABILITY,
   benefitWarning,
@@ -453,6 +454,24 @@ export default function DriverHome() {
     setAvailabilityError('');
     if (driver?.activeRideId) {
       router.push({ pathname: '/active-ride', params: { rideId: driver.activeRideId } });
+      return;
+    }
+    const pixValidation = validateAndNormalizePixKey(driver?.pixKey, driver?.pixKeyType);
+    if (!pixValidation.valid) {
+      Alert.alert(
+        'Atualize sua chave Pix',
+        'Para receber corridas, confirme uma chave Pix válida. Você voltará ao cockpit após salvar.',
+        [
+          { text: 'Agora não', style: 'cancel' },
+          {
+            text: 'Atualizar chave Pix',
+            onPress: () => router.push({
+              pathname: '/(driver)/profile',
+              params: { returnTo: 'home', pixRequired: '1' },
+            }),
+          },
+        ]
+      );
       return;
     }
     if (!eligibility.eligible) {

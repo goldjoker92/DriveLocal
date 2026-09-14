@@ -5,6 +5,8 @@
 // caller supplies the VERIFIED driver Pix key (read server-side); this module
 // never logs or persists it.
 
+const { validateAndNormalizePixKey } = require('./pixKey');
+
 // Builds one EMV TLV field: id (2 chars) + length (2 digits) + value.
 function tlv(id, value) {
   const v = String(value);
@@ -44,12 +46,24 @@ function sanitizeTxid(value) {
 
 /**
  * Builds a static Pix BR Code payload with an amount.
- * @param {{pixKey:string, amountCentavos:number, merchantName:string, city:string, txid:string}} p
+ * @param {{pixKey:string, pixKeyType?:string, amountCentavos:number, merchantName:string, city:string, txid:string}} p
  * @returns {string} the copy-and-paste ("copia e cola") payload
  */
 function buildPixPayload(p) {
-  const amount = (Number(p.amountCentavos) / 100).toFixed(2);
-  const merchantAccount = tlv('00', 'br.gov.bcb.pix') + tlv('01', String(p.pixKey));
+  const pixKey = validateAndNormalizePixKey(p.pixKey, p.pixKeyType);
+  if (!pixKey.valid) {
+    const error = new Error('Invalid Pix key: ' + pixKey.reason);
+    error.code = 'PIX_KEY_INVALID';
+    throw error;
+  }
+  const amountCentavos = Number(p.amountCentavos);
+  if (!Number.isSafeInteger(amountCentavos) || amountCentavos <= 0) {
+    const error = new Error('Invalid Pix amount');
+    error.code = 'PIX_AMOUNT_INVALID';
+    throw error;
+  }
+  const amount = (amountCentavos / 100).toFixed(2);
+  const merchantAccount = tlv('00', 'br.gov.bcb.pix') + tlv('01', pixKey.value);
   const additionalData = tlv('05', sanitizeTxid(p.txid));
 
   let payload =

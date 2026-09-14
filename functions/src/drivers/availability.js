@@ -14,6 +14,7 @@ const {
   resolveDriverBuildPolicy,
 } = require('./appVersion');
 const rideC = require('../rides/constants');
+const { validateAndNormalizePixKey } = require('../pix/pixKey');
 
 const AVAILABILITY_VALUES = Object.freeze(['online', 'offline']);
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
@@ -109,6 +110,18 @@ async function setDriverAvailability({ db, request, context, clock }) {
             minimumBuildNumber: buildPolicy.minimumBuildNumber,
           },
         });
+      }
+      if (buildPolicy.enforced && buildPolicy.minimumBuildNumber >= 17) {
+        const pixKey = validateAndNormalizePixKey(driver.pixKey, driver.pixKeyType);
+        if (!pixKey.valid) {
+          throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
+            internalMessage: 'driver ' + driverId + ' has invalid Pix key: ' + pixKey.reason,
+            safeMetadata: {
+              reason: 'PIX_KEY_INVALID',
+              message: 'Atualize sua chave Pix no perfil antes de ficar disponível.',
+            },
+          });
+        }
       }
       if (driver.activeRideId) {
         throw new AppError(ERROR_CODES.RIDE_IN_PROGRESS, {
