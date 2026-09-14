@@ -32,6 +32,14 @@ function evaluateDriverBuildNumber(value, minimumBuildNumber = MIN_SUPPORTED_DRI
   };
 }
 
+function resolveDriverBuildPolicy(config = {}) {
+  return {
+    enforced: config.enforceMinimumDriverBuild === true,
+    minimumBuildNumber: normalizeBuildNumber(config.minimumDriverBuildNumber)
+      || MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
+  };
+}
+
 function driverHasFreshSupportedBuild(
   driver = {},
   nowMs = Date.now(),
@@ -63,5 +71,6 @@ module.exports = {
   normalizeBuildNumber,
   timestampToMillis,
   evaluateDriverBuildNumber,
+  resolveDriverBuildPolicy,
   driverHasFreshSupportedBuild,
 };
