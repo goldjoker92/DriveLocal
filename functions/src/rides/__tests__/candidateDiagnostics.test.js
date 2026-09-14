@@ -96,4 +96,38 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
     expect(eligible).toHaveLength(0);
     expect(diagnostics.rejectedStaleWorkSession).toBe(1);
   });
+
+  it('excludes invalid Pix keys once the build 17 policy is enforced', () => {
+    const validSession = candidate('valid-pix', {
+      pixKeyType: 'CPF',
+      pixKey: '529.982.247-25',
+      availabilityClientBuildNumber: 17,
+      availabilityClientSessionId: 'work_valid-pix_session_123456789',
+      availabilityClientUpdatedAtMs: NOW - 60_000,
+    });
+    const invalidSession = candidate('invalid-pix', {
+      pixKeyType: 'CPF',
+      pixKey: '024.995.773-635',
+      availabilityClientBuildNumber: 17,
+      availabilityClientSessionId: 'work_invalid-pix_session_123456789',
+      availabilityClientUpdatedAtMs: NOW - 60_000,
+    });
+
+    const { eligible, diagnostics } = selectEligibleDriversWithDiagnostics(
+      [validSession, invalidSession],
+      {
+        pickup,
+        searchRadiusMeters: 50_000,
+        clock,
+        driverBuildPolicy: {
+          enforceMinimumDriverBuild: true,
+          minimumDriverBuildNumber: 17,
+        },
+      }
+    );
+
+    expect(eligible.map((item) => item.driverId)).toEqual(['valid-pix']);
+    expect(diagnostics.rejectedInvalidPixKey).toBe(1);
+  });
+
 });
