@@ -6,6 +6,11 @@
 
 const admin = require('firebase-admin');
 const { PROJECT_ENV } = require('../src/config/environment');
+const {
+  driverHasFreshSupportedBuild,
+} = require('../src/drivers/appVersion');
+
+const BUILD_PROOF_MAX_AGE_MS = 20 * 60 * 1000;
 
 function arg(name) {
   const i = process.argv.indexOf('--' + name);
@@ -49,17 +54,57 @@ async function main() {
   const current = await ref.get();
   if (!current.exists) die('service area config does not exist: ' + serviceAreaId);
 
-  await ref.set({
+  let unsupportedDrivers = [];
+  if (enforceMinimumDriverBuild) {
+    const online = await admin.firestore()
+      .collection('drivers')
+      .where('availabilityStatus', '==', 'online')
+      .get();
+    const nowMs = Date.now();
+    unsupportedDrivers = online.docs.filter((snapshot) => {
+      const driver = snapshot.data() || {};
+      if ((driver.serviceAreaId || 'HORIZONTE_CE_BR') !== serviceAreaId) return false;
+      if (driver.activeRideId) return false;
+      return !driverHasFreshSupportedBuild(
+        driver,
+        nowMs,
+        BUILD_PROOF_MAX_AGE_MS,
+        minimumBuildNumber
+      );
+    });
+    if (unsupportedDrivers.length > 400) {
+      die('more than 400 sessions require closure; refusing a partial activation');
+    }
+  }
+
+  // One batch makes the policy activation and the idle-session purge atomic.
+  // Active rides are deliberately excluded and finish under their current state.
+  const batch = admin.firestore().batch();
+  batch.set(ref, {
     minimumDriverBuildNumber,
     enforceMinimumDriverBuild,
     driverBuildPolicyUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, { merge: true });
+  unsupportedDrivers.forEach((snapshot) => {
+    batch.set(snapshot.ref, {
+      availabilityStatus: 'offline',
+      availabilitySessionId: null,
+      availabilitySessionEndedAt: admin.firestore.FieldValue.serverTimestamp(),
+      availabilityUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      locationAvailabilitySessionId: null,
+      availabilityClientSessionId: null,
+      availabilityClosedReason: 'mandatory_update_required',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+  await batch.commit();
 
   console.log(
     '[DRIVER_BUILD_POLICY] OK project=' + projectId
       + ' serviceArea=' + serviceAreaId
       + ' minimumBuild=' + minimumBuildNumber
       + ' enforced=' + enforceMinimumDriverBuild
+      + ' sessionsClosed=' + unsupportedDrivers.length
   );
   process.exit(0);
 }
