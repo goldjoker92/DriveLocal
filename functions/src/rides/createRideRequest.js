@@ -236,6 +236,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       offerTtlSeconds: svc.offerTtlSeconds,
       searchRadiusMeters: svc.searchRadiusMeters,
       maxCandidates: svc.maxCandidates,
+      driverBuildPolicy: svc.driverBuildPolicy,
       context,
       clock,
     });
