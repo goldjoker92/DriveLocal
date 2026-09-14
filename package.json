@@ -67,6 +67,8 @@
     "release:prod-auth-smoke": "node scripts/release/prod-auth-smoke.js",
     "dispatch:smoke:prod": "node scripts/release/dispatch-smoke.js --project drivelocal-prod",
     "dispatch:smoke:dev": "node scripts/release/dispatch-smoke.js --project drivelocal-dev",
+    "driver-build-policy:dev": "node functions/scripts/set-minimum-driver-build.js --project drivelocal-dev",
+    "driver-build-policy:prod": "node functions/scripts/set-minimum-driver-build.js --project drivelocal-prod",
     "release:closed-test-gate": "npm run release:check && npm run release:ensure-prod-email-auth && npm run release:ensure-prod-android-api-key && npm run release:prod-auth-smoke",
     "validate:service-area": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
     "validate:env:dev": "node functions/scripts/validate-config.js --project drivelocal-dev --expect-env development",
