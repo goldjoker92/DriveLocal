@@ -32,12 +32,28 @@ export default function DriverTimedOfferCard({ view }) {
         </View>
       </View>
 
-      <View style={styles.pickupSection}>
-        <Text style={styles.eyebrow}>REGIÃO DO EMBARQUE</Text>
-        <Text style={styles.pickupRegion}>{view.pickupRegionLabel}</Text>
-        <Text style={styles.pickupMetrics}>
-          {`${view.distanceLabel}  •  ${view.etaLabel}`}
-        </Text>
+      <View style={styles.routeSection}>
+        <View style={styles.routeRail} accessibilityElementsHidden>
+          <View style={styles.pickupMarker} />
+          <View style={styles.routeLine} />
+          <View style={styles.destinationMarker} />
+        </View>
+        <View style={styles.routeDetails}>
+          <View style={styles.routeStop}>
+            <Text style={styles.eyebrow}>EMBARQUE</Text>
+            <Text style={styles.routeRegion}>{view.pickupRegionLabel}</Text>
+            <Text style={styles.routeMetrics}>
+              {`${view.distanceLabel}  •  ${view.etaLabel}`}
+            </Text>
+          </View>
+          <View style={styles.routeStop}>
+            <Text style={styles.eyebrow}>DESTINO</Text>
+            <Text style={styles.routeRegion}>{view.destinationRegionLabel}</Text>
+            <Text style={styles.routeMetrics}>
+              {`${view.routeDistanceLabel}  •  ${view.routeDurationLabel}`}
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={styles.receiveSection}>
@@ -99,19 +115,52 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   countdownValueUrgent: { color: colors.danger },
-  pickupSection: { gap: spacing.xs },
+  routeSection: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  routeRail: {
+    width: 16,
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  pickupMarker: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
+  },
+  routeLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 48,
+    backgroundColor: colors.border,
+  },
+  destinationMarker: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+  },
+  routeDetails: {
+    flex: 1,
+    gap: spacing.lg,
+  },
+  routeStop: { gap: spacing.xs },
   eyebrow: {
     fontFamily,
     color: colors.textFaint,
     ...typography.caption,
     letterSpacing: 0.8,
   },
-  pickupRegion: {
+  routeRegion: {
     fontFamily,
     color: colors.text,
     ...typography.h3,
   },
-  pickupMetrics: {
+  routeMetrics: {
     fontFamily,
     color: colors.textMuted,
     ...typography.small,

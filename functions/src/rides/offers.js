@@ -2,8 +2,9 @@
 // createTargetedOffers — writes one deterministic offer document per eligible
 // driver: driverOffers/{rideId}_{driverId}. Deterministic ids make dispatch
 // idempotent: re-running for the same ride can never create duplicate offers.
-// Documents carry only a SAFE pickup preview (coarsened coordinates + generic
-// label). The exact address/coordinates are delivered to the winner at acceptance.
+// Documents carry only SAFE route previews: coarse pickup coordinates and
+// neighborhood/city labels with street/number removed. Exact addresses and
+// destination coordinates are delivered only to the winner after acceptance.
 
 const admin = require('firebase-admin');
 const { getFunctions } = require('firebase-admin/functions');
@@ -22,17 +23,76 @@ function coarse(value) {
   return Math.round(Number(value) * 1000) / 1000;
 }
 
-function offerId(rideId, driverId) {
-  return `${rideId}_${driverId}`;
+const STREET_PREFIX = /^(?:r(?:ua)?\\.?|av(?:enida)?\\.?|travessa|tv\\.?|rodovia|estrada|alameda|praça|praca|br-\\d+|ce-\\d+)\\b/i;
+const COUNTRY_OR_POSTAL = /^(?:brasil|brazil|\\d{5}-?\\d{3})$/i;
+const CITY_STATE = /^([^,]{2,80}?)\\s*-\\s*([A-Za-z]{2})$/;
+
+function safeAreaPart(value) {
+  let text = String(value || '').normalize('NFKC').trim().replace(/\\s+/g, ' ');
+  if (!text || COUNTRY_OR_POSTAL.test(text)) return null;
+
+  // Google formatted addresses commonly use "123 - Bairro". Drop the number.
+  text = text.replace(/^(?:n(?:[º°.]|umero)?\\s*)?\\d+[A-Za-z0-9/-]*\\s*-\\s*/i, '');
+
+  // A street segment may end with the neighborhood: "Rua X - Centro".
+  // Keep only the suffix; a bare street name fails closed.
+  if (STREET_PREFIX.test(text)) {
+    const sections = text.split(/\\s+-\\s+/).filter(Boolean);
+    if (sections.length < 2) return null;
+    text = sections[sections.length - 1].trim();
+  }
+
+  if (
+    !text
+    || STREET_PREFIX.test(text)
+    || /\\b\\d{3,}\\b/.test(text)
+    || text.includes(',')
+  ) {
+    return null;
+  }
+  return text.slice(0, 80);
+}
+
+function publicAreaLabel(point, fallback) {
+  const raw = typeof point?.label === 'string'
+    ? point.label.normalize('NFKC').trim().replace(/\\s+/g, ' ')
+    : '';
+  if (!raw) return fallback;
+
+  const parts = raw.split(',').map((part) => part.trim()).filter(Boolean);
+  const cityIndex = parts.findIndex((part) => CITY_STATE.test(part));
+  if (cityIndex >= 0) {
+    const match = parts[cityIndex].match(CITY_STATE);
+    const cityState = `${match[1].trim()} - ${match[2].toUpperCase()}`;
+    let neighborhood = null;
+    for (let index = cityIndex - 1; index >= 0 && !neighborhood; index -= 1) {
+      neighborhood = safeAreaPart(parts[index]);
+    }
+    return neighborhood ? `${neighborhood} · ${cityState}` : cityState;
+  }
+
+  return safeAreaPart(raw) || fallback;
 }
 
 function pickupPreview(pickup) {
   return {
-    // Never copy the passenger's street/number before the driver accepts.
-    label: 'Região do embarque',
+    // A neighborhood/city decision cue is useful; street and number stay hidden.
+    label: publicAreaLabel(pickup, 'Região do embarque'),
     approxLat: coarse(pickup.lat),
     approxLng: coarse(pickup.lng),
   };
+}
+
+function destinationPreview(destination) {
+  // Destination coordinates never enter driverOffers before acceptance.
+  return {
+    label: publicAreaLabel(destination, 'Região do destino'),
+  };
+}
+
+function safeRouteMetric(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? Math.round(numeric) : null;
 }
 
 // Only the closed percentage vocabulary crosses into driverOffers. The exact
@@ -112,6 +172,9 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
   const nowMs = clock.now();
   const expiresAtMs = nowMs + offerTtlSeconds * 1000;
   const preview = pickupPreview(ride.pickup);
+  const destination = destinationPreview(ride.destination);
+  const routeDistanceMeters = safeRouteMetric(ride.routeDistanceMeters);
+  const routeDurationSeconds = safeRouteMetric(ride.routeDurationSeconds);
   const offerIds = [];
 
   // All offers of one wave are written in a SINGLE batch. Sequentially awaiting
@@ -131,7 +194,10 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
       estimatedFareCentavos: ride.estimatedFareCentavos,
       commissionDisplayBps: commissionDisplayBpsForOffer(ride, cand.data, nowMs),
       pickupPreview: preview,
+      destinationPreview: destination,
       distanceToPickupMeters: cand.distanceToPickupMeters,
+      routeDistanceMeters,
+      routeDurationSeconds,
       status: C.OFFER_STATUS.OFFERED,
       driverRideStatus: null,
       createdAtMs: nowMs,
@@ -191,6 +257,8 @@ module.exports = {
   createTargetedOffers,
   offerId,
   pickupPreview,
+  destinationPreview,
+  publicAreaLabel,
   commissionDisplayBpsForOffer,
   scheduleOfferExpiry,
   isTaskAlreadyExists,

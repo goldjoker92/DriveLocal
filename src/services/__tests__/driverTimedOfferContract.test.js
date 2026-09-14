@@ -17,15 +17,20 @@ describe('block 17 compact timed offer contract', () => {
     expect(card).toContain('view.driverReceivesLabel');
     expect(card).toContain('view.distanceLabel');
     expect(card).toContain('view.etaLabel');
+    expect(card).toContain('view.destinationRegionLabel');
+    expect(card).toContain('view.routeDistanceLabel');
+    expect(card).toContain('view.routeDurationLabel');
     expect(card).toContain('view.vehicle.label');
     expect(card).toContain('label="Taxa da plataforma"');
     expect(card).toContain('label="Pagamento"');
 
     const countdownIndex = card.indexOf('view.secondsLeft');
+    const destinationIndex = card.indexOf('DESTINO');
     const receiveIndex = card.indexOf('VOCÊ RECEBE');
     const summaryIndex = card.indexOf('<View style={styles.summary}>');
     expect(countdownIndex).toBeGreaterThan(-1);
-    expect(receiveIndex).toBeGreaterThan(countdownIndex);
+    expect(destinationIndex).toBeGreaterThan(countdownIndex);
+    expect(receiveIndex).toBeGreaterThan(destinationIndex);
     expect(summaryIndex).toBeGreaterThan(receiveIndex);
   });
 
@@ -69,17 +74,19 @@ describe('block 17 compact timed offer contract', () => {
     expect(notifications).not.toContain('dismissAllNotificationsAsync');
   });
 
-  it('uses only coarse pickup data before acceptance', () => {
+  it('uses only coarse route data before acceptance', () => {
     const screen = source('src/app/(driver)/ride-request.jsx');
     const card = source('src/components/DriverTimedOfferCard.jsx');
     const model = source('src/utils/driverTimedOffer.js');
 
     expect(model).toContain('offer?.pickupPreview?.label');
+    expect(model).toContain('offer?.destinationPreview?.label');
     expect(model).toContain('offer?.distanceToPickupMeters');
+    expect(model).toContain('offer?.routeDistanceMeters');
+    expect(model).toContain('offer?.routeDurationSeconds');
     expect(screen).not.toContain('offer.exactPickup');
     expect(card).not.toContain('exactPickup');
     expect(card).not.toContain('exactDestination');
-    expect(card).not.toContain('destination');
   });
 
   it('removes the old long commercial explanation cards', () => {
@@ -104,6 +111,7 @@ describe('block 17 compact timed offer contract', () => {
     expect(model).toContain('Distância carregando');
     expect(model).toContain('Tempo carregando');
     expect(model).toContain('Validada ao aceitar');
+    expect(model).toContain("'Sem taxa'");
     expect(model).toContain("type: 'unknown'");
     expect(screen).toContain('KNOWN_VEHICLE_TYPES.has(offer.vehicleType)');
     expect(screen).not.toContain("|| 'car'");

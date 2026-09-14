@@ -1,6 +1,7 @@
 // Incoming targeted ride offer (route "/ride-request").
-// Before acceptance only a generic/coarsened pickup region is shown. Acceptance,
-// refusal and expiry remain server-authoritative; this screen only presents safe data.
+// Before acceptance only coarse pickup/destination regions and route totals are
+// shown. Exact addresses remain protected. Acceptance, refusal and expiry stay
+// server-authoritative; this screen only presents safe data.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -108,6 +109,9 @@ export default function RideRequest() {
           vehicleType: nextOffer.vehicleType,
           hasPickupRegion: Boolean(nextOffer.pickupPreview?.label),
           hasPickupDistance: hasFiniteOfferNumber(nextOffer.distanceToPickupMeters),
+          hasDestinationRegion: Boolean(nextOffer.destinationPreview?.label),
+          hasRouteDistance: hasFiniteOfferNumber(nextOffer.routeDistanceMeters),
+          hasRouteDuration: hasFiniteOfferNumber(nextOffer.routeDurationSeconds),
           hasFare: hasFiniteOfferNumber(nextOffer.estimatedFareCentavos),
         });
       }
@@ -333,7 +337,7 @@ export default function RideRequest() {
               <Text style={styles.screenEyebrow}>NOVA CORRIDA</Text>
               <DriverTimedOfferCard view={compactOffer} />
               <Text style={styles.privacyCopy}>
-                O endereço exato e o destino permanecem protegidos até as etapas corretas da corrida.
+                Os endereços exatos são liberados somente após aceitar a corrida.
               </Text>
             </>
           ) : (
