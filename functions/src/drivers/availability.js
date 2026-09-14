@@ -9,6 +9,10 @@ const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateEnum, validateIdentifier } = require('../validation/validators');
 const { logInfo } = require('../logging/logger');
 const { evaluateRideEligibility, toMillis } = require('./eligibility');
+const {
+  MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
+  evaluateDriverBuildNumber,
+} = require('./appVersion');
 const rideC = require('../rides/constants');
 
 const AVAILABILITY_VALUES = Object.freeze(['online', 'offline']);
@@ -57,7 +61,7 @@ async function setDriverAvailability({ db, request, context, clock }) {
 
   const payload = assertShape(request?.data || {}, {
     required: ['availabilityStatus'],
-    optional: ['availabilitySessionId'],
+    optional: ['availabilitySessionId', 'clientBuildNumber', 'clientVersion'],
   });
   const desired = validateEnum(
     payload.availabilityStatus,
@@ -67,6 +71,23 @@ async function setDriverAvailability({ db, request, context, clock }) {
   const requestedSessionId = payload.availabilitySessionId == null
     ? null
     : validateIdentifier(payload.availabilitySessionId, 'availabilitySessionId');
+  const clientBuild = desired === 'online'
+    ? evaluateDriverBuildNumber(payload.clientBuildNumber)
+    : { supported: true, buildNumber: null };
+  const clientVersion = typeof payload.clientVersion === 'string'
+    ? payload.clientVersion.trim().slice(0, 32)
+    : null;
+
+  if (desired === 'online' && !clientBuild.supported) {
+    throw new AppError(ERROR_CODES.APP_UPDATE_REQUIRED, {
+      internalMessage: `driver ${driverId} uses unsupported app build ${String(payload.clientBuildNumber || 'missing')}`,
+      safeMetadata: {
+        reason: 'app_update_required',
+        minimumBuildNumber: MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
+      },
+    });
+  }
+
   const driverRef = db.collection(rideC.DRIVERS).doc(driverId);
   const nowMs = Number(clock.now());
 
@@ -116,9 +137,18 @@ async function setDriverAvailability({ db, request, context, clock }) {
       }
 
       if (hasReusableSession(driver, nowMs)) {
+        const versionUpdate = {
+          availabilityClientBuildNumber: clientBuild.buildNumber,
+          availabilityClientVersion: clientVersion,
+          availabilityClientSessionId: driver.availabilitySessionId,
+          availabilityClientUpdatedAtMs: nowMs,
+          availabilityClientUpdatedAt: ts(),
+          updatedAt: ts(),
+        };
+        tx.set(driverRef, versionUpdate, { merge: true });
         return {
           replay: true,
-          after: driver,
+          after: { ...driver, ...versionUpdate },
         };
       }
 
@@ -130,6 +160,11 @@ async function setDriverAvailability({ db, request, context, clock }) {
         availabilitySessionStartedAt: ts(),
         availabilityUpdatedAtMs: nowMs,
         availabilityUpdatedAt: ts(),
+        availabilityClientBuildNumber: clientBuild.buildNumber,
+        availabilityClientVersion: clientVersion,
+        availabilityClientSessionId: availabilitySessionId,
+        availabilityClientUpdatedAtMs: nowMs,
+        availabilityClientUpdatedAt: ts(),
         // A new work session must publish a new point before dispatch can use it.
         locationAvailabilitySessionId: null,
         updatedAt: ts(),
@@ -174,6 +209,9 @@ async function setDriverAvailability({ db, request, context, clock }) {
       availabilityUpdatedAtMs: nowMs,
       availabilityUpdatedAt: ts(),
       locationAvailabilitySessionId: null,
+      availabilityClientSessionId: null,
+      availabilityClientUpdatedAtMs: nowMs,
+      availabilityClientUpdatedAt: ts(),
       updatedAt: ts(),
     };
     tx.set(driverRef, update, { merge: true });
