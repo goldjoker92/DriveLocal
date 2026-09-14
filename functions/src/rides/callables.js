@@ -26,6 +26,7 @@ const {
 } = require('./safeViews');
 const { resolveRideDispute } = require('./disputeResolution');
 const { getAdminRideSummary, listAdminDisputedRides } = require('./adminReads');
+const { syncDriverPixKeyForRide } = require('../pix/driverPixSync');
 const C = require('./constants');
 
 const REGION = 'southamerica-east1';
@@ -48,36 +49,11 @@ async function cancelRideWithCompatibility({ db, request, context, clock }) {
   });
 }
 
-// Older driver profiles store Pix fields on drivers/{uid}, while the secure ride
-// lifecycle reads privateDriverData/{uid}. Migrate that already-authenticated
-// driver's data server-side before finishing so existing approved accounts can
-// complete a ride without weakening the payment destination checks.
+// Synchronize keys saved by older app versions before the server builds the
+// payment payload. The helper validates and never logs the raw key.
 async function finishRideWithPixMigration({ db, request, context, clock }) {
   const driverId = request?.auth?.uid;
-  if (driverId) {
-    const privateRef = db.collection(C.PRIVATE_DRIVER_DATA).doc(driverId);
-    const privateSnap = await privateRef.get();
-    const privateData = privateSnap.exists ? privateSnap.data() || {} : {};
-
-    if (!privateData.pixKey) {
-      const driverSnap = await db.collection(C.DRIVERS).doc(driverId).get();
-      const driver = driverSnap.exists ? driverSnap.data() || {} : {};
-      const legacyPixKey = typeof driver.pixKey === 'string' ? driver.pixKey.trim() : '';
-
-      if (legacyPixKey) {
-        await privateRef.set(
-          {
-            pixKey: legacyPixKey,
-            pixKeyType: driver.pixKeyType || null,
-            pixOwnerName: driver.pixOwnerName || driver.fullName || null,
-            migratedFromDriverProfileAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-    }
-  }
-
+  if (driverId) await syncDriverPixKeyForRide({ db, driverId });
   return lifecycle.finishRide({ db, request, context, clock });
 }
 

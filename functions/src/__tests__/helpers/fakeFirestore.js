@@ -59,6 +59,17 @@ function normalizeTestDocument(collectionName, docId, value) {
     out.email = `${docId}@test.drivelocal.local`;
   }
 
+  // Approved-driver fixtures created before direct Pix did not declare a key.
+  // Supply a deterministic TEST-only key, while preserving explicit null/invalid
+  // values so Pix failure tests remain meaningful.
+  if (
+    collectionName === 'drivers'
+    && !Object.prototype.hasOwnProperty.call(out, 'pixKey')
+  ) {
+    out.pixKeyType = 'E-mail';
+    out.pixKey = `${docId}@pix.test.drivelocal.local`;
+  }
+
   if (collectionName !== 'cityPublicConfig') return out;
 
   // An explicit boundaryGeoJson value (including null) is intentional and must

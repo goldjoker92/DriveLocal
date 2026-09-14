@@ -7,7 +7,7 @@
 // No mock payment result: the payment object comes from createDriverPixPayment.
 
 import { useEffect, useRef, useState } from 'react';
-import { View, Text, Platform } from 'react-native';
+import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import AppCard from './AppCard';
 import AppButton from './AppButton';
@@ -15,6 +15,7 @@ import { colors } from '../constants/colors';
 import { spacing, radius } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
 import { formatBRL } from '../utils/format';
+import { copyToClipboard } from '../utils/clipboard';
 import { getPaymentStatus, isFinalPaymentStatus } from '../services/paymentsService';
 
 const POLL_INTERVAL_MS = 5000;
@@ -39,6 +40,7 @@ export default function DriverPixPaymentSheet({
 }) {
   const [status, setStatus] = useState(payment ? payment.status : null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
   const timerRef = useRef(null);
 
   const localPaymentId = payment ? payment.localPaymentId : null;
@@ -46,6 +48,7 @@ export default function DriverPixPaymentSheet({
   useEffect(() => {
     setStatus(payment ? payment.status : null);
     setCopied(false);
+    setCopyError('');
   }, [payment?.localPaymentId, payment?.status]);
 
   useEffect(() => {
@@ -78,14 +81,11 @@ export default function DriverPixPaymentSheet({
 
   if (!payment) return null;
 
-  function onCopy() {
+  async function onCopy() {
     if (!payment.qrCode) return;
-    // Web: use the Clipboard API. Native: the code is selectable (long-press to
-    // copy) — no extra dependency required.
-    if (Platform.OS === 'web' && globalThis.navigator && globalThis.navigator.clipboard) {
-      globalThis.navigator.clipboard.writeText(payment.qrCode);
-    }
-    setCopied(true);
+    const didCopy = await copyToClipboard(payment.qrCode);
+    setCopied(didCopy);
+    setCopyError(didCopy ? '' : 'Não foi possível copiar. Pressione o código para copiar manualmente.');
   }
 
   const labels = { ...STATUS_LABEL, ...(statusLabels || {}) };
@@ -139,6 +139,9 @@ export default function DriverPixPaymentSheet({
         onPress={onCopy}
         disabled={!payment.qrCode}
       />
+      {copyError ? (
+        <Text style={[{ fontFamily, color: colors.danger }, typography.caption]}>{copyError}</Text>
+      ) : null}
 
       <Text style={[{ fontFamily, color: colors.textMuted, alignSelf: 'center' }, typography.small]}>
         {label}

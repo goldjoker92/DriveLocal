@@ -21,6 +21,7 @@ const { logInfo } = require('../logging/logger');
 const { writeAuditLog } = require('../audit/auditLog');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const { buildPixPayload } = require('../pix/pixBrCode');
+const { normalizePixKey } = require('../pix/pixKey');
 const { bestEffortRiskSignal } = require('../risk/riskEngine');
 const riskC = require('../risk/constants');
 const driverC = require('../drivers/constants');
@@ -239,20 +240,37 @@ async function finishRide({ db, request, context, clock }) {
       });
     }
 
-    const pixKey = pix.pixKey || driverProfile.pixKey || ride.driverPixKey;
-    const pixKeySource = pix.pixKey
-      ? 'private_driver_data'
+    const pixCandidate = pix.pixKey
+      ? {
+          key: pix.pixKey,
+          keyType: pix.pixKeyType || null,
+          source: 'private_driver_data',
+        }
       : driverProfile.pixKey
-        ? 'driver_profile_compat'
+        ? {
+            key: driverProfile.pixKey,
+            keyType: driverProfile.pixKeyType || null,
+            source: 'driver_profile_compat',
+          }
         : ride.driverPixKey
-          ? 'ride_snapshot_compat'
-          : 'missing';
-    if (!pixKey) {
-      throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, {
-        internalMessage: `no verified pix key for driver ${driverId}`,
-        safeMetadata: { pixKeySource },
+          ? {
+              key: ride.driverPixKey,
+              keyType: ride.driverPixKeyType || null,
+              source: 'ride_snapshot_compat',
+            }
+          : { key: null, keyType: null, source: 'missing' };
+    const pixKeySource = pixCandidate.source;
+    const normalizedPix = normalizePixKey(pixCandidate.key, pixCandidate.keyType);
+    if (!normalizedPix.valid) {
+      throw new AppError(ERROR_CODES.PIX_KEY_INVALID, {
+        internalMessage: `invalid Pix key for driver ${driverId}`,
+        safeMetadata: {
+          pixKeySource,
+          reason: normalizedPix.reasonCode || 'PIX_KEY_INVALID',
+        },
       });
     }
+    const pixKey = normalizedPix.key;
 
     const nowMs = clock.now();
     const finalFareCentavos = Number(ride.estimatedFareCentavos || 0);

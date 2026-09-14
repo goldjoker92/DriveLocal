@@ -29,6 +29,10 @@ function baseDriver() {
     availabilitySessionId: SESSION_ID,
     subscriptionActive: true,
     subscriptionExpiresAt: START_MS + 30 * 24 * 60 * 60 * 1000,
+    // A dispatchable production driver must have a structurally valid Pix key.
+    // Keep the location-lease simulation focused on location freshness.
+    pixKeyType: 'E-mail',
+    pixKey: 'driver_lease@pix.test.drivelocal.local',
     activeRideId: null,
   };
 }

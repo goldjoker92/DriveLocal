@@ -90,6 +90,12 @@ async function setDriverAvailability({ db, request, context, clock }) {
       }
 
       const eligibility = evaluateRideEligibility(driver, clock);
+      if (!eligibility.pixKeyValid) {
+        throw new AppError(ERROR_CODES.PIX_KEY_INVALID, {
+          internalMessage: `driver ${driverId} has no structurally valid Pix key`,
+          safeMetadata: { reason: eligibility.pixKeyReasonCode || 'PIX_KEY_INVALID' },
+        });
+      }
       if (!eligibility.canReceiveRides) {
         throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
           internalMessage: `driver ${driverId} cannot open work session`,
