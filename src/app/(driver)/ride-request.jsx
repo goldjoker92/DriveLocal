@@ -1,9 +1,18 @@
 // Incoming targeted ride offer (route "/ride-request").
-// Before acceptance only a generic/coarsened pickup region is shown. Acceptance,
-// refusal and expiry remain server-authoritative; this screen only presents safe data.
+// Before acceptance only coarse pickup/destination regions and route totals are
+// shown. Exact addresses remain protected. Acceptance, refusal and expiry stay
+// server-authoritative; this screen only presents safe data.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
@@ -41,8 +50,16 @@ export default function RideRequest() {
   const [acceptError, setAcceptError] = useState('');
   const [accepted, setAccepted] = useState(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [offerViewportHeight, setOfferViewportHeight] = useState(0);
+  const [offerContentHeight, setOfferContentHeight] = useState(0);
+  const [forceCompactLayout, setForceCompactLayout] = useState(false);
+  const { height: windowHeight, fontScale } = useWindowDimensions();
   const lastLoggedOfferId = useRef(null);
   const lastPresentedOffer = useRef(null);
+
+  useEffect(() => {
+    setForceCompactLayout(false);
+  }, [windowHeight, fontScale]);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -108,6 +125,9 @@ export default function RideRequest() {
           vehicleType: nextOffer.vehicleType,
           hasPickupRegion: Boolean(nextOffer.pickupPreview?.label),
           hasPickupDistance: hasFiniteOfferNumber(nextOffer.distanceToPickupMeters),
+          hasDestinationRegion: Boolean(nextOffer.destinationPreview?.label),
+          hasRouteDistance: hasFiniteOfferNumber(nextOffer.routeDistanceMeters),
+          hasRouteDuration: hasFiniteOfferNumber(nextOffer.routeDurationSeconds),
           hasFare: hasFiniteOfferNumber(nextOffer.estimatedFareCentavos),
         });
       }
@@ -283,6 +303,11 @@ export default function RideRequest() {
     commissionStatus: driverContextStatus,
   }), [offer, secondsLeft, presentation?.commissionPercentLabel, driverContextStatus]);
 
+  const compactOfferLayout = windowHeight < 760 || fontScale > 1.1 || forceCompactLayout;
+  const offerContentOverflows = offerViewportHeight > 0
+    && offerContentHeight > offerViewportHeight + 1;
+  const offerScrollEnabled = compactOfferLayout && offerContentOverflows;
+
   const acceptDisabled = accepting
     || declining
     || secondsLeft <= 0
@@ -294,8 +319,26 @@ export default function RideRequest() {
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.screen}>
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            compactOfferLayout && styles.contentCompact,
+          ]}
           showsVerticalScrollIndicator={false}
+          scrollEnabled={accepted ? true : offerScrollEnabled}
+          onLayout={(event) => {
+            setOfferViewportHeight(Math.round(event.nativeEvent.layout.height));
+          }}
+          onContentSizeChange={(_, height) => {
+            const nextHeight = Math.ceil(height);
+            setOfferContentHeight(nextHeight);
+            if (
+              !compactOfferLayout
+              && offerViewportHeight > 0
+              && nextHeight > offerViewportHeight + 1
+            ) {
+              setForceCompactLayout(true);
+            }
+          }}
         >
           {accepted ? (
             <>
@@ -331,9 +374,9 @@ export default function RideRequest() {
           ) : compactOffer.visible ? (
             <>
               <Text style={styles.screenEyebrow}>NOVA CORRIDA</Text>
-              <DriverTimedOfferCard view={compactOffer} />
-              <Text style={styles.privacyCopy}>
-                O endereço exato e o destino permanecem protegidos até as etapas corretas da corrida.
+              <DriverTimedOfferCard view={compactOffer} compact={compactOfferLayout} />
+              <Text style={[styles.privacyCopy, compactOfferLayout && styles.privacyCopyCompact]}>
+                Os endereços exatos são liberados somente após aceitar a corrida.
               </Text>
             </>
           ) : (
@@ -346,7 +389,7 @@ export default function RideRequest() {
         </ScrollView>
 
         {!accepted && compactOffer.visible ? (
-          <View style={styles.actionDock}>
+          <View style={[styles.actionDock, compactOfferLayout && styles.actionDockCompact]}>
             <AnimatedAcceptRideButton
               title={compactOffer.acceptTitle}
               onPress={handleAccept}
@@ -360,6 +403,7 @@ export default function RideRequest() {
               disabled={accepting || declining}
               style={({ pressed }) => [
                 styles.declineButton,
+                compactOfferLayout && styles.declineButtonCompact,
                 pressed && styles.declinePressed,
                 (accepting || declining) && styles.disabled,
               ]}
@@ -384,6 +428,13 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
     gap: spacing.md,
   },
+  contentCompact: {
+    justifyContent: 'flex-start',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
   screenEyebrow: {
     fontFamily,
     color: colors.primary,
@@ -400,6 +451,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     textAlign: 'center',
   },
+  privacyCopyCompact: { lineHeight: 14 },
   actionDock: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -409,6 +461,12 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  actionDockCompact: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    gap: spacing.xs,
+  },
   declineButton: {
     minHeight: 42,
     flexDirection: 'row',
@@ -417,6 +475,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderRadius: radius.md,
   },
+  declineButtonCompact: { minHeight: 36 },
   declinePressed: { backgroundColor: colors.primaryTint },
   declineText: {
     fontFamily,

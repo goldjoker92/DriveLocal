@@ -5,7 +5,12 @@
 // aggregate rejection diagnostics (never UIDs, coordinates or profile data).
 
 const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
+const {
+  driverHasFreshSupportedBuild,
+  resolveDriverBuildPolicy,
+} = require('../drivers/appVersion');
 const { haversineMeters } = require('../geo/geo');
+const { validateAndNormalizePixKey } = require('../pix/pixKey');
 const C = require('./constants');
 
 // Kept as a compatibility export for analytics/tests. The fallback is now bounded
@@ -60,6 +65,8 @@ function emptyDiagnostics(radius) {
     rejectedBusy: 0,
     rejectedMissingWorkSession: 0,
     rejectedStaleWorkSession: 0,
+    rejectedUnsupportedAppBuild: 0,
+    rejectedInvalidPixKey: 0,
     // Subset of rejectedStaleWorkSession with no sign of life for far longer:
     // the only sessions the caller is allowed to close.
     abandonedWorkSessionCount: 0,
@@ -120,10 +127,13 @@ async function queryCandidateDrivers({ db, serviceAreaId, vehicleType, maxCandid
  * @param {{pickup:object, searchRadiusMeters:number, clock:{now:()=>number}}} args
  * @returns {{eligible:Array<{driverId:string,data:object,distanceToPickupMeters:number,locationFreshness:string,locationAgeMs:number,availabilitySessionId:string}>, diagnostics:object, abandonedWorkSessionDriverIds:Array<string>}}
  */
-function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadiusMeters, clock }) {
+function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadiusMeters, clock, driverBuildPolicy }) {
   const nowMs = Number(clock.now());
   const radius = Number(searchRadiusMeters) > 0 ? Number(searchRadiusMeters) : C.DEFAULT_SEARCH_RADIUS_METERS;
   const diagnostics = emptyDiagnostics(radius);
+  const buildPolicy = resolveDriverBuildPolicy(driverBuildPolicy || {});
+  diagnostics.minimumDriverBuildNumber = buildPolicy.minimumBuildNumber;
+  diagnostics.minimumDriverBuildEnforced = buildPolicy.enforced;
   const eligible = [];
   // Abandoned work sessions: still flagged online, with no published point for
   // far longer than the lease, so the app is gone (killed, swiped, battery
@@ -133,6 +143,7 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
   // becomes dispatchable again by himself. Collected here, never written here:
   // this selector stays pure.
   const abandonedWorkSessionDriverIds = [];
+  const unsupportedAppBuildDriverIds = [];
 
   for (const c of candidates || []) {
     diagnostics.candidateCount += 1;
@@ -160,6 +171,25 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
         abandonedWorkSessionDriverIds.push(c.id);
       }
       continue;
+    }
+
+    if (buildPolicy.enforced && !driverHasFreshSupportedBuild(
+      d,
+      nowMs,
+      C.AVAILABILITY_SESSION_MAX_AGE_MS,
+      buildPolicy.minimumBuildNumber
+    )) {
+      diagnostics.rejectedUnsupportedAppBuild += 1;
+      unsupportedAppBuildDriverIds.push(c.id);
+      continue;
+    }
+
+    if (buildPolicy.enforced && buildPolicy.minimumBuildNumber >= 17) {
+      const pixKey = validateAndNormalizePixKey(d.pixKey, d.pixKeyType);
+      if (!pixKey.valid) {
+        diagnostics.rejectedInvalidPixKey += 1;
+        continue;
+      }
     }
 
     const evalResult = evaluateRideEligibility(d, clock);
@@ -214,7 +244,12 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
 
   diagnostics.eligibleCount = eligible.length;
   diagnostics.rejectedCount = diagnostics.candidateCount - diagnostics.eligibleCount;
-  return { eligible, diagnostics, abandonedWorkSessionDriverIds };
+  return {
+    eligible,
+    diagnostics,
+    abandonedWorkSessionDriverIds,
+    unsupportedAppBuildDriverIds,
+  };
 }
 
 function selectEligibleDrivers(candidates, args) {

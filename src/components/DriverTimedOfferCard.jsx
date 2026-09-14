@@ -4,9 +4,9 @@ import { colors } from '../constants/colors';
 import { radius, spacing } from '../constants/spacing';
 import { fontFamily, typography } from '../constants/typography';
 
-function SummaryRow({ label, value, emphasized = false }) {
+function SummaryRow({ label, value, emphasized = false, compact = false }) {
   return (
-    <View style={styles.summaryRow}>
+    <View style={[styles.summaryRow, compact && styles.summaryRowCompact]}>
       <Text style={styles.summaryLabel}>{label}</Text>
       <Text style={[styles.summaryValue, emphasized && styles.summaryValueEmphasized]}>
         {value}
@@ -15,11 +15,11 @@ function SummaryRow({ label, value, emphasized = false }) {
   );
 }
 
-export default function DriverTimedOfferCard({ view }) {
+export default function DriverTimedOfferCard({ view, compact = false }) {
   if (!view?.visible) return null;
 
   return (
-    <AppCard style={styles.card}>
+    <AppCard style={[styles.card, compact && styles.cardCompact]}>
       <View style={styles.topRow}>
         <View style={styles.vehicleRow}>
           <Text style={styles.vehicleEmoji}>{view.vehicle.emoji}</Text>
@@ -32,25 +32,64 @@ export default function DriverTimedOfferCard({ view }) {
         </View>
       </View>
 
-      <View style={styles.pickupSection}>
-        <Text style={styles.eyebrow}>REGIÃO DO EMBARQUE</Text>
-        <Text style={styles.pickupRegion}>{view.pickupRegionLabel}</Text>
-        <Text style={styles.pickupMetrics}>
-          {`${view.distanceLabel}  •  ${view.etaLabel}`}
-        </Text>
+      <View style={styles.routeSection}>
+        <View style={styles.routeRail} accessibilityElementsHidden>
+          <View style={styles.pickupMarker} />
+          <View style={[styles.routeLine, compact && styles.routeLineCompact]} />
+          <View style={styles.destinationMarker} />
+        </View>
+        <View style={[styles.routeDetails, compact && styles.routeDetailsCompact]}>
+          <View style={[styles.routeStop, compact && styles.routeStopCompact]}>
+            <Text style={styles.eyebrow}>EMBARQUE</Text>
+            <Text
+              style={styles.routeRegion}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+              numberOfLines={1}
+            >{view.pickupRegionLabel}</Text>
+            <Text
+              style={styles.routeMetrics}
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
+              numberOfLines={1}
+            >
+              {`${view.distanceLabel}  •  ${view.etaLabel}`}
+            </Text>
+          </View>
+          <View style={[styles.routeStop, compact && styles.routeStopCompact]}>
+            <Text style={styles.eyebrow}>DESTINO</Text>
+            <Text
+              style={styles.routeRegion}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+              numberOfLines={1}
+            >{view.destinationRegionLabel}</Text>
+            <Text
+              style={styles.routeMetrics}
+              adjustsFontSizeToFit
+              minimumFontScale={0.82}
+              numberOfLines={1}
+            >
+              {`${view.routeDistanceLabel}  •  ${view.routeDurationLabel}`}
+            </Text>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.receiveSection}>
+      <View style={[styles.receiveSection, compact && styles.receiveSectionCompact]}>
         <Text style={styles.receiveLabel}>VOCÊ RECEBE</Text>
-        <Text style={styles.receiveValue} adjustsFontSizeToFit numberOfLines={1}>
+        <Text style={[styles.receiveValue, compact && styles.receiveValueCompact]}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+          numberOfLines={1}>
           {view.driverReceivesLabel}
         </Text>
       </View>
 
-      <View style={styles.summary}>
-        <SummaryRow label="Valor da corrida" value={view.fareLabel} />
-        <SummaryRow label="Taxa da plataforma" value={view.commissionLabel} />
-        <SummaryRow label="Pagamento" value={view.paymentLabel} emphasized />
+      <View style={[styles.summary, compact && styles.summaryCompact]}>
+        <SummaryRow compact={compact} label="Valor da corrida" value={view.fareLabel} />
+        <SummaryRow compact={compact} label="Taxa da plataforma" value={view.commissionLabel} />
+        <SummaryRow compact={compact} label="Pagamento" value={view.paymentLabel} emphasized />
       </View>
     </AppCard>
   );
@@ -62,6 +101,10 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     backgroundColor: colors.background,
     borderColor: colors.primary,
+  },
+  cardCompact: {
+    gap: spacing.md,
+    padding: spacing.md,
   },
   topRow: {
     flexDirection: 'row',
@@ -99,19 +142,55 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   countdownValueUrgent: { color: colors.danger },
-  pickupSection: { gap: spacing.xs },
+  routeSection: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  routeRail: {
+    width: 16,
+    alignItems: 'center',
+    paddingVertical: 5,
+  },
+  pickupMarker: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
+  },
+  routeLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 48,
+    backgroundColor: colors.border,
+  },
+  destinationMarker: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: colors.primary,
+  },
+  routeDetails: {
+    flex: 1,
+    gap: spacing.lg,
+  },
+  routeDetailsCompact: { gap: spacing.md },
+  routeStop: { gap: spacing.xs },
+  routeStopCompact: { gap: 2 },
+  routeLineCompact: { minHeight: 36 },
   eyebrow: {
     fontFamily,
     color: colors.textFaint,
     ...typography.caption,
     letterSpacing: 0.8,
   },
-  pickupRegion: {
+  routeRegion: {
     fontFamily,
     color: colors.text,
     ...typography.h3,
   },
-  pickupMetrics: {
+  routeMetrics: {
     fontFamily,
     color: colors.textMuted,
     ...typography.small,
@@ -122,6 +201,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radius.lg,
     backgroundColor: colors.successBg,
+  },
+  receiveSectionCompact: {
+    paddingVertical: spacing.sm,
   },
   receiveLabel: {
     fontFamily,
@@ -139,11 +221,19 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     textAlign: 'center',
   },
+  receiveValueCompact: {
+    fontSize: 28,
+    lineHeight: 32,
+  },
   summary: {
     gap: spacing.sm,
     paddingTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  summaryCompact: {
+    gap: spacing.xs,
+    paddingTop: spacing.sm,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -151,6 +241,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.md,
   },
+  summaryRowCompact: { minHeight: 22 },
   summaryLabel: {
     flex: 1,
     fontFamily,

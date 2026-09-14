@@ -13,7 +13,11 @@ function offered(overrides = {}) {
     vehicleType: 'moto',
     estimatedFareCentavos: 826,
     distanceToPickupMeters: 800,
-    pickupPreview: { label: 'Centro' },
+    pickupPreview: { label: 'Centro · Horizonte - CE' },
+    destinationPreview: { label: 'Parque Industrial · Horizonte - CE' },
+    routeDistanceMeters: 8400,
+    routeDurationSeconds: 1080,
+    commissionDisplayBps: 0,
     ...overrides,
   };
 }
@@ -31,13 +35,16 @@ describe('compact timed driver offer', () => {
       secondsLeft: 36,
       urgent: false,
       vehicle: { type: 'moto', emoji: '🏍', label: 'MOTO' },
-      pickupRegionLabel: 'Centro',
+      pickupRegionLabel: 'Centro · Horizonte - CE',
       distanceLabel: '0,8 km',
       etaLabel: '2 min',
+      destinationRegionLabel: 'Parque Industrial · Horizonte - CE',
+      routeDistanceLabel: '8,4 km',
+      routeDurationLabel: '18 min',
       fareCentavos: 826,
       fareLabel: 'R$ 8,26',
       driverReceivesLabel: 'R$ 8,26',
-      commissionLabel: '0%',
+      commissionLabel: 'Sem taxa',
       paymentLabel: 'Pix direto',
       acceptTitle: 'ACEITAR — R$ 8,26',
     });
@@ -57,6 +64,10 @@ describe('compact timed driver offer', () => {
         estimatedFareCentavos: null,
         distanceToPickupMeters: null,
         pickupPreview: null,
+        destinationPreview: null,
+        routeDistanceMeters: null,
+        routeDurationSeconds: null,
+        commissionDisplayBps: null,
       }),
       secondsLeft: 20,
     });
@@ -65,15 +76,29 @@ describe('compact timed driver offer', () => {
     expect(view.pickupRegionLabel).toBe('Região do embarque');
     expect(view.distanceLabel).toBe('Distância carregando');
     expect(view.etaLabel).toBe('Tempo carregando');
+    expect(view.destinationRegionLabel).toBe('Região do destino');
+    expect(view.routeDistanceLabel).toBe('Distância da corrida carregando');
+    expect(view.routeDurationLabel).toBe('Tempo da corrida carregando');
     expect(view.fareCentavos).toBeNull();
     expect(view.fareLabel).toBe('Carregando valor…');
     expect(view.commissionLabel).toBe('Carregando…');
     expect(view.acceptTitle).toBe('ACEITAR');
   });
 
+  it('uses the server-projected platform fee without waiting for the profile', () => {
+    expect(deriveDriverTimedOffer({
+      offer: offered({ commissionDisplayBps: 1200 }),
+      commissionStatus: 'loading',
+    }).commissionLabel).toBe('12%');
+    expect(deriveDriverTimedOffer({
+      offer: offered({ commissionDisplayBps: 1500 }),
+      commissionStatus: 'loading',
+    }).commissionLabel).toBe('15%');
+  });
+
   it('shows a server-validation message when commercial context failed', () => {
     expect(deriveDriverTimedOffer({
-      offer: offered(),
+      offer: offered({ commissionDisplayBps: null }),
       commissionStatus: 'failed',
     }).commissionLabel).toBe('Validada ao aceitar');
   });

@@ -81,6 +81,9 @@ service cloud.firestore {
         'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt',
         'locationAvailabilitySessionId',
         'availabilityUpdatedAtMs', 'availabilityUpdatedAt',
+        'availabilityClientBuildNumber', 'availabilityClientVersion',
+        'availabilityClientSessionId',
+        'availabilityClientUpdatedAtMs', 'availabilityClientUpdatedAt',
         'updatedAt'
       ];
     }
@@ -247,6 +250,14 @@ service cloud.firestore {
       ];
     }
 
+    function driverBuildProofFields() {
+      return [
+        'availabilityClientBuildNumber', 'availabilityClientVersion',
+        'availabilityClientSessionId',
+        'availabilityClientUpdatedAtMs', 'availabilityClientUpdatedAt'
+      ];
+    }
+
     // A driver may renew his own lease while the session is not abandoned. This
     // window is 30 min, NOT the 7 min dispatch lease: dispatch skipping a driver
     // whose last point is late is temporary, but refusing his next point would
@@ -258,8 +269,20 @@ service cloud.firestore {
     function driverOperationalUpdateValid() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let locationChanged = changed.hasAny(driverLocationFields());
+      let buildProofChanged = changed.hasAny(driverBuildProofFields());
 
-      return (!locationChanged || (
+      return (!buildProofChanged || (
+          request.resource.data.keys().hasAll(driverBuildProofFields()) &&
+          request.resource.data.availabilityClientBuildNumber is int &&
+          request.resource.data.availabilityClientBuildNumber > 0 &&
+          request.resource.data.availabilityClientVersion is string &&
+          request.resource.data.availabilityClientVersion.size() > 0 &&
+          request.resource.data.availabilityClientVersion.size() <= 32 &&
+          request.resource.data.availabilityClientSessionId == resource.data.availabilitySessionId &&
+          request.resource.data.availabilityClientUpdatedAtMs is int &&
+          request.resource.data.availabilityClientUpdatedAt == request.time
+        )) &&
+        (!locationChanged || (
           resource.data.availabilityStatus == 'online' &&
           resource.data.availabilitySessionId is string &&
           resource.data.availabilitySessionId.size() >= 16 &&

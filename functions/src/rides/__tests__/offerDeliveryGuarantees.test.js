@@ -13,6 +13,8 @@
 const C = require('../constants');
 const {
   createTargetedOffers,
+  destinationPreview,
+  pickupPreview,
   scheduleOfferExpiry,
 } = require('../offers');
 
@@ -62,7 +64,18 @@ function ride(overrides = {}) {
     rideId: 'ride_lot2',
     serviceAreaId: C.DEFAULT_SERVICE_AREA_ID,
     vehicleType: 'moto',
-    pickup: { lat: -4.0999, lng: -38.4954 },
+    pickup: {
+      lat: -4.0999,
+      lng: -38.4954,
+      label: 'Rua Baturité, 45 - Centro, Horizonte - CE, 62880-000, Brasil',
+    },
+    destination: {
+      lat: -4.112,
+      lng: -38.47,
+      label: 'Avenida Presidente Castelo Branco, 500 - Parque Industrial, Horizonte - CE, Brasil',
+    },
+    routeDistanceMeters: 8400,
+    routeDurationSeconds: 1080,
     estimatedFareCentavos: 900,
     estimatedCommissionCentavos: 0,
     ...overrides,
@@ -109,6 +122,33 @@ describe('offer wave delivery guarantees', () => {
     expect(db._batches.every((b) => b.committed)).toBe(true);
     expect(db._batches[0].ops).toHaveLength(12);
     expect(db._batches[1].ops).toHaveLength(12);
+
+    const [, firstOffer] = entries(db, `${C.DRIVER_OFFERS}/`)[0];
+    expect(firstOffer.pickupPreview.label).toBe('Centro · Horizonte - CE');
+    expect(firstOffer.destinationPreview).toEqual({
+      label: 'Parque Industrial · Horizonte - CE',
+    });
+    expect(firstOffer.routeDistanceMeters).toBe(8400);
+    expect(firstOffer.routeDurationSeconds).toBe(1080);
+    expect(firstOffer.destinationPreview).not.toHaveProperty('lat');
+    expect(firstOffer.destinationPreview).not.toHaveProperty('lng');
+  });
+
+  it('removes street and number from pre-acceptance route previews', () => {
+    expect(pickupPreview({
+      lat: -4.1,
+      lng: -38.49,
+      label: 'Rua Baturité, 45 - Centro, Horizonte - CE, 62880-000, Brasil',
+    })).toMatchObject({
+      label: 'Centro · Horizonte - CE',
+    });
+    expect(destinationPreview({
+      lat: -4.11,
+      lng: -38.47,
+      label: 'Avenida Central, 500 - Parque Industrial, Horizonte - CE, Brasil',
+    })).toEqual({
+      label: 'Parque Industrial · Horizonte - CE',
+    });
   });
 
   it('still notifies every driver when the expiry task cannot be enqueued', async () => {

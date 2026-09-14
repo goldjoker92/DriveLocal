@@ -91,6 +91,7 @@ async function sweepSearchingRides({ db, nowMs, context, clock }) {
         ),
         searchRadiusMeters: svc.searchRadiusMeters,
         maxCandidates: svc.maxCandidates,
+        driverBuildPolicy: svc.driverBuildPolicy,
         context,
         clock,
       });

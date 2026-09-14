@@ -122,7 +122,53 @@ function normalizePixKey(value, declaredType) {
   return valid(randomKey, keyType);
 }
 
+const PIX_KEY_TYPE = Object.freeze({
+  CPF: 'CPF',
+  PHONE: 'PHONE',
+  EMAIL: 'EMAIL',
+  EVP: 'EVP',
+});
+
+const LEGACY_TYPE_BY_INTERNAL = Object.freeze({
+  [PIX_KEY_TYPES.CPF]: PIX_KEY_TYPE.CPF,
+  [PIX_KEY_TYPES.PHONE]: PIX_KEY_TYPE.PHONE,
+  [PIX_KEY_TYPES.EMAIL]: PIX_KEY_TYPE.EMAIL,
+  [PIX_KEY_TYPES.RANDOM]: PIX_KEY_TYPE.EVP,
+});
+
+function canonicalPixKeyType(value, key = '') {
+  const internalType = resolvePixKeyType(value, key);
+  return internalType ? LEGACY_TYPE_BY_INTERNAL[internalType] : null;
+}
+
+function validateAndNormalizePixKey(value, declaredType) {
+  const normalized = normalizePixKey(value, declaredType);
+  const reasonMap = {
+    PIX_KEY_EMPTY: 'missing',
+    PIX_KEY_TYPE_INVALID: 'unknown_type',
+    PIX_KEY_CPF_INVALID: 'invalid_cpf',
+    PIX_KEY_PHONE_INVALID: 'invalid_phone',
+    PIX_KEY_EMAIL_INVALID: 'invalid_email',
+    PIX_KEY_RANDOM_INVALID: 'invalid_evp',
+  };
+
+  return {
+    valid: normalized.valid,
+    value: normalized.valid ? normalized.key : String(value || '').trim(),
+    type: normalized.keyType
+      ? LEGACY_TYPE_BY_INTERNAL[normalized.keyType]
+      : canonicalPixKeyType(declaredType, value),
+    reason: normalized.valid
+      ? null
+      : (reasonMap[normalized.reasonCode] || 'invalid'),
+  };
+}
+
 module.exports = {
+  PIX_KEY_TYPE,
+  canonicalPixKeyType,
+  validateAndNormalizePixKey,
+  validCpfDigits: isValidCpfDigits,
   PIX_KEY_TYPES,
   DISPLAY_TYPES,
   resolvePixKeyType,

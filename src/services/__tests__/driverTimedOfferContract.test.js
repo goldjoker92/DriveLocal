@@ -17,15 +17,20 @@ describe('block 17 compact timed offer contract', () => {
     expect(card).toContain('view.driverReceivesLabel');
     expect(card).toContain('view.distanceLabel');
     expect(card).toContain('view.etaLabel');
+    expect(card).toContain('view.destinationRegionLabel');
+    expect(card).toContain('view.routeDistanceLabel');
+    expect(card).toContain('view.routeDurationLabel');
     expect(card).toContain('view.vehicle.label');
     expect(card).toContain('label="Taxa da plataforma"');
     expect(card).toContain('label="Pagamento"');
 
     const countdownIndex = card.indexOf('view.secondsLeft');
+    const destinationIndex = card.indexOf('DESTINO');
     const receiveIndex = card.indexOf('VOCÊ RECEBE');
-    const summaryIndex = card.indexOf('<View style={styles.summary}>');
+    const summaryIndex = card.indexOf('styles.summary, compact && styles.summaryCompact');
     expect(countdownIndex).toBeGreaterThan(-1);
-    expect(receiveIndex).toBeGreaterThan(countdownIndex);
+    expect(destinationIndex).toBeGreaterThan(countdownIndex);
+    expect(receiveIndex).toBeGreaterThan(destinationIndex);
     expect(summaryIndex).toBeGreaterThan(receiveIndex);
   });
 
@@ -41,6 +46,22 @@ describe('block 17 compact timed offer contract', () => {
     expect(screen).toContain('accessibilityLabel="Recusar corrida"');
     expect(button).toContain("title = 'ACEITAR'");
     expect(button).toContain("const visibleTitle = loading ? 'ACEITANDO…' : title");
+  });
+
+  it('compacts the card first and enables scrolling only as an overflow safety net', () => {
+    const screen = source('src/app/(driver)/ride-request.jsx');
+    const card = source('src/components/DriverTimedOfferCard.jsx');
+
+    expect(screen).toContain('useWindowDimensions');
+    expect(screen).toContain('windowHeight < 760 || fontScale > 1.1');
+    expect(screen).toContain('onContentSizeChange');
+    expect(screen).toContain('setForceCompactLayout(true)');
+    expect(screen).toContain('scrollEnabled={accepted ? true : offerScrollEnabled}');
+    expect(screen).toContain('compact={compactOfferLayout}');
+    expect(card).toContain('compact = false');
+    expect(card).toContain('compact && styles.cardCompact');
+    expect(card).toContain('minimumFontScale={0.78}');
+    expect(card).toContain('numberOfLines={1}');
   });
 
   it('preserves the real countdown and server-authoritative lifecycle actions', () => {
@@ -69,17 +90,19 @@ describe('block 17 compact timed offer contract', () => {
     expect(notifications).not.toContain('dismissAllNotificationsAsync');
   });
 
-  it('uses only coarse pickup data before acceptance', () => {
+  it('uses only coarse route data before acceptance', () => {
     const screen = source('src/app/(driver)/ride-request.jsx');
     const card = source('src/components/DriverTimedOfferCard.jsx');
     const model = source('src/utils/driverTimedOffer.js');
 
     expect(model).toContain('offer?.pickupPreview?.label');
+    expect(model).toContain('offer?.destinationPreview?.label');
     expect(model).toContain('offer?.distanceToPickupMeters');
+    expect(model).toContain('offer?.routeDistanceMeters');
+    expect(model).toContain('offer?.routeDurationSeconds');
     expect(screen).not.toContain('offer.exactPickup');
     expect(card).not.toContain('exactPickup');
     expect(card).not.toContain('exactDestination');
-    expect(card).not.toContain('destination');
   });
 
   it('removes the old long commercial explanation cards', () => {
@@ -104,6 +127,7 @@ describe('block 17 compact timed offer contract', () => {
     expect(model).toContain('Distância carregando');
     expect(model).toContain('Tempo carregando');
     expect(model).toContain('Validada ao aceitar');
+    expect(model).toContain("'Sem taxa'");
     expect(model).toContain("type: 'unknown'");
     expect(screen).toContain('KNOWN_VEHICLE_TYPES.has(offer.vehicleType)');
     expect(screen).not.toContain("|| 'car'");

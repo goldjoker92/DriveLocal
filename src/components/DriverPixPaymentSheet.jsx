@@ -7,7 +7,7 @@
 // No mock payment result: the payment object comes from createDriverPixPayment.
 
 import { useEffect, useRef, useState } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, useWindowDimensions } from 'react-native';
 import { Image } from 'expo-image';
 import AppCard from './AppCard';
 import AppButton from './AppButton';
@@ -15,8 +15,9 @@ import { colors } from '../constants/colors';
 import { spacing, radius } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
 import { formatBRL } from '../utils/format';
-import { copyToClipboard } from '../utils/clipboard';
 import { getPaymentStatus, isFinalPaymentStatus } from '../services/paymentsService';
+import { copyToClipboard } from '../utils/clipboard';
+import useTemporaryMaxBrightness from '../hooks/useTemporaryMaxBrightness';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -42,8 +43,11 @@ export default function DriverPixPaymentSheet({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
   const timerRef = useRef(null);
+  const { width } = useWindowDimensions();
 
   const localPaymentId = payment ? payment.localPaymentId : null;
+  const qrSize = Math.min(260, Math.max(180, width - (spacing.lg * 5)));
+  useTemporaryMaxBrightness(Boolean(payment?.qrCodeBase64));
 
   useEffect(() => {
     setStatus(payment ? payment.status : null);
@@ -83,9 +87,11 @@ export default function DriverPixPaymentSheet({
 
   async function onCopy() {
     if (!payment.qrCode) return;
-    const didCopy = await copyToClipboard(payment.qrCode);
-    setCopied(didCopy);
-    setCopyError(didCopy ? '' : 'Não foi possível copiar. Pressione o código para copiar manualmente.');
+    const copiedSuccessfully = await copyToClipboard(payment.qrCode);
+    setCopied(copiedSuccessfully);
+    setCopyError(copiedSuccessfully
+      ? ''
+      : 'Não foi possível copiar. Pressione o código e escolha Copiar.');
   }
 
   const labels = { ...STATUS_LABEL, ...(statusLabels || {}) };
@@ -100,11 +106,13 @@ export default function DriverPixPaymentSheet({
       </Text>
 
       {payment.qrCodeBase64 ? (
-        <Image
-          style={{ alignSelf: 'center', width: 180, height: 180, borderRadius: radius.md }}
-          source={{ uri: `data:image/png;base64,${payment.qrCodeBase64}` }}
-          contentFit="contain"
-        />
+        <View style={{ alignSelf: 'center', padding: spacing.md, backgroundColor: '#FFFFFF' }}>
+          <Image
+            style={{ width: qrSize, height: qrSize, borderRadius: radius.md }}
+            source={{ uri: `data:image/png;base64,${payment.qrCodeBase64}` }}
+            contentFit="contain"
+          />
+        </View>
       ) : (
         <View
           style={{
@@ -126,12 +134,19 @@ export default function DriverPixPaymentSheet({
       )}
 
       {payment.qrCode ? (
-        <Text
-          selectable
-          style={[{ fontFamily, color: colors.textMuted }, typography.caption]}
+        <View
+          style={{
+            padding: spacing.sm,
+            borderRadius: radius.md,
+            backgroundColor: colors.primaryTint,
+            borderWidth: 1,
+            borderColor: colors.border,
+          }}
         >
-          {payment.qrCode}
-        </Text>
+          <Text selectable style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+            {payment.qrCode}
+          </Text>
+        </View>
       ) : null}
 
       <AppButton
@@ -140,7 +155,7 @@ export default function DriverPixPaymentSheet({
         disabled={!payment.qrCode}
       />
       {copyError ? (
-        <Text style={[{ fontFamily, color: colors.danger }, typography.caption]}>{copyError}</Text>
+        <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>{copyError}</Text>
       ) : null}
 
       <Text style={[{ fontFamily, color: colors.textMuted, alignSelf: 'center' }, typography.small]}>

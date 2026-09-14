@@ -6,6 +6,7 @@
 const crypto = require('crypto');
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { pointInServiceArea } = require('../geo/geo');
+const { resolveDriverBuildPolicy } = require('../drivers/appVersion');
 const { validateBoundaryArtifact } = require('../geo/boundaryArtifact');
 const C = require('./constants');
 
@@ -160,6 +161,7 @@ async function validateServiceArea({ db, serviceAreaId, vehicleType, pickup, des
     offerTtlSeconds: policy.offerTtlSeconds,
     searchRadiusMeters: policy.searchRadiusMeters,
     maxCandidates: policy.maxCandidates,
+    driverBuildPolicy: resolveDriverBuildPolicy(cfg),
   };
 }
 

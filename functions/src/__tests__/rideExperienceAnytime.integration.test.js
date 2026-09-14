@@ -125,9 +125,15 @@ describe('any-hour moto customer experience', () => {
 
     const offerId = `${rideId}_${DRIVER}`;
     const offered = db._store.get(`${C.DRIVER_OFFERS}/${offerId}`);
-    expect(offered.pickupPreview.label).toBe('Região do embarque');
+    expect(offered.pickupPreview.label).toBe('Zumbi · Horizonte - CE');
+    expect(offered.destinationPreview.label).toBe('Centro · Horizonte - CE');
+    expect(offered.routeDistanceMeters).toBe(4000);
+    expect(offered.routeDurationSeconds).toBe(720);
     expect(offered.availabilitySessionId).toBe(AVAILABILITY_SESSION);
     expect(JSON.stringify(offered.pickupPreview)).not.toContain('José Sabino');
+    expect(JSON.stringify(offered.destinationPreview)).not.toContain('Maria Conrado');
+    expect(offered.destinationPreview.lat).toBeUndefined();
+    expect(offered.destinationPreview.lng).toBeUndefined();
     expect(offered.exactPickup).toBeUndefined();
 
     const offerEvent = db._store.get(`${C.NOTIFICATION_EVENTS}/${rideId}_offer_created_${DRIVER}`);

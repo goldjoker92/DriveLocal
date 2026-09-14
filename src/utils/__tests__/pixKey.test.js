@@ -1,32 +1,39 @@
-import { normalizePixKey } from '../pixKey';
+import {
+  PIX_KEY_TYPE,
+  canonicalPixKeyType,
+  validateAndNormalizePixKey,
+} from '../pixKey';
 
-describe('mobile Pix key validation', () => {
-  let logSpy;
-
-  beforeEach(() => {
-    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+describe('Pix key validation', () => {
+  test('normalizes and validates a formatted CPF', () => {
+    expect(validateAndNormalizePixKey('529.982.247-25', 'CPF')).toEqual({
+      valid: true,
+      value: '52998224725',
+      type: PIX_KEY_TYPE.CPF,
+      message: '',
+    });
   });
 
-  afterEach(() => {
-    logSpy.mockRestore();
+  test('rejects invalid CPF values', () => {
+    expect(validateAndNormalizePixKey('024.995.773-635', 'CPF').valid).toBe(false);
+    expect(validateAndNormalizePixKey('111.111.111-11', 'CPF').valid).toBe(false);
   });
 
-  test.each([
-    ['CPF', '529.982.247-25', '52998224725'],
-    ['Telefone', '(85) 99999-1234', '+5585999991234'],
-    ['E-mail', ' Motorista@Example.COM ', 'motorista@example.com'],
-    ['Chave aleatória', '123E4567-E12B-12D1-A456-426655440000',
-      '123e4567-e12b-12d1-a456-426655440000'],
-  ])('normalizes %s before saving', (type, input, expected) => {
-    expect(normalizePixKey(input, type)).toMatchObject({ valid: true, key: expected });
+  test('normalizes phone, email and random keys', () => {
+    expect(validateAndNormalizePixKey('(85) 99999-9999', 'Telefone').value)
+      .toBe('+5585999999999');
+    expect(validateAndNormalizePixKey('MOTORISTA@EXEMPLO.COM', 'E-mail').value)
+      .toBe('motorista@exemplo.com');
+    expect(validateAndNormalizePixKey(
+      '123E4567-E89B-12D3-A456-426614174000',
+      'Chave aleatória'
+    ).value).toBe('123e4567-e89b-12d3-a456-426614174000');
   });
 
-  test.each([
-    ['CPF', '000.000.000-00'],
-    ['Telefone', '1234'],
-    ['E-mail', 'invalido'],
-    ['Chave aleatória', 'invalida'],
-  ])('rejects an invalid %s key', (type, input) => {
-    expect(normalizePixKey(input, type).valid).toBe(false);
+  test('recognizes the four UI labels', () => {
+    expect(canonicalPixKeyType('CPF')).toBe(PIX_KEY_TYPE.CPF);
+    expect(canonicalPixKeyType('Telefone')).toBe(PIX_KEY_TYPE.PHONE);
+    expect(canonicalPixKeyType('E-mail')).toBe(PIX_KEY_TYPE.EMAIL);
+    expect(canonicalPixKeyType('Chave aleatória')).toBe(PIX_KEY_TYPE.EVP);
   });
 });

@@ -9,6 +9,11 @@ jest.mock('../../config/firebase', () => ({
   functions: {},
 }));
 
+jest.mock('../../config/runtimeEnvironment', () => ({
+  APP_BUILD_NUMBER: 17,
+  APP_VERSION: '1.0.12',
+}));
+
 jest.mock('../driverDeviceDiagnostics', () => ({
   prepareDriverDeviceForAvailability: (...args) => mockPrepareDriverDeviceForAvailability(...args),
 }));
@@ -75,7 +80,11 @@ describe('driver availability device gate', () => {
     const result = await startDriverWorkSession();
 
     expect(order).toEqual(['preflight', 'firebase']);
-    expect(mockCallable).toHaveBeenCalledWith({ availabilityStatus: 'online' });
+    expect(mockCallable).toHaveBeenCalledWith({
+      availabilityStatus: 'online',
+      clientBuildNumber: 17,
+      clientVersion: '1.0.12',
+    });
     expect(result).toMatchObject({
       availabilityStatus: 'online',
       availabilitySessionId: 'session_1234567890',

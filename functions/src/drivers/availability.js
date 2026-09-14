@@ -9,7 +9,12 @@ const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateEnum, validateIdentifier } = require('../validation/validators');
 const { logInfo } = require('../logging/logger');
 const { evaluateRideEligibility, toMillis } = require('./eligibility');
+const {
+  evaluateDriverBuildNumber,
+  resolveDriverBuildPolicy,
+} = require('./appVersion');
 const rideC = require('../rides/constants');
+const { validateAndNormalizePixKey } = require('../pix/pixKey');
 
 const AVAILABILITY_VALUES = Object.freeze(['online', 'offline']);
 const WORK_SESSION_MAX_AGE_MS = 7 * 60 * 1000;
@@ -57,7 +62,7 @@ async function setDriverAvailability({ db, request, context, clock }) {
 
   const payload = assertShape(request?.data || {}, {
     required: ['availabilityStatus'],
-    optional: ['availabilitySessionId'],
+    optional: ['availabilitySessionId', 'clientBuildNumber', 'clientVersion'],
   });
   const desired = validateEnum(
     payload.availabilityStatus,
@@ -67,6 +72,10 @@ async function setDriverAvailability({ db, request, context, clock }) {
   const requestedSessionId = payload.availabilitySessionId == null
     ? null
     : validateIdentifier(payload.availabilitySessionId, 'availabilitySessionId');
+  const clientVersion = typeof payload.clientVersion === 'string'
+    ? payload.clientVersion.trim().slice(0, 32)
+    : null;
+
   const driverRef = db.collection(rideC.DRIVERS).doc(driverId);
   const nowMs = Number(clock.now());
 
@@ -82,6 +91,38 @@ async function setDriverAvailability({ db, request, context, clock }) {
     const driver = snapshot.data() || {};
 
     if (desired === 'online') {
+      const serviceAreaId = driver.serviceAreaId || rideC.DEFAULT_SERVICE_AREA_ID;
+      const configSnapshot = await tx.get(
+        db.collection(rideC.CITY_PUBLIC_CONFIG).doc(serviceAreaId)
+      );
+      const buildPolicy = resolveDriverBuildPolicy(
+        configSnapshot.exists ? configSnapshot.data() || {} : {}
+      );
+      const clientBuild = evaluateDriverBuildNumber(
+        payload.clientBuildNumber,
+        buildPolicy.minimumBuildNumber
+      );
+      if (buildPolicy.enforced && !clientBuild.supported) {
+        throw new AppError(ERROR_CODES.APP_UPDATE_REQUIRED, {
+          internalMessage: `driver ${driverId} uses unsupported app build ${String(payload.clientBuildNumber || 'missing')}`,
+          safeMetadata: {
+            reason: 'app_update_required',
+            minimumBuildNumber: buildPolicy.minimumBuildNumber,
+          },
+        });
+      }
+      if (buildPolicy.enforced && buildPolicy.minimumBuildNumber >= 17) {
+        const pixKey = validateAndNormalizePixKey(driver.pixKey, driver.pixKeyType);
+        if (!pixKey.valid) {
+          throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
+            internalMessage: 'driver ' + driverId + ' has invalid Pix key: ' + pixKey.reason,
+            safeMetadata: {
+              reason: 'PIX_KEY_INVALID',
+              message: 'Atualize sua chave Pix no perfil antes de ficar disponível.',
+            },
+          });
+        }
+      }
       if (driver.activeRideId) {
         throw new AppError(ERROR_CODES.RIDE_IN_PROGRESS, {
           internalMessage: `driver ${driverId} already has active ride ${driver.activeRideId}`,
@@ -122,9 +163,20 @@ async function setDriverAvailability({ db, request, context, clock }) {
       }
 
       if (hasReusableSession(driver, nowMs)) {
+        const versionUpdate = {
+          availabilityClientBuildNumber: clientBuild.buildNumber,
+          availabilityClientVersion: clientVersion,
+          availabilityClientSessionId: driver.availabilitySessionId,
+          availabilityClientUpdatedAtMs: nowMs,
+          availabilityClientUpdatedAt: ts(),
+          availabilityClosedReason: null,
+          availabilityRequiredBuildNumber: null,
+          updatedAt: ts(),
+        };
+        tx.set(driverRef, versionUpdate, { merge: true });
         return {
           replay: true,
-          after: driver,
+          after: { ...driver, ...versionUpdate },
         };
       }
 
@@ -136,6 +188,13 @@ async function setDriverAvailability({ db, request, context, clock }) {
         availabilitySessionStartedAt: ts(),
         availabilityUpdatedAtMs: nowMs,
         availabilityUpdatedAt: ts(),
+        availabilityClientBuildNumber: clientBuild.buildNumber,
+        availabilityClientVersion: clientVersion,
+        availabilityClientSessionId: availabilitySessionId,
+        availabilityClientUpdatedAtMs: nowMs,
+        availabilityClientUpdatedAt: ts(),
+        availabilityClosedReason: null,
+        availabilityRequiredBuildNumber: null,
         // A new work session must publish a new point before dispatch can use it.
         locationAvailabilitySessionId: null,
         updatedAt: ts(),
@@ -180,6 +239,9 @@ async function setDriverAvailability({ db, request, context, clock }) {
       availabilityUpdatedAtMs: nowMs,
       availabilityUpdatedAt: ts(),
       locationAvailabilitySessionId: null,
+      availabilityClientSessionId: null,
+      availabilityClientUpdatedAtMs: nowMs,
+      availabilityClientUpdatedAt: ts(),
       updatedAt: ts(),
     };
     tx.set(driverRef, update, { merge: true });

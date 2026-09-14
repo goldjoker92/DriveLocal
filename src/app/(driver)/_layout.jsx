@@ -82,6 +82,7 @@ export default function DriverLayout() {
       && remoteWorkSessionRecoverable(remote)
     );
     if (sessionMatches) return;
+    const updateRequired = remote?.availabilityClosedReason === 'mandatory_update_required';
 
     // A cache replay is useful for rendering but not authoritative enough to stop
     // an Android foreground service. Wait for a server-confirmed snapshot.
@@ -126,11 +127,13 @@ export default function DriverLayout() {
       localSessionId: shortId(local.availabilitySessionId),
       remoteSessionId: shortId(remote?.availabilitySessionId),
       remoteStatus: remote?.availabilityStatus || 'missing',
-      reason: remote?.availabilityStatus !== 'online'
-        ? 'remote_offline'
-        : remote?.availabilitySessionId !== local.availabilitySessionId
-          ? 'session_mismatch'
-          : 'lease_expired',
+      reason: updateRequired
+        ? 'mandatory_update_required'
+        : remote?.availabilityStatus !== 'online'
+          ? 'remote_offline'
+          : remote?.availabilitySessionId !== local.availabilitySessionId
+            ? 'session_mismatch'
+            : 'lease_expired',
       atMs: Date.now(),
     });
     try {
@@ -141,7 +144,19 @@ export default function DriverLayout() {
         BACKGROUND_INCIDENT_REASONS.WORK_SESSION_REVOKED
       ).catch(() => undefined);
       await stopDriverOnlineTracking();
-      if (!onActiveRideScreen) router.replace('/driver-home');
+      if (updateRequired) {
+        const minimumBuildNumber = Number(
+          remote?.availabilityRequiredBuildNumber || 0
+        );
+        router.replace({
+          pathname: '/update-required',
+          params: minimumBuildNumber > 0
+            ? { minimumBuildNumber: String(minimumBuildNumber) }
+            : {},
+        });
+      } else if (!onActiveRideScreen) {
+        router.replace('/driver-home');
+      }
     } finally {
       reconciliationBusy.current = false;
     }

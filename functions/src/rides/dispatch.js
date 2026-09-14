@@ -62,12 +62,52 @@ async function closeAbandonedWorkSessions({ db, driverIds, context, base }) {
   }
 }
 
+async function closeUnsupportedAppBuildSessions({ db, driverIds, context, base }) {
+  if (!Array.isArray(driverIds) || driverIds.length === 0) return 0;
+
+  const update = {
+    availabilityStatus: 'offline',
+    availabilitySessionId: null,
+    availabilitySessionEndedAt: admin.firestore.FieldValue.serverTimestamp(),
+    availabilityUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    locationAvailabilitySessionId: null,
+    availabilityClientSessionId: null,
+    availabilityClosedReason: 'mandatory_update_required',
+    availabilityRequiredBuildNumber:
+      Number(base.minimumDriverBuildNumber) > 0
+        ? Number(base.minimumDriverBuildNumber)
+        : null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  try {
+    const batch = db.batch();
+    driverIds.forEach((driverId) => {
+      batch.set(db.collection(C.DRIVERS).doc(driverId), update, { merge: true });
+    });
+    await batch.commit();
+    logWarning(context, 'ride.dispatch.unsupported_app_sessions_closed', {
+      ...base,
+      closedCount: driverIds.length,
+      result: 'mandatory_update_required',
+    });
+    return driverIds.length;
+  } catch (err) {
+    logWarning(context, 'ride.dispatch.unsupported_app_sessions_close_failed', {
+      ...base,
+      attemptedCount: driverIds.length,
+      internalMessage: err?.message || 'unknown reconciliation failure',
+    });
+    return 0;
+  }
+}
+
 /**
  * @param {{db:object, ride:object, offerTtlSeconds:number, searchRadiusMeters:number,
  *          maxCandidates?:number, context:object, clock:{now:()=>number}}} args
  * @returns {Promise<{status:string, reasonCode:string, offersCreated:number}>}
  */
-async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, maxCandidates, context, clock }) {
+async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, maxCandidates, driverBuildPolicy, context, clock }) {
   const rideRef = db.collection(C.RIDE_REQUESTS).doc(ride.rideId);
   const effectiveMaxCandidates = Number(maxCandidates) > 0
     ? Math.min(Math.floor(Number(maxCandidates)), C.MAX_CANDIDATES)
@@ -81,6 +121,8 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     maxCandidates: effectiveMaxCandidates,
     offerTtlSeconds,
     locationMaxAgeMs: C.LOCATION_MAX_AGE_MS,
+    minimumDriverBuildEnforced: driverBuildPolicy?.enforced === true,
+    minimumDriverBuildNumber: driverBuildPolicy?.minimumBuildNumber || null,
   };
   logInfo(context, 'ride.dispatch.started', base);
 
@@ -94,10 +136,12 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     eligible,
     diagnostics,
     abandonedWorkSessionDriverIds,
+    unsupportedAppBuildDriverIds,
   } = selectEligibleDriversWithDiagnostics(candidates, {
     pickup: ride.pickup,
     searchRadiusMeters,
     clock,
+    driverBuildPolicy,
   });
 
   // Incremental waves: a driver is offered a given ride exactly once. Re-offering
@@ -122,6 +166,13 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
   await closeAbandonedWorkSessions({
     db,
     driverIds: abandonedWorkSessionDriverIds,
+    context,
+    base,
+  });
+
+  await closeUnsupportedAppBuildSessions({
+    db,
+    driverIds: unsupportedAppBuildDriverIds,
     context,
     base,
   });

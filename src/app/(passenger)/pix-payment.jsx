@@ -31,6 +31,7 @@ export default function PixPayment() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
 
   useEffect(() => {
     if (!rideId) return undefined;
@@ -76,15 +77,16 @@ export default function PixPayment() {
 
   async function onCopy() {
     if (!payload) return;
-    const didCopy = await copyToClipboard(payload);
-    setCopied(didCopy);
-    if (!didCopy) {
-      setError('Não foi possível copiar o código Pix. Pressione o código para copiar manualmente.');
-      logRideClientEvent('pix.passenger.payload_copy_failed', { rideId }, 'error');
-      return;
-    }
-    setError('');
-    logRideClientEvent('pix.passenger.payload_copied', { rideId });
+    const copiedSuccessfully = await copyToClipboard(payload);
+    setCopied(copiedSuccessfully);
+    setCopyError(copiedSuccessfully
+      ? ''
+      : 'Não foi possível copiar. Pressione o código abaixo e escolha Copiar.');
+    logRideClientEvent(
+      copiedSuccessfully ? 'pix.passenger.payload_copied' : 'pix.passenger.payload_copy_failed',
+      { rideId },
+      copiedSuccessfully ? 'log' : 'warn'
+    );
   }
 
   async function run(action, fn, reason) {
@@ -149,11 +151,18 @@ export default function PixPayment() {
               showPayload
               instruction="Pague neste telefone usando o Pix copia e cola. O valor da corrida já está preenchido."
               primaryAction={(
-                <AppButton
-                  title={copied ? 'Código copiado' : 'Copiar código Pix'}
-                  onPress={onCopy}
-                  disabled={!payload}
-                />
+                <View style={{ gap: spacing.xs }}>
+                  <AppButton
+                    title={copied ? 'Código copiado' : 'Copiar código Pix'}
+                    onPress={onCopy}
+                    disabled={!payload}
+                  />
+                  {copyError ? (
+                    <Text style={[{ fontFamily, color: colors.warning }, typography.small]}>
+                      {copyError}
+                    </Text>
+                  ) : null}
+                </View>
               )}
               qrInstruction="O QR Code abaixo pode ser escaneado por outro aparelho."
             />
@@ -173,8 +182,8 @@ export default function PixPayment() {
 
         {disputed ? (
           <AppCard>
-            <Text style={[{ fontFamily, color: colors.danger }, typography.bodyBold]}>
-              Pagamento não confirmado
+            <Text style={[{ fontFamily, color: colors.warning }, typography.bodyBold]}>
+              Pagamento em conferência
             </Text>
             <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
               A tela permanece aberta e o valor da corrida continua registrado para conferência e suporte.

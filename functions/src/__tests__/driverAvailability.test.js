@@ -149,4 +149,47 @@ describe('secure driver availability sessions', () => {
     const stored = db._store.get(`drivers/${DRIVER_ID}`);
     expect(stored.locationAvailabilitySessionId).toBeNull();
   });
+
+  it('rejects build 17 online activation when the Pix key is invalid', async () => {
+    const db = makeFakeFirestore();
+    await db.collection('cityPublicConfig').doc('HORIZONTE_CE_BR').set({
+      minimumDriverBuildNumber: 17,
+      enforceMinimumDriverBuild: true,
+    });
+    seedDriver(db, {
+      pixKeyType: 'CPF',
+      pixKey: '024.995.773-635',
+    });
+
+    await expect(setDriverAvailability({
+      db,
+      request: req('online', { clientBuildNumber: 17, clientVersion: '1.0.12' }),
+      context: ctx,
+      clock: fixedClock(T0),
+    })).rejects.toMatchObject({
+      code: 'DRIVER_NOT_ELIGIBLE',
+      safeMetadata: { reason: 'PIX_KEY_INVALID' },
+    });
+  });
+
+  it('accepts and normalizes a valid formatted Pix key during build 17 preflight', async () => {
+    const db = makeFakeFirestore();
+    await db.collection('cityPublicConfig').doc('HORIZONTE_CE_BR').set({
+      minimumDriverBuildNumber: 17,
+      enforceMinimumDriverBuild: true,
+    });
+    seedDriver(db, {
+      pixKeyType: 'CPF',
+      pixKey: '529.982.247-25',
+    });
+
+    const result = await setDriverAvailability({
+      db,
+      request: req('online', { clientBuildNumber: 17, clientVersion: '1.0.12' }),
+      context: ctx,
+      clock: fixedClock(T0),
+    });
+    expect(result.availabilityStatus).toBe('online');
+  });
+
 });
