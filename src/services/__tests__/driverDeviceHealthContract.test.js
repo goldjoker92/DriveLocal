@@ -14,9 +14,12 @@ describe('driver device health integration contracts', () => {
     );
 
     expect(start).toContain('prepareDriverDeviceForAvailability');
-    expect(start).toContain("setDriverAvailabilitySecure({ availabilityStatus: 'online' })");
+    expect(start).toContain('setDriverAvailabilitySecure({');
+    expect(start).toContain("availabilityStatus: 'online'");
+    expect(start).toContain('clientBuildNumber: APP_BUILD_NUMBER');
+    expect(start).toContain('clientVersion: APP_VERSION');
     expect(start.indexOf('prepareDriverDeviceForAvailability'))
-      .toBeLessThan(start.indexOf("setDriverAvailabilitySecure({ availabilityStatus: 'online' })"));
+      .toBeLessThan(start.indexOf('setDriverAvailabilitySecure({'));
     // The stable error code is created by the dedicated helper immediately above
     // startDriverWorkSession, while the guarded flow throws that helper result.
     expect(availability).toContain("error.code = 'DRIVER_DEVICE_NOT_READY'");
