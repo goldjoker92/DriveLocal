@@ -48,6 +48,22 @@ describe('block 17 compact timed offer contract', () => {
     expect(button).toContain("const visibleTitle = loading ? 'ACEITANDO…' : title");
   });
 
+  it('compacts the card first and enables scrolling only as an overflow safety net', () => {
+    const screen = source('src/app/(driver)/ride-request.jsx');
+    const card = source('src/components/DriverTimedOfferCard.jsx');
+
+    expect(screen).toContain('useWindowDimensions');
+    expect(screen).toContain('windowHeight < 760 || fontScale > 1.1');
+    expect(screen).toContain('onContentSizeChange');
+    expect(screen).toContain('setForceCompactLayout(true)');
+    expect(screen).toContain('scrollEnabled={accepted ? true : offerScrollEnabled}');
+    expect(screen).toContain('compact={compactOfferLayout}');
+    expect(card).toContain('compact = false');
+    expect(card).toContain('compact && styles.cardCompact');
+    expect(card).toContain('minimumFontScale={0.78}');
+    expect(card).toContain('numberOfLines={1}');
+  });
+
   it('preserves the real countdown and server-authoritative lifecycle actions', () => {
     const screen = source('src/app/(driver)/ride-request.jsx');
     const service = source('src/services/ridesService.js');
