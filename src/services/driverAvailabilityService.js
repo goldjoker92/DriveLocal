@@ -6,6 +6,7 @@
 import { router as appRouter } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
+import { APP_BUILD_NUMBER, APP_VERSION } from '../config/runtimeEnvironment';
 import { prepareDriverDeviceForAvailability } from './driverDeviceDiagnostics';
 
 const setDriverAvailabilitySecure = httpsCallable(functions, 'setDriverAvailabilitySecure');
@@ -56,6 +57,23 @@ export function isWalletRequiredAvailabilityError(error) {
   return safeCode === 'WALLET_INSUFFICIENT' || reason === 'wallet_low';
 }
 
+export function isAppUpdateRequiredAvailabilityError(error) {
+  const safeCode = error?.details?.code || error?.code || null;
+  const reason = error?.details?.metadata?.reason || error?.details?.reason || null;
+  return safeCode === 'APP_UPDATE_REQUIRED' || reason === 'app_update_required';
+}
+
+function redirectToRequiredAppUpdate(error) {
+  if (!isAppUpdateRequiredAvailabilityError(error)) return false;
+  traceAvailability('work_session.update_required_redirected', {
+    currentBuildNumber: APP_BUILD_NUMBER,
+    requiredBuildNumber: error?.details?.metadata?.minimumBuildNumber || null,
+    result: 'update_required_screen',
+  }, 'warn');
+  appRouter.replace('/update-required');
+  return true;
+}
+
 function redirectToRequiredWalletTopup(error) {
   if (!isWalletRequiredAvailabilityError(error)) return false;
   traceAvailability('work_session.wallet_recovery_redirected', {
@@ -88,7 +106,11 @@ export async function startDriverWorkSession() {
       result: 'preflight_passed',
     });
 
-    const response = await setDriverAvailabilitySecure({ availabilityStatus: 'online' });
+    const response = await setDriverAvailabilitySecure({
+      availabilityStatus: 'online',
+      clientBuildNumber: APP_BUILD_NUMBER,
+      clientVersion: APP_VERSION,
+    });
     const result = normalizedResult(response);
     if (result.availabilityStatus !== 'online' || !result.availabilitySessionId) {
       const error = new Error('DRIVER_WORK_SESSION_NOT_OPENED');
@@ -104,10 +126,12 @@ export async function startDriverWorkSession() {
     });
     return result;
   } catch (error) {
-    const walletRedirected = redirectToRequiredWalletTopup(error);
+    const updateRedirected = redirectToRequiredAppUpdate(error);
+    const walletRedirected = updateRedirected ? false : redirectToRequiredWalletTopup(error);
     traceAvailability('work_session.start_failed', {
       reason: error?.details?.code || error?.code || error?.message || 'unknown',
       issueCode: error?.details?.issueCode || null,
+      updateRedirected,
       walletRedirected,
       durationMs: Date.now() - startedAt,
       result: 'offline',
