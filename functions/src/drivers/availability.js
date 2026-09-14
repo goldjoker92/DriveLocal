@@ -150,6 +150,8 @@ async function setDriverAvailability({ db, request, context, clock }) {
           availabilityClientSessionId: driver.availabilitySessionId,
           availabilityClientUpdatedAtMs: nowMs,
           availabilityClientUpdatedAt: ts(),
+          availabilityClosedReason: null,
+          availabilityRequiredBuildNumber: null,
           updatedAt: ts(),
         };
         tx.set(driverRef, versionUpdate, { merge: true });
@@ -172,6 +174,8 @@ async function setDriverAvailability({ db, request, context, clock }) {
         availabilityClientSessionId: availabilitySessionId,
         availabilityClientUpdatedAtMs: nowMs,
         availabilityClientUpdatedAt: ts(),
+        availabilityClosedReason: null,
+        availabilityRequiredBuildNumber: null,
         // A new work session must publish a new point before dispatch can use it.
         locationAvailabilitySessionId: null,
         updatedAt: ts(),
