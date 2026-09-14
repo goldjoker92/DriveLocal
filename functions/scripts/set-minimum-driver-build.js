@@ -94,6 +94,7 @@ async function main() {
       locationAvailabilitySessionId: null,
       availabilityClientSessionId: null,
       availabilityClosedReason: 'mandatory_update_required',
+      availabilityRequiredBuildNumber: minimumBuildNumber,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   });
