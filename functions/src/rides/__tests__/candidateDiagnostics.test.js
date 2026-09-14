@@ -22,6 +22,8 @@ function candidate(id, over = {}) {
       locationAvailabilitySessionId: availabilitySessionId,
       verificationStatus: 'approved',
       isBlocked: false,
+      pixKeyType: 'E-mail',
+      pixKey: `${id}@pix.test.drivelocal.local`,
       founderEligible: true,
       subscriptionFreeUntil: NOW + 24 * 60 * 60 * 1000,
       commissionFreeUntil: NOW + 24 * 60 * 60 * 1000,

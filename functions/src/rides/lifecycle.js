@@ -21,6 +21,7 @@ const { logInfo } = require('../logging/logger');
 const { writeAuditLog } = require('../audit/auditLog');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const { buildPixPayload } = require('../pix/pixBrCode');
+const { normalizePixKey } = require('../pix/pixKey');
 const { bestEffortRiskSignal } = require('../risk/riskEngine');
 const riskC = require('../risk/constants');
 const driverC = require('../drivers/constants');
@@ -239,53 +240,52 @@ async function finishRide({ db, request, context, clock }) {
       });
     }
 
-    const pixKey = pix.pixKey || driverProfile.pixKey || ride.driverPixKey;
-    const pixKeyType = pix.pixKey
-      ? pix.pixKeyType
+    const pixCandidate = pix.pixKey
+      ? {
+          key: pix.pixKey,
+          keyType: pix.pixKeyType || null,
+          source: 'private_driver_data',
+        }
       : driverProfile.pixKey
-        ? driverProfile.pixKeyType
-        : ride.driverPixKeyType;
-    const pixKeySource = pix.pixKey
-      ? 'private_driver_data'
-      : driverProfile.pixKey
-        ? 'driver_profile_compat'
+        ? {
+            key: driverProfile.pixKey,
+            keyType: driverProfile.pixKeyType || null,
+            source: 'driver_profile_compat',
+          }
         : ride.driverPixKey
-          ? 'ride_snapshot_compat'
-          : 'missing';
-    if (!pixKey) {
-      throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, {
-        internalMessage: `no verified pix key for driver ${driverId}`,
-        safeMetadata: { pixKeySource },
+          ? {
+              key: ride.driverPixKey,
+              keyType: ride.driverPixKeyType || null,
+              source: 'ride_snapshot_compat',
+            }
+          : { key: null, keyType: null, source: 'missing' };
+    const pixKeySource = pixCandidate.source;
+    const normalizedPix = normalizePixKey(pixCandidate.key, pixCandidate.keyType);
+    if (!normalizedPix.valid) {
+      throw new AppError(ERROR_CODES.PIX_KEY_INVALID, {
+        internalMessage: `invalid Pix key for driver ${driverId}`,
+        safeMetadata: {
+          pixKeySource,
+          reason: normalizedPix.reasonCode || 'PIX_KEY_INVALID',
+        },
       });
     }
+    const pixKey = normalizedPix.key;
 
     const nowMs = clock.now();
     const finalFareCentavos = Number(ride.estimatedFareCentavos || 0);
     const finalCommissionCentavos = Number(ride.estimatedCommissionCentavos || 0);
-    let payload;
-    try {
-      payload = buildPixPayload({
-        pixKey,
-        pixKeyType,
-        amountCentavos: finalFareCentavos,
-        merchantName: pix.pixOwnerName
-          || pix.fullName
-          || driverProfile.fullName
-          || driverProfile.displayName
-          || 'DriveLocal',
-        city: 'Horizonte',
-        txid: `DL${rideId}`.slice(0, 25),
-      });
-    } catch (error) {
-      throw new AppError(ERROR_CODES.CONFIGURATION_MISSING, {
-        internalMessage: 'invalid Pix charge data for driver ' + driverId + ': ' + (error?.code || error?.message),
-        safeMetadata: {
-          reason: error?.code || 'PIX_CONFIGURATION_INVALID',
-          pixKeySource,
-          message: 'Atualize sua chave Pix no perfil e tente finalizar novamente.',
-        },
-      });
-    }
+    const payload = buildPixPayload({
+      pixKey,
+      amountCentavos: finalFareCentavos,
+      merchantName: pix.pixOwnerName
+        || pix.fullName
+        || driverProfile.fullName
+        || driverProfile.displayName
+        || 'DriveLocal',
+      city: 'Horizonte',
+      txid: `DL${rideId}`.slice(0, 25),
+    });
 
     tx.set(rideRef, {
       status: C.RIDE_STATUS.AWAITING_PAYMENT,

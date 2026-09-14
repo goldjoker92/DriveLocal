@@ -21,6 +21,8 @@ describe('driver backend eligibility timestamp normalization', () => {
     const result = evaluateRideEligibility(
       {
         verificationStatus: 'approved',
+        pixKeyType: 'E-mail',
+        pixKey: 'timestamp_driver@pix.test.drivelocal.local',
         founderEligible: true,
         subscriptionFreeUntil: timestampLike(NOW_MS + 60_000),
         commissionFreeUntil: timestampLike(NOW_MS + 60_000),
@@ -37,6 +39,8 @@ describe('driver backend eligibility timestamp normalization', () => {
     const result = evaluateRideEligibility(
       {
         verificationStatus: 'approved',
+        pixKeyType: 'E-mail',
+        pixKey: 'timestamp_driver@pix.test.drivelocal.local',
         founderEligible: true,
         subscriptionActive: true,
         subscriptionFreeUntil: timestampLike(NOW_MS - 1),
@@ -53,6 +57,8 @@ describe('driver backend eligibility timestamp normalization', () => {
     const result = evaluateRideEligibility(
       {
         verificationStatus: 'approved',
+        pixKeyType: 'E-mail',
+        pixKey: 'timestamp_driver@pix.test.drivelocal.local',
         founderEligible: true,
         subscriptionFreeUntil: timestampLike(NOW_MS - 1),
         subscriptionActive: false,

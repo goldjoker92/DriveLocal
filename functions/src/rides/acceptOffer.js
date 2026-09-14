@@ -183,6 +183,12 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       });
     }
     const evalResult = evaluateRideEligibility(driver, clock);
+    if (!evalResult.pixKeyValid) {
+      throw new AppError(ERROR_CODES.PIX_KEY_INVALID, {
+        internalMessage: `driver ${driverId} has no structurally valid Pix key`,
+        safeMetadata: { reason: evalResult.pixKeyReasonCode || 'PIX_KEY_INVALID' },
+      });
+    }
     if (!evalResult.canReceiveRides) {
       throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
         internalMessage: `driver ${driverId} not ride-eligible`,

@@ -83,7 +83,9 @@
     "verify:firebase:dev": "firebase functions:list --project drivelocal-dev",
     "verify:firebase:prod": "firebase functions:list --project drivelocal-prod",
     "pix-keys:audit:prod": "node functions/scripts/audit-driver-pix-keys.js --project drivelocal-prod",
-    "pix-keys:audit:dev": "node functions/scripts/audit-driver-pix-keys.js --project drivelocal-dev"
+    "pix-keys:audit:dev": "node functions/scripts/audit-driver-pix-keys.js --project drivelocal-dev",
+    "pix:smoke:prod": "node scripts/release/pix-smoke.js --project drivelocal-prod",
+    "pix:smoke:dev": "node scripts/release/pix-smoke.js --project drivelocal-dev"
   },
   "jest": {
     "preset": "jest-expo",
