@@ -73,6 +73,10 @@ async function closeUnsupportedAppBuildSessions({ db, driverIds, context, base }
     locationAvailabilitySessionId: null,
     availabilityClientSessionId: null,
     availabilityClosedReason: 'mandatory_update_required',
+    availabilityRequiredBuildNumber:
+      Number(base.minimumDriverBuildNumber) > 0
+        ? Number(base.minimumDriverBuildNumber)
+        : null,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
 
