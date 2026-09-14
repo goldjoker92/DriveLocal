@@ -103,7 +103,7 @@ async function closeUnsupportedAppBuildSessions({ db, driverIds, context, base }
  *          maxCandidates?:number, context:object, clock:{now:()=>number}}} args
  * @returns {Promise<{status:string, reasonCode:string, offersCreated:number}>}
  */
-async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, maxCandidates, context, clock }) {
+async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, maxCandidates, driverBuildPolicy, context, clock }) {
   const rideRef = db.collection(C.RIDE_REQUESTS).doc(ride.rideId);
   const effectiveMaxCandidates = Number(maxCandidates) > 0
     ? Math.min(Math.floor(Number(maxCandidates)), C.MAX_CANDIDATES)
@@ -117,6 +117,8 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     maxCandidates: effectiveMaxCandidates,
     offerTtlSeconds,
     locationMaxAgeMs: C.LOCATION_MAX_AGE_MS,
+    minimumDriverBuildEnforced: driverBuildPolicy?.enforced === true,
+    minimumDriverBuildNumber: driverBuildPolicy?.minimumBuildNumber || null,
   };
   logInfo(context, 'ride.dispatch.started', base);
 
@@ -135,6 +137,7 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     pickup: ride.pickup,
     searchRadiusMeters,
     clock,
+    driverBuildPolicy,
   });
 
   // Incremental waves: a driver is offered a given ride exactly once. Re-offering
