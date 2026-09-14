@@ -10,8 +10,8 @@ const { assertShape, validateEnum, validateIdentifier } = require('../validation
 const { logInfo } = require('../logging/logger');
 const { evaluateRideEligibility, toMillis } = require('./eligibility');
 const {
-  MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
   evaluateDriverBuildNumber,
+  resolveDriverBuildPolicy,
 } = require('./appVersion');
 const rideC = require('../rides/constants');
 
@@ -71,22 +71,9 @@ async function setDriverAvailability({ db, request, context, clock }) {
   const requestedSessionId = payload.availabilitySessionId == null
     ? null
     : validateIdentifier(payload.availabilitySessionId, 'availabilitySessionId');
-  const clientBuild = desired === 'online'
-    ? evaluateDriverBuildNumber(payload.clientBuildNumber)
-    : { supported: true, buildNumber: null };
   const clientVersion = typeof payload.clientVersion === 'string'
     ? payload.clientVersion.trim().slice(0, 32)
     : null;
-
-  if (desired === 'online' && !clientBuild.supported) {
-    throw new AppError(ERROR_CODES.APP_UPDATE_REQUIRED, {
-      internalMessage: `driver ${driverId} uses unsupported app build ${String(payload.clientBuildNumber || 'missing')}`,
-      safeMetadata: {
-        reason: 'app_update_required',
-        minimumBuildNumber: MIN_SUPPORTED_DRIVER_BUILD_NUMBER,
-      },
-    });
-  }
 
   const driverRef = db.collection(rideC.DRIVERS).doc(driverId);
   const nowMs = Number(clock.now());
@@ -103,6 +90,26 @@ async function setDriverAvailability({ db, request, context, clock }) {
     const driver = snapshot.data() || {};
 
     if (desired === 'online') {
+      const serviceAreaId = driver.serviceAreaId || rideC.DEFAULT_SERVICE_AREA_ID;
+      const configSnapshot = await tx.get(
+        db.collection(rideC.CITY_PUBLIC_CONFIG).doc(serviceAreaId)
+      );
+      const buildPolicy = resolveDriverBuildPolicy(
+        configSnapshot.exists ? configSnapshot.data() || {} : {}
+      );
+      const clientBuild = evaluateDriverBuildNumber(
+        payload.clientBuildNumber,
+        buildPolicy.minimumBuildNumber
+      );
+      if (buildPolicy.enforced && !clientBuild.supported) {
+        throw new AppError(ERROR_CODES.APP_UPDATE_REQUIRED, {
+          internalMessage: `driver ${driverId} uses unsupported app build ${String(payload.clientBuildNumber || 'missing')}`,
+          safeMetadata: {
+            reason: 'app_update_required',
+            minimumBuildNumber: buildPolicy.minimumBuildNumber,
+          },
+        });
+      }
       if (driver.activeRideId) {
         throw new AppError(ERROR_CODES.RIDE_IN_PROGRESS, {
           internalMessage: `driver ${driverId} already has active ride ${driver.activeRideId}`,
