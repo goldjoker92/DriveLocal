@@ -22,6 +22,14 @@ function die(message) {
   process.exit(1);
 }
 
+function buildPolicyUpdate(minimumBuildNumber, enforceMinimumDriverBuild, updatedAt) {
+  return {
+    minimumDriverBuildNumber: minimumBuildNumber,
+    enforceMinimumDriverBuild,
+    driverBuildPolicyUpdatedAt: updatedAt,
+  };
+}
+
 async function main() {
   const projectId = arg('project');
   const serviceAreaId = arg('service-area') || 'HORIZONTE_CE_BR';
@@ -80,11 +88,15 @@ async function main() {
   // One batch makes the policy activation and the idle-session purge atomic.
   // Active rides are deliberately excluded and finish under their current state.
   const batch = admin.firestore().batch();
-  batch.set(ref, {
-    minimumDriverBuildNumber,
-    enforceMinimumDriverBuild,
-    driverBuildPolicyUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, { merge: true });
+  batch.set(
+    ref,
+    buildPolicyUpdate(
+      minimumBuildNumber,
+      enforceMinimumDriverBuild,
+      admin.firestore.FieldValue.serverTimestamp()
+    ),
+    { merge: true }
+  );
   unsupportedDrivers.forEach((snapshot) => {
     batch.set(snapshot.ref, {
       availabilityStatus: 'offline',
@@ -110,7 +122,13 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((error) => {
-  console.error('[DRIVER_BUILD_POLICY] FAILED: ' + error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('[DRIVER_BUILD_POLICY] FAILED: ' + error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  buildPolicyUpdate,
+};
