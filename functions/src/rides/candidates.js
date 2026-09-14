@@ -5,6 +5,7 @@
 // aggregate rejection diagnostics (never UIDs, coordinates or profile data).
 
 const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
+const { driverHasFreshSupportedBuild } = require('../drivers/appVersion');
 const { haversineMeters } = require('../geo/geo');
 const C = require('./constants');
 
@@ -60,6 +61,7 @@ function emptyDiagnostics(radius) {
     rejectedBusy: 0,
     rejectedMissingWorkSession: 0,
     rejectedStaleWorkSession: 0,
+    rejectedUnsupportedAppBuild: 0,
     // Subset of rejectedStaleWorkSession with no sign of life for far longer:
     // the only sessions the caller is allowed to close.
     abandonedWorkSessionCount: 0,
@@ -133,6 +135,7 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
   // becomes dispatchable again by himself. Collected here, never written here:
   // this selector stays pure.
   const abandonedWorkSessionDriverIds = [];
+  const unsupportedAppBuildDriverIds = [];
 
   for (const c of candidates || []) {
     diagnostics.candidateCount += 1;
@@ -159,6 +162,16 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
         diagnostics.abandonedWorkSessionCount += 1;
         abandonedWorkSessionDriverIds.push(c.id);
       }
+      continue;
+    }
+
+    if (!driverHasFreshSupportedBuild(
+      d,
+      nowMs,
+      C.AVAILABILITY_SESSION_MAX_AGE_MS
+    )) {
+      diagnostics.rejectedUnsupportedAppBuild += 1;
+      unsupportedAppBuildDriverIds.push(c.id);
       continue;
     }
 
@@ -214,7 +227,12 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
 
   diagnostics.eligibleCount = eligible.length;
   diagnostics.rejectedCount = diagnostics.candidateCount - diagnostics.eligibleCount;
-  return { eligible, diagnostics, abandonedWorkSessionDriverIds };
+  return {
+    eligible,
+    diagnostics,
+    abandonedWorkSessionDriverIds,
+    unsupportedAppBuildDriverIds,
+  };
 }
 
 function selectEligibleDrivers(candidates, args) {
