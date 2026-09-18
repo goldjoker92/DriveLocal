@@ -104,11 +104,25 @@ async function closeUnsupportedAppBuildSessions({ db, driverIds, context, base }
 
 /**
  * @param {{db:object, ride:object, offerTtlSeconds:number, searchRadiusMeters:number,
- *          maxCandidates?:number, context:object, clock:{now:()=>number}}} args
+ *          maxCandidates?:number, driverBuildPolicy?:object, dispatchWaveIndex?:number,
+ *          dispatchWaveTrigger?:string, context:object, clock:{now:()=>number}}} args
  * @returns {Promise<{status:string, reasonCode:string, offersCreated:number}>}
  */
-async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, maxCandidates, driverBuildPolicy, context, clock }) {
+async function dispatchRide({
+  db,
+  ride,
+  offerTtlSeconds,
+  searchRadiusMeters,
+  maxCandidates,
+  driverBuildPolicy,
+  dispatchWaveIndex,
+  dispatchWaveTrigger,
+  context,
+  clock,
+}) {
   const rideRef = db.collection(C.RIDE_REQUESTS).doc(ride.rideId);
+  const waveIndex = Number.isInteger(dispatchWaveIndex) ? dispatchWaveIndex : null;
+  const waveTrigger = dispatchWaveTrigger || 'legacy_direct';
   const effectiveMaxCandidates = Number(maxCandidates) > 0
     ? Math.min(Math.floor(Number(maxCandidates)), C.MAX_CANDIDATES)
     : C.MAX_CANDIDATES;
@@ -123,6 +137,9 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
     locationMaxAgeMs: C.LOCATION_MAX_AGE_MS,
     minimumDriverBuildEnforced: driverBuildPolicy?.enforced === true,
     minimumDriverBuildNumber: driverBuildPolicy?.minimumBuildNumber || null,
+    dispatchWavePlanVersion: C.DISPATCH_WAVE_PLAN_VERSION,
+    dispatchWaveIndex: waveIndex,
+    dispatchWaveTrigger: waveTrigger,
   };
   logInfo(context, 'ride.dispatch.started', base);
 
@@ -183,52 +200,76 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
   // later is reached by the next wave. Only the sweep task, at the end of the
   // window, is allowed to conclude that nobody came.
   if (freshlyEligible.length === 0) {
-    await rideRef.set(
-      {
+    const liveResult = await db.runTransaction(async (tx) => {
+      const liveRideSnap = await tx.get(rideRef);
+      if (!liveRideSnap.exists) return { updated: false, status: 'missing' };
+      const liveRide = liveRideSnap.data() || {};
+      if (liveRide.status !== C.RIDE_STATUS.SEARCHING) {
+        return { updated: false, status: liveRide.status || 'unknown' };
+      }
+      const attempts = Array.isArray(liveRide.dispatchWaveIndexesAttempted)
+        ? liveRide.dispatchWaveIndexesAttempted
+        : [];
+      tx.set(rideRef, {
         status: C.RIDE_STATUS.SEARCHING,
         reasonCode: C.REASON.SEARCH_CONTINUES,
+        dispatchWavePlanVersion: C.DISPATCH_WAVE_PLAN_VERSION,
+        dispatchWaveIndexesAttempted: waveIndex == null
+          ? attempts
+          : [...new Set([...attempts, waveIndex])].sort((a, b) => a - b),
+        lastDispatchWaveIndex: waveIndex == null
+          ? (liveRide.lastDispatchWaveIndex ?? null)
+          : Math.max(Number(liveRide.lastDispatchWaveIndex ?? -1), waveIndex),
+        lastDispatchWaveRadiusMeters: searchRadiusMeters,
+        lastDispatchWaveTrigger: waveTrigger,
         lastDispatchWaveAtMs: clock.now(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+      }, { merge: true });
+      return { updated: true, status: C.RIDE_STATUS.SEARCHING };
+    });
     logInfo(context, 'ride.dispatch.no_candidates', {
       ...base,
       ...diagnostics,
-      normalizedStatus: C.RIDE_STATUS.SEARCHING,
+      normalizedStatus: liveResult.status,
       reasonCode: C.REASON.SEARCH_CONTINUES,
     });
     return {
-      status: C.RIDE_STATUS.SEARCHING,
+      status: liveResult.status === C.RIDE_STATUS.SEARCHING
+        ? C.RIDE_STATUS.SEARCHING
+        : liveResult.status,
       reasonCode: C.REASON.SEARCH_CONTINUES,
       offersCreated: 0,
     };
   }
 
   try {
-    const { createdCount } = await createTargetedOffers({
+    const offerResult = await createTargetedOffers({
       db,
-      ride,
+      ride: {
+        ...ride,
+        dispatchWaveIndex: waveIndex,
+        dispatchWaveRadiusMeters: searchRadiusMeters,
+        dispatchWaveTrigger: waveTrigger,
+      },
       eligible: freshlyEligible,
       offerTtlSeconds,
       traceId: context && context.traceId,
       context,
       clock,
     });
-    // Remember who was served so later waves stay incremental. Bounded so the
-    // ride document can never grow without limit.
-    const nextOfferedDriverIds = [
-      ...alreadyOffered,
-      ...freshlyEligible.map((candidate) => candidate.driverId),
-    ].slice(0, C.MAX_TRACKED_OFFERED_DRIVERS);
-    await rideRef.set(
-      {
-        offeredDriverIds: nextOfferedDriverIds,
-        lastDispatchWaveAtMs: clock.now(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+
+    if (offerResult.skippedReason) {
+      logInfo(context, 'ride.dispatch.wave_skipped', {
+        ...base,
+        reasonCode: offerResult.skippedReason,
+        normalizedStatus: offerResult.rideStatus,
+      });
+      return {
+        status: offerResult.rideStatus || C.RIDE_STATUS.SEARCHING,
+        reasonCode: offerResult.skippedReason,
+        offersCreated: 0,
+      };
+    }
 
     logInfo(context, 'ride.dispatch.offers_created', {
       ...base,
@@ -236,30 +277,39 @@ async function dispatchRide({ db, ride, offerTtlSeconds, searchRadiusMeters, max
       staleFallbackEligibleCount: diagnostics.staleFallbackEligibleCount,
       normalizedStatus: C.RIDE_STATUS.SEARCHING,
       reasonCode: C.REASON.OFFERS_CREATED,
-      offersCreated: createdCount,
+      offersCreated: offerResult.createdCount,
+      duplicateOffersSkipped: Math.max(0, freshlyEligible.length - offerResult.createdCount),
+      offerExpiresAtMs: offerResult.expiresAtMs,
     });
     return {
       status: C.RIDE_STATUS.SEARCHING,
       reasonCode: C.REASON.OFFERS_CREATED,
-      offersCreated: createdCount,
+      offersCreated: offerResult.createdCount,
     };
   } catch (err) {
-    await rideRef.set(
-      {
-        status: C.RIDE_STATUS.DISPATCH_FAILED,
-        reasonCode: C.REASON.OFFER_BATCH_FAILED,
+    // A transient wave failure must not terminate a valid passenger search. The
+    // next Cloud Task (or the scheduled sweep fallback) retries from live state.
+    await db.runTransaction(async (tx) => {
+      const liveRideSnap = await tx.get(rideRef);
+      if (!liveRideSnap.exists) return;
+      const liveRide = liveRideSnap.data() || {};
+      if (liveRide.status !== C.RIDE_STATUS.SEARCHING) return;
+      tx.set(rideRef, {
+        reasonCode: C.REASON.SEARCH_CONTINUES,
+        lastDispatchErrorAtMs: clock.now(),
+        lastDispatchErrorCode: C.REASON.OFFER_BATCH_FAILED,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+      }, { merge: true });
+    });
     logWarning(context, 'ride.dispatch.offer_batch_failed', {
       ...base,
-      normalizedStatus: C.RIDE_STATUS.DISPATCH_FAILED,
+      normalizedStatus: C.RIDE_STATUS.SEARCHING,
       reasonCode: C.REASON.OFFER_BATCH_FAILED,
+      fallback: 'next_wave_or_dispatchSweepTask',
       internalMessage: err?.message || 'unknown dispatch failure',
     });
     return {
-      status: C.RIDE_STATUS.DISPATCH_FAILED,
+      status: C.RIDE_STATUS.SEARCHING,
       reasonCode: C.REASON.OFFER_BATCH_FAILED,
       offersCreated: 0,
     };

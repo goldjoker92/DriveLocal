@@ -29,16 +29,15 @@ const artifact = {
 const report = { checksum: 'abc123', bbox: [-38.55, -4.15, -38.45, -4.05] };
 
 describe('Horizonte launch dispatch policy', () => {
-  it('seeds a citywide bounded broadcast with a tolerant freshness window', () => {
+  it('seeds a progressive bounded search with a tolerant freshness window', () => {
     const config = buildServiceAreaConfig(identity(), artifact, report, {});
 
-    expect(config.dispatchMode).toBe('citywide_launch');
-    expect(config.searchRadiusMeters).toBe(50_000);
+    expect(config.dispatchMode).toBe('progressive_launch');
+    expect(config.searchRadiusMeters).toBe(15_000);
     expect(config.maxCandidates).toBe(100);
     expect(config.offerTtlSeconds).toBe(C.OFFER_TTL_SECONDS);
-    // The offer must span the whole search window: a late FCM delivery can no
-    // longer eat most of the driver's decision time.
-    expect(config.offerTtlSeconds).toBe(C.SEARCH_TTL_SECONDS);
+    expect(config.offerTtlSeconds).toBe(30);
+    expect(C.SEARCH_TTL_SECONDS).toBe(90);
     expect(C.LOCATION_MAX_AGE_MS).toBe(15 * 60 * 1000);
   });
 
@@ -50,9 +49,9 @@ describe('Horizonte launch dispatch policy', () => {
     });
 
     expect(policy).toMatchObject({
-      dispatchMode: 'citywide_launch',
-      source: 'backend_launch_fallback',
-      searchRadiusMeters: 50_000,
+      dispatchMode: 'progressive_launch',
+      source: 'backend_progressive_fallback',
+      searchRadiusMeters: 15_000,
       maxCandidates: 100,
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
     });

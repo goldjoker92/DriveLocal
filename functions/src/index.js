@@ -76,6 +76,8 @@ const { expireRideOffersTask } = require('./rides/expireOffersTask');
 exports.expireRideOffersTask = expireRideOffersTask;
 // Continuous search: runs the next dispatch wave and closes elapsed searches
 // without depending on Cloud Tasks.
+const { dispatchRideWaveTask } = require('./rides/dispatchWaveTask');
+exports.dispatchRideWaveTask = dispatchRideWaveTask;
 const { dispatchSweepTask } = require('./rides/dispatchSweepTask');
 exports.dispatchSweepTask = dispatchSweepTask;
 const {

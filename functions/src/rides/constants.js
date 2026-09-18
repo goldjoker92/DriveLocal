@@ -115,16 +115,22 @@ module.exports = Object.freeze({
     OFFERS_CREATED: 'OFFERS_CREATED',
   }),
 
-  // Horizonte launch policy: broadcast to every eligible online driver in the
-  // municipality (bounded for safety), give enough time to answer, and tolerate
-  // short Android delivery delays without treating a working driver as offline.
-  // Android routinely delays FCM delivery by 10-15s on doze-prone devices, so a
-  // 45s offer left a working driver ~30s of real decision time. The offer now
-  // spans the whole search window: a driver who answers late still wins the ride.
-  OFFER_TTL_SECONDS: 90,
+  // Horizonte progressive launch policy. Each individual offer remains valid
+  // for 30 seconds while the passenger search has one clear 90-second ceiling.
+  // Radius expansion is cumulative: drivers already offered the ride are never
+  // notified twice, but drivers coming online during the window remain eligible.
+  OFFER_TTL_SECONDS: 30,
   SEARCH_TTL_SECONDS: 90,
   MAX_CANDIDATES: 100,
-  DEFAULT_SEARCH_RADIUS_METERS: 50_000,
+  DEFAULT_SEARCH_RADIUS_METERS: 15_000,
+  DISPATCH_WAVE_PLAN_VERSION: 'horizonte-progressive-v1',
+  DISPATCH_WAVES: Object.freeze([
+    Object.freeze({ index: 0, offsetMs: 0, radiusMeters: 3_000 }),
+    Object.freeze({ index: 1, offsetMs: 15_000, radiusMeters: 6_000 }),
+    Object.freeze({ index: 2, offsetMs: 30_000, radiusMeters: 10_000 }),
+    Object.freeze({ index: 3, offsetMs: 45_000, radiusMeters: 12_000 }),
+    Object.freeze({ index: 4, offsetMs: 60_000, radiusMeters: 15_000 }),
+  ]),
   // Launch reality: the work session is refreshed ONLY by a published GPS point
   // (see driverLocationTracking.driverLocationUpdate). Any Android battery
   // restriction that suspends the location task therefore silently removes a
@@ -141,12 +147,9 @@ module.exports = Object.freeze({
   // tunnel, an indoor stop or a short doze never ends a working driver's shift.
   WORK_SESSION_ABANDONED_MAX_AGE_MS: 45 * 60 * 1000,
 
-  // Continuous search. A ride is NEVER closed at t=0 for lack of drivers: the
-  // passenger sees a real search, exactly like the apps he already uses, and a
-  // driver who comes online mid-search is picked up by the next wave.
-  // Waves are incremental: an offer is written ONCE per driver, later waves only
-  // target drivers who were not reachable before, so cost stays near zero.
-  DISPATCH_WAVE_INTERVAL_MS: 25 * 1000,
+  // Cloud Tasks runs the sub-minute cadence. The one-minute scheduled sweep is
+  // deliberately only a recovery mechanism when a task is delayed or unavailable.
+  DISPATCH_WAVE_INTERVAL_MS: 15 * 1000,
   // Drivers already offered this ride, kept on the ride document so a wave costs
   // no extra reads. Bounded to stay far below the 1 MiB document limit.
   MAX_TRACKED_OFFERED_DRIVERS: 200,

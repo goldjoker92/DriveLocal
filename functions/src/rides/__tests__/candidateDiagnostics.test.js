@@ -76,7 +76,7 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
       rejectedStaleWorkSession: 1,
       rejectedStaleLocation: 1,
       rejectedSubscriptionRequired: 1,
-      searchRadiusMeters: 50_000,
+      searchRadiusMeters: 15_000,
       locationMaxAgeMs: 15 * 60 * 1000,
       availabilitySessionMaxAgeMs: 20 * 60 * 1000,
       staleFallbackMaxAgeMs: ONLINE_STALE_FALLBACK_MAX_AGE_MS,
@@ -91,7 +91,7 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
       }),
     ], {
       pickup,
-      searchRadiusMeters: 50_000,
+      searchRadiusMeters: 15_000,
       clock,
     });
 
