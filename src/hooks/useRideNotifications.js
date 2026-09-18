@@ -9,7 +9,10 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { auth } from '../config/firebase';
-import { registerForPushNotifications } from '../services/notificationsService';
+import {
+  registerForPushNotifications,
+  presentForegroundRideOfferAlert,
+} from '../services/notificationsService';
 import { logRideClientEvent } from '../utils/clientRideLog';
 import {
   notificationDataFromResponse,
@@ -29,14 +32,28 @@ function configureHandlerOnce() {
   handlerConfigured = true;
   Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
-      const eventType = notification?.request?.content?.data?.eventType;
-      const shouldPlaySound = FOREGROUND_SOUND_EVENTS.has(String(eventType || ''));
+      const data = notification?.request?.content?.data || {};
+      const eventType = String(data.eventType || '');
+
+      // A ride offer arriving in the foreground is re-presented on the custom V4
+      // channel by the received-listener below (that is the only way to get the
+      // DriveLocal 30s sound, vibration and light while the app is open). If we
+      // ALSO let the handler sound the original here, the driver hears the alert
+      // twice, so the offer stays silent at this stage and the re-presented copy
+      // carries the sound. The re-presented copy is flagged so it is never
+      // itself re-presented, which would loop.
+      const isOffer = eventType === 'offer_created';
+      const isRepresented = data.foregroundRepresented === true;
+      const shouldPlaySound = isRepresented
+        ? true
+        : FOREGROUND_SOUND_EVENTS.has(eventType) && !isOffer;
+
       return {
         shouldShowBanner: true,
         shouldShowList: true,
-        // On Android, a foreground notification with sound disabled may not display
-        // the drop-down banner. Arrival is therefore treated as a critical visible
-        // update, just like a new ride offer.
+        // On Android, a foreground notification with sound disabled may not
+        // display the drop-down banner. Arrival is treated as a critical visible
+        // update; the offer's banner is carried by the re-presented V4 copy.
         shouldPlaySound,
         shouldSetBadge: false,
       };
@@ -109,6 +126,18 @@ export function useRideNotifications() {
         notificationId: typeof data.notificationId === 'string' ? data.notificationId : null,
         appState: 'foreground',
       });
+
+      // Make a foreground offer impossible to miss: re-post it on the custom V4
+      // channel so it carries the DriveLocal sound, vibration and light exactly
+      // like a background offer. The already re-presented copy is skipped to
+      // avoid an infinite loop. Best effort: a failure leaves the default
+      // foreground banner untouched.
+      if (
+        String(data.eventType || '') === 'offer_created'
+        && data.foregroundRepresented !== true
+      ) {
+        presentForegroundRideOfferAlert(data).catch(() => undefined);
+      }
     });
     const responseSub = Notifications.addNotificationResponseReceivedListener((resp) => {
       navigateFromResponse(resp);
