@@ -31,12 +31,10 @@ function buildServiceAreaConfig(identity, artifact, report, existing = {}) {
     founderCounterId: identity.founderCounterId,
     allowedVehicleTypes: existing.allowedVehicleTypes || ['moto', 'car'],
 
-    // Launch policy for a medium-sized city with a small initial driver supply.
-    // The service-area query still limits candidates to Horizonte + vehicle type
-    // + online status. The large radius therefore means citywide dispatch, not
-    // cross-city dispatch, and avoids false "no driver" results caused by an
-    // overly narrow pickup radius.
-    dispatchMode: 'citywide_launch',
+    // Progressive launch policy for a medium-sized city with limited initial
+    // supply. Runtime expands through 3/6/10/12/15 km without ever crossing the
+    // municipality geofence validated above.
+    dispatchMode: 'progressive_launch',
     searchRadiusMeters: C.DEFAULT_SEARCH_RADIUS_METERS,
     maxCandidates: C.MAX_CANDIDATES,
     offerTtlSeconds: C.OFFER_TTL_SECONDS,

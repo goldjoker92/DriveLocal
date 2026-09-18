@@ -81,8 +81,9 @@ function positiveNumber(value, fallback) {
 
 /**
  * Resolves the effective dispatch policy. Horizonte V1 is deliberately
- * self-healing: an old Firestore document created before the launch-policy seed
- * must not silently restore a 5 km radius, 15 second offer or 25-driver cap.
+ * self-healing: an old Firestore document created before the progressive-policy
+ * seed must not silently restore a 50 km broadcast, 15-second offer or
+ * 25-driver cap.
  * A future density-optimized mode can explicitly opt back into configurable
  * values after launch.
  *
@@ -95,11 +96,13 @@ function resolveDispatchPolicy(serviceAreaId, cfg = {}) {
 
   if (launchMode) {
     return {
-      dispatchMode: 'citywide_launch',
+      dispatchMode: 'progressive_launch',
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
       searchRadiusMeters: C.DEFAULT_SEARCH_RADIUS_METERS,
       maxCandidates: C.MAX_CANDIDATES,
-      source: cfg.dispatchMode === 'citywide_launch' ? 'firestore_launch' : 'backend_launch_fallback',
+      source: cfg.dispatchMode === 'progressive_launch'
+        ? 'firestore_progressive_launch'
+        : 'backend_progressive_fallback',
     };
   }
 

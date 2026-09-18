@@ -24,10 +24,22 @@ const clock = { now: () => T0 };
 function fakeDb() {
   const store = new Map();
   const batches = [];
+  store.set(`${C.RIDE_REQUESTS}/ride_lot2`, {
+    ...ride(),
+    status: C.RIDE_STATUS.SEARCHING,
+    searchExpiresAtMs: T0 + C.SEARCH_TTL_SECONDS * 1000,
+    offeredDriverIds: [],
+    dispatchWaveIndexesAttempted: [],
+  });
 
   function docRef(path) {
     return {
+      id: path.split('/').pop(),
       path,
+      get: () => {
+        const data = store.get(path);
+        return Promise.resolve({ exists: data !== undefined, data: () => data });
+      },
       set: (data) => {
         store.set(path, { ...(store.get(path) || {}), ...data });
         return Promise.resolve();
@@ -39,6 +51,13 @@ function fakeDb() {
     _store: store,
     _batches: batches,
     collection: (name) => ({ doc: (id) => docRef(`${name}/${id}`) }),
+    runTransaction: async (callback) => callback({
+      get: (ref) => ref.get(),
+      set: (ref, data, options) => {
+        const previous = store.get(ref.path);
+        store.set(ref.path, options?.merge && previous ? { ...previous, ...data } : { ...data });
+      },
+    }),
     batch() {
       const ops = [];
       const record = { ops, committed: false };
@@ -101,7 +120,7 @@ describe('offer wave delivery guarantees', () => {
     process.env.NODE_ENV = originalEnv;
   });
 
-  it('writes the whole wave in batches instead of one await per driver', async () => {
+  it('writes the whole wave and notification outbox atomically', async () => {
     const db = fakeDb();
     const result = await createTargetedOffers({
       db,
@@ -116,12 +135,9 @@ describe('offer wave delivery guarantees', () => {
     expect(entries(db, `${C.DRIVER_OFFERS}/`)).toHaveLength(12);
     expect(entries(db, `${C.NOTIFICATION_EVENTS}/`)).toHaveLength(12);
 
-    // Exactly two commits: one for the offers, one for the notifications. Any
-    // regression back to per-driver awaits would show up as 24 batches or none.
-    expect(db._batches).toHaveLength(2);
-    expect(db._batches.every((b) => b.committed)).toBe(true);
-    expect(db._batches[0].ops).toHaveLength(12);
-    expect(db._batches[1].ops).toHaveLength(12);
+    // One Firestore transaction owns both sides; no partially-notified wave can
+    // survive a retry or process interruption.
+    expect(db._batches).toHaveLength(0);
 
     const [, firstOffer] = entries(db, `${C.DRIVER_OFFERS}/`)[0];
     expect(firstOffer.pickupPreview.label).toBe('Centro · Horizonte - CE');
@@ -184,10 +200,10 @@ describe('offer wave delivery guarantees', () => {
       clock,
     });
 
-    // Offers are committed first, notifications second. Expiry comes last and is
-    // deliberately absent from the batches: it is a safety net, not a gate.
-    expect(db._batches[0].ops[0].path.startsWith(`${C.DRIVER_OFFERS}/`)).toBe(true);
-    expect(db._batches[1].ops[0].path.startsWith(`${C.NOTIFICATION_EVENTS}/`)).toBe(true);
+    // Both writes already exist when expiry scheduling begins. The scheduler is
+    // a safety net and never a precondition for delivering the offer.
+    expect(entries(db, `${C.DRIVER_OFFERS}/`)).toHaveLength(3);
+    expect(entries(db, `${C.NOTIFICATION_EVENTS}/`)).toHaveLength(3);
   });
 
   it('carries the offer deadline on the notification event', async () => {

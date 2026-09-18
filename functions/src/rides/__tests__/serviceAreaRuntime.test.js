@@ -61,8 +61,8 @@ describe('runtime service-area geofence', () => {
       destination: { lat: -4.08, lng: -38.48 },
     });
 
-    expect(result.dispatchMode).toBe('citywide_launch');
-    expect(result.policySource).toBe('backend_launch_fallback');
+    expect(result.dispatchMode).toBe('progressive_launch');
+    expect(result.policySource).toBe('backend_progressive_fallback');
     expect(result.offerTtlSeconds).toBe(C.OFFER_TTL_SECONDS);
     expect(result.searchRadiusMeters).toBe(C.DEFAULT_SEARCH_RADIUS_METERS);
     expect(result.maxCandidates).toBe(C.MAX_CANDIDATES);

@@ -15,8 +15,8 @@
 const admin = require('firebase-admin');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { logInfo, logWarning } = require('../logging/logger');
-const { validateServiceArea } = require('./serviceArea');
-const { dispatchRide } = require('./dispatch');
+const { runDispatchWave } = require('./dispatchWaveTask');
+const { dueWaveIndex } = require('./dispatchWavePolicy');
 const { expireRideOffers } = require('./expireOffersTask');
 const C = require('./constants');
 
@@ -27,8 +27,7 @@ const TIME_ZONE = 'America/Fortaleza';
 const MAX_RIDES_PER_RUN = 25;
 
 /**
- * @param {{db:object, nowMs:number, context:object, clock:{now:()=>number},
- *          routingAdapter?:object}} args
+ * @param {{db:object, nowMs:number, context:object, clock:{now:()=>number}}} args
  */
 async function sweepSearchingRides({ db, nowMs, context, clock }) {
   const snap = await db
@@ -69,29 +68,16 @@ async function sweepSearchingRides({ db, nowMs, context, clock }) {
       continue;
     }
 
-    // A wave re-queries live supply and offers ONLY to drivers not served yet.
-    // When nobody new is reachable it writes a single timestamp and stops.
+    // Recover the latest wave that should already have run. Cloud Tasks normally
+    // handles the exact 15-second cadence; this path is intentionally coarse.
     try {
-      const svc = await validateServiceArea({
+      const recoveryWaveIndex = dueWaveIndex(ride.createdAtMs, nowMs);
+      const outcome = await runDispatchWave({
         db,
-        serviceAreaId: ride.serviceAreaId || C.DEFAULT_SERVICE_AREA_ID,
-        vehicleType: ride.vehicleType,
-        pickup: ride.pickup,
-        destination: ride.destination,
-      });
-
-      const outcome = await dispatchRide({
-        db,
-        ride: { ...ride, rideId },
-        // Every offer of a ride dies with the search window, whichever wave
-        // created it, so the passenger's wait has one clear end.
-        offerTtlSeconds: Math.max(
-          1,
-          Math.ceil((searchExpiresAtMs - nowMs) / 1000)
-        ),
-        searchRadiusMeters: svc.searchRadiusMeters,
-        maxCandidates: svc.maxCandidates,
-        driverBuildPolicy: svc.driverBuildPolicy,
+        rideId,
+        waveIndex: recoveryWaveIndex,
+        trigger: 'scheduled_sweep_fallback',
+        expandIfEmpty: true,
         context,
         clock,
       });
@@ -103,6 +89,8 @@ async function sweepSearchingRides({ db, nowMs, context, clock }) {
         vehicleType: ride.vehicleType,
         offersCreated: outcome.offersCreated,
         reasonCode: outcome.reasonCode,
+        dispatchWaveIndex: recoveryWaveIndex,
+        fallback: true,
       });
     } catch (error) {
       summary.failed += 1;

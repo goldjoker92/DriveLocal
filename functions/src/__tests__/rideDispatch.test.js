@@ -172,7 +172,7 @@ describe('dispatch targeting', () => {
     seedDriver(db, 'car', { vehicleType: 'car' });
     seedDriver(db, 'blocked', { isBlocked: true });
     seedDriver(db, 'unapproved', { verificationStatus: 'pending_review' });
-    seedDriver(db, 'stale', { locationUpdatedAtMs: T0 - 10 * 60 * 1000 });
+    seedDriver(db, 'stale', { locationUpdatedAtMs: T0 - 16 * 60 * 1000 });
     seedDriver(db, 'old-session', { locationAvailabilitySessionId: 'work_previous_session_123456' });
     seedDriver(db, 'far', { location: { lat: -4.14, lng: -38.54 } });
     seedDriver(db, 'busy', { activeRideId: 'other' });
@@ -185,16 +185,19 @@ describe('dispatch targeting', () => {
     expect(offered).not.toContain(`${view.rideId}_car`);
     expect(offered).not.toContain(`${view.rideId}_blocked`);
     expect(offered).not.toContain(`${view.rideId}_unapproved`);
-    // A 10-minute-old point is now INSIDE the widened location window and is
+    // A 16-minute-old point is inside the controlled stale fallback window and is
     // deliberately served: losing a real working driver to an Android battery
     // restriction costs far more than an offer he can simply decline.
     expect(offered).toContain(`${view.rideId}_stale`);
     expect(offered).not.toContain(`${view.rideId}_old-session`);
     expect(offered).not.toContain(`${view.rideId}_busy`);
+    // A near driver keeps the first wave at 3 km. The ~7 km driver is reached by
+    // a later progressive task rather than receiving the initial notification.
+    expect(offered).not.toContain(`${view.rideId}_far`);
     expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
   });
 
-  it('T5: no eligible driver keeps the ride searching instead of refusing at once', async () => {
+  it('T5: no eligible driver keeps searching until the global deadline', async () => {
     const db = makeFakeFirestore();
     seedCity(db);
     seedDriver(db, 'offline', { availabilityStatus: 'offline' });
@@ -205,6 +208,8 @@ describe('dispatch targeting', () => {
     expect(view.status).toBe(C.RIDE_STATUS.SEARCHING);
     expect(view.reasonCode).toBe(C.REASON.SEARCH_CONTINUES);
     expect(offersFor(db, view.rideId).length).toBe(0);
+    expect(db._store.get(`${C.RIDE_REQUESTS}/${view.rideId}`).dispatchWaveIndexesAttempted)
+      .toEqual([0, 1, 2, 3, 4]);
   });
 });
 

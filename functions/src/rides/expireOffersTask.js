@@ -16,9 +16,10 @@ function ts() {
 }
 
 /**
- * Idempotently closes expired offers for one ride and ends the search only when
- * the ride is still searching and no live offer remains. The ride, passenger and
- * offers are read before any write so acceptance and expiry cannot both win.
+ * Idempotently closes expired offers for one ride. Individual 30-second offer
+ * expiry never ends the passenger's 90-second search; only the global search
+ * deadline can transition the ride to no_driver_available. The ride, passenger
+ * and offers are read before any write so acceptance and expiry cannot both win.
  *
  * @param {{db:object, rideId:string, nowMs:number, context?:object}} args
  */
@@ -56,13 +57,22 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
     const offersSnap = await tx.get(offersQuery);
     const expiredDocs = [];
     let liveOfferCount = 0;
+    const searchExpiresAtMs = Number(ride.searchExpiresAtMs || 0);
+    const hasGlobalDeadline = searchExpiresAtMs > 0;
+    const globalSearchExpired = hasGlobalDeadline && searchExpiresAtMs <= nowMs;
 
     offersSnap.forEach((doc) => {
       const offer = doc.data() || {};
       if (offer.status !== C.OFFER_STATUS.OFFERED) return;
-      if (Number(offer.expiresAtMs || 0) > nowMs) liveOfferCount += 1;
+      if (!globalSearchExpired && Number(offer.expiresAtMs || 0) > nowMs) liveOfferCount += 1;
       else expiredDocs.push(doc);
     });
+
+    // Legacy rides created before continuous search have no global deadline:
+    // preserve their close-on-last-offer behavior without closing a live offer.
+    const searchExpired = hasGlobalDeadline
+      ? globalSearchExpired
+      : liveOfferCount === 0;
 
     expiredDocs.forEach((doc) => {
       tx.set(doc.ref, {
@@ -74,13 +84,15 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
       }, { merge: true });
     });
 
-    if (liveOfferCount > 0) {
+    if (!searchExpired) {
       return {
-        outcome: 'live_offers_remain',
+        outcome: liveOfferCount > 0 ? 'live_offers_remain' : 'search_continues',
         expiredOfferCount: expiredDocs.length,
         liveOfferCount,
         passengerStateCleared: false,
         passengerNotified: false,
+        searchExpired: false,
+        searchExpiresAtMs,
       };
     }
 
@@ -133,6 +145,8 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
       liveOfferCount: 0,
       passengerStateCleared,
       passengerNotified,
+      searchExpired: true,
+      searchExpiresAtMs,
     };
   });
 
@@ -143,6 +157,8 @@ async function expireRideOffers({ db, rideId, nowMs, context }) {
     liveOfferCount: result.liveOfferCount,
     passengerStateCleared: result.passengerStateCleared,
     passengerNotified: result.passengerNotified,
+    searchExpired: result.searchExpired,
+    searchExpiresAtMs: result.searchExpiresAtMs,
     outcome: result.outcome,
   });
 

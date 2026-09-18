@@ -7,7 +7,7 @@
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateEnum, validateIdempotencyKey } = require('../validation/validators');
-const { logInfo } = require('../logging/logger');
+const { logInfo, logWarning } = require('../logging/logger');
 const {
   acquireOperation,
   completeOperation,
@@ -17,7 +17,10 @@ const {
 const { evaluatePassengerRideEligibility } = require('../passengers/eligibility');
 const { validateServiceArea } = require('./serviceArea');
 const { calculateServerRideQuote } = require('./quote');
-const { dispatchRide } = require('./dispatch');
+const {
+  runDispatchWave,
+  scheduleRideDispatchTasks,
+} = require('./dispatchWaveTask');
 const { safeRideView } = require('./safeViews');
 const C = require('./constants');
 
@@ -213,6 +216,12 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       createdAtMs: nowMs,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       searchExpiresAtMs: nowMs + C.SEARCH_TTL_SECONDS * 1000,
+      dispatchWavePlanVersion: C.DISPATCH_WAVE_PLAN_VERSION,
+      dispatchWaveIndexesAttempted: [],
+      lastDispatchWaveIndex: null,
+      lastDispatchWaveRadiusMeters: null,
+      lastDispatchWaveTrigger: null,
+      offeredDriverIds: [],
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     await rideRef.set(ride);
@@ -230,13 +239,41 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         quote.minimumPlatformCommissionCentavos,
     });
 
-    const dispatch = await dispatchRide({
+    let taskSchedule = null;
+    try {
+      taskSchedule = await scheduleRideDispatchTasks({
+        rideId,
+        createdAtMs: nowMs,
+        searchExpiresAtMs: ride.searchExpiresAtMs,
+        traceId,
+        context,
+      });
+    } catch (error) {
+      // The minute sweep remains an independent fallback even if the task API
+      // itself is temporarily unavailable during ride creation.
+      logWarning(context, 'ride.dispatch_tasks.schedule_failed', {
+        operation: OPERATION_TYPE,
+        rideId,
+        fallback: 'dispatchSweepTask',
+        internalMessage: error?.message || 'unknown dispatch task scheduling failure',
+      });
+    }
+    logInfo(context, 'ride.dispatch_tasks.schedule_completed', {
+      operation: OPERATION_TYPE,
+      rideId,
+      scheduledWaveCount: taskSchedule?.scheduledWaveCount || 0,
+      failedWaveCount: taskSchedule?.failedWaveCount || 0,
+      searchExpiryScheduled: taskSchedule?.searchExpiryScheduled === true,
+      reasonCode: taskSchedule?.reasonCode || 'FALLBACK_SWEEP',
+    });
+
+    const dispatch = await runDispatchWave({
       db,
-      ride,
-      offerTtlSeconds: svc.offerTtlSeconds,
-      searchRadiusMeters: svc.searchRadiusMeters,
-      maxCandidates: svc.maxCandidates,
-      driverBuildPolicy: svc.driverBuildPolicy,
+      rideId,
+      waveIndex: 0,
+      trigger: 'initial_callable',
+      expandIfEmpty: true,
+      resolvedServiceArea: svc,
       context,
       clock,
     });
@@ -260,7 +297,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
 
     const view = safeRideView(rideId, {
       ...ride,
-      status: dispatch.status,
+      status: dispatch.status || C.RIDE_STATUS.SEARCHING,
       reasonCode: dispatch.reasonCode,
     });
     await completeOperation(db, idempotencyKey, view, clock);

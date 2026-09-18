@@ -1,12 +1,14 @@
 // @ts-check
 // Driver refusal/expiry for a targeted offer. The backend closes only the
-// authenticated driver's offer. If no live offer remains, the passenger search
-// and activeRideId are closed together.
+// authenticated driver's offer. If no live offer remains, the next radius is
+// requested early; the passenger search closes only at its global deadline.
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { assertShape, validateIdentifier } = require('../validation/validators');
 const { logInfo } = require('../logging/logger');
+const { enqueueImmediateDispatchWave } = require('./dispatchWaveTask');
+const { nextWaveIndex } = require('./dispatchWavePolicy');
 const C = require('./constants');
 
 function ts() {
@@ -14,23 +16,59 @@ function ts() {
 }
 
 async function finishSearchWhenNoLiveOffer({ db, rideId, nowMs, context }) {
-  const offersSnap = await db.collection(C.DRIVER_OFFERS).where('rideId', '==', rideId).get();
-  let hasLiveOffer = false;
-  offersSnap.forEach((doc) => {
-    const offer = doc.data() || {};
-    if (offer.status === C.OFFER_STATUS.OFFERED && Number(offer.expiresAtMs || 0) > nowMs) {
-      hasLiveOffer = true;
-    }
-  });
-  if (hasLiveOffer) return false;
-
   const rideRef = db.collection(C.RIDE_REQUESTS).doc(rideId);
+  const offersQuery = db.collection(C.DRIVER_OFFERS).where('rideId', '==', rideId);
   const result = await db.runTransaction(async (tx) => {
     const rideSnap = await tx.get(rideRef);
-    if (!rideSnap.exists) return { closed: false, passengerStateCleared: false };
+    const offersSnap = await tx.get(offersQuery);
+    if (!rideSnap.exists) {
+      return { closed: false, passengerStateCleared: false, outcome: 'ride_missing' };
+    }
     const ride = rideSnap.data() || {};
     if (ride.status !== C.RIDE_STATUS.SEARCHING) {
-      return { closed: false, passengerStateCleared: false };
+      return {
+        closed: false,
+        passengerStateCleared: false,
+        outcome: `ride_${ride.status || 'unknown'}`,
+      };
+    }
+
+    let hasLiveOffer = false;
+    offersSnap.forEach((doc) => {
+      const offer = doc.data() || {};
+      if (offer.status === C.OFFER_STATUS.OFFERED
+        && Number(offer.expiresAtMs || 0) > nowMs) hasLiveOffer = true;
+    });
+    if (hasLiveOffer) {
+      return {
+        closed: false,
+        passengerStateCleared: false,
+        outcome: 'live_offers_remain',
+      };
+    }
+
+    const searchExpiresAtMs = Number(ride.searchExpiresAtMs || 0);
+    const searchExpired = searchExpiresAtMs <= 0 || searchExpiresAtMs <= nowMs;
+    if (!searchExpired) {
+      const attempts = Array.isArray(ride.dispatchWaveIndexesAttempted)
+        ? ride.dispatchWaveIndexesAttempted.filter(Number.isInteger)
+        : [];
+      const currentWaveIndex = Number.isInteger(ride.lastDispatchWaveIndex)
+        ? ride.lastDispatchWaveIndex
+        : (attempts.length > 0 ? Math.max(...attempts) : 0);
+      const advanceToWaveIndex = nextWaveIndex(currentWaveIndex);
+      tx.set(rideRef, {
+        reasonCode: C.REASON.SEARCH_CONTINUES,
+        lastAllOffersClosedAtMs: nowMs,
+        updatedAt: ts(),
+      }, { merge: true });
+      return {
+        closed: false,
+        passengerStateCleared: false,
+        outcome: 'search_continues',
+        advanceToWaveIndex,
+        searchExpiresAtMs,
+      };
     }
 
     const passengerRef = ride.passengerId
@@ -58,9 +96,37 @@ async function finishSearchWhenNoLiveOffer({ db, rideId, nowMs, context }) {
       passengerStateCleared = true;
     }
 
-    return { closed: true, passengerStateCleared };
+    return {
+      closed: true,
+      passengerStateCleared,
+      outcome: 'search_closed',
+      advanceToWaveIndex: null,
+      searchExpiresAtMs,
+    };
   });
 
+  if (result.outcome === 'search_continues') {
+    let advance = { scheduled: false, reasonCode: 'NO_NEXT_WAVE' };
+    if (result.advanceToWaveIndex != null) {
+      advance = await enqueueImmediateDispatchWave({
+        rideId,
+        waveIndex: result.advanceToWaveIndex,
+        traceId: context?.traceId || null,
+        context,
+      });
+    }
+    logInfo(context, 'ride.dispatch.all_offers_closed_search_continues', {
+      operation: 'decline_offer',
+      rideId,
+      normalizedStatus: C.RIDE_STATUS.SEARCHING,
+      reasonCode: C.REASON.SEARCH_CONTINUES,
+      advanceToWaveIndex: result.advanceToWaveIndex,
+      advanceScheduled: advance.scheduled,
+      advanceReasonCode: advance.reasonCode,
+      searchExpiresAtMs: result.searchExpiresAtMs,
+    });
+    return false;
+  }
   if (!result.closed) return false;
   logInfo(context, 'ride.dispatch.all_offers_closed', {
     operation: 'decline_offer',
@@ -68,6 +134,7 @@ async function finishSearchWhenNoLiveOffer({ db, rideId, nowMs, context }) {
     normalizedStatus: C.RIDE_STATUS.NO_DRIVER_AVAILABLE,
     reasonCode: C.REASON.NO_ELIGIBLE_DRIVERS,
     passengerStateCleared: result.passengerStateCleared,
+    searchExpiresAtMs: result.searchExpiresAtMs,
   });
   return true;
 }
