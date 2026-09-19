@@ -344,6 +344,93 @@ const appVersion =
  * Reads the safe local registration receipt plus the current Android permission.
  * It never asks for permission and never requests or returns the FCM token.
  */
+/**
+ * Re-presents a ride offer on the custom-sound channel while the app is in the
+ * FOREGROUND.
+ *
+ * Why this exists: when the app is open, Android hands the incoming FCM message
+ * to expo-notifications' handler instead of drawing it itself. That handler can
+ * say "play a sound", but it CANNOT choose a channel, so the sound comes from
+ * the default status channel — the generic system tone, no custom 30s alert, no
+ * light. A driver waiting on the cockpit (app open, screen kept awake) is
+ * exactly the case that matters, and it was the one losing the alert.
+ *
+ * The fix is to post a second, local notification explicitly on the V4 offer
+ * channel, which carries the DriveLocal sound, vibration and light. The handler
+ * is told NOT to sound the original foreground notification, so the driver
+ * hears the alert once, not twice.
+ *
+ * Deliberately best effort and self-contained:
+ *   - only fires for a real offer_created with an id, so nothing else can
+ *     trigger a second notification;
+ *   - only fires when the V4 channel is actually ready on THIS device; if the
+ *     custom-sound channel never came up, we do nothing and leave the system
+ *     default rather than risk a silent or crashing path;
+ *   - reuses the offer id as the Android notification identifier, so the local
+ *     copy replaces any duplicate instead of stacking, and dismiss/cleanup by
+ *     offer id keeps working unchanged.
+ *
+ * @param {{ eventType?: string, offerId?: string, rideId?: string,
+ *           title?: string, body?: string }} data notification data payload
+ * @returns {Promise<boolean>} true when a custom-channel alert was posted
+ */
+export async function presentForegroundRideOfferAlert(data = {}) {
+  if (Platform.OS !== "android") return false;
+  if (String(data.eventType || "") !== "offer_created") return false;
+
+  const offerId = normalizedNotificationMatchId(data.offerId);
+  const rideId = normalizedNotificationMatchId(data.rideId);
+  if (!offerId && !rideId) return false;
+
+  try {
+    // Trust the device, not the stored capability: check the channel that will
+    // actually play the sound is present and correctly configured right now.
+    const channel = await Notifications.getNotificationChannelAsync(
+      NOTIFICATION_CHANNELS.RIDE_OFFERS_V4,
+    );
+    if (!isRideOfferSoundChannelReady(channel)) {
+      traceNotificationReadiness("foreground_offer.v4_channel_unavailable", {
+        capability: RIDE_OFFER_CHANNEL_CAPABILITIES.CUSTOM_SOUND_V4,
+      });
+      return false;
+    }
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: offerId || `ride_offer_${rideId}`,
+      content: {
+        title: typeof data.title === "string" && data.title.trim()
+          ? data.title
+          : "Nova corrida disponível",
+        body: typeof data.body === "string" && data.body.trim()
+          ? data.body
+          : "Toque para ver a oferta.",
+        // The channel supplies the sound; naming it here keeps the mapping
+        // explicit and lets Android pick the custom alert on every OEM skin.
+        sound: NOTIFICATION_SOUNDS.RIDE_OFFER,
+        // Carry the same routing data so a tap opens the offer exactly like a
+        // background notification would.
+        data: {
+          ...data,
+          foregroundRepresented: true,
+        },
+      },
+      trigger: {
+        channelId: NOTIFICATION_CHANNELS.RIDE_OFFERS_V4,
+        // Fire immediately.
+        seconds: 1,
+      },
+    });
+    return true;
+  } catch (error) {
+    // Never let a presentation failure break notification handling: the driver
+    // still has the default foreground banner, and dispatch is unaffected.
+    traceNotificationReadiness("foreground_offer.present_failed", {
+      reasonCode: String(error?.code || error?.name || "unknown").slice(0, 80),
+    });
+    return false;
+  }
+}
+
 export async function getPushNotificationDiagnosticState({
   nowMs = Date.now(),
   freshForMs = REGISTRATION_FRESH_MS,
