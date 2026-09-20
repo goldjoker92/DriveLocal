@@ -36,7 +36,7 @@ describe('Horizonte launch dispatch policy', () => {
     expect(config.searchRadiusMeters).toBe(15_000);
     expect(config.maxCandidates).toBe(100);
     expect(config.offerTtlSeconds).toBe(C.OFFER_TTL_SECONDS);
-    expect(config.offerTtlSeconds).toBe(30);
+    expect(config.offerTtlSeconds).toBe(60);
     expect(C.SEARCH_TTL_SECONDS).toBe(90);
     expect(C.LOCATION_MAX_AGE_MS).toBe(15 * 60 * 1000);
   });

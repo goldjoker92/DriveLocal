@@ -116,10 +116,14 @@ module.exports = Object.freeze({
   }),
 
   // Horizonte progressive launch policy. Each individual offer remains valid
-  // for 30 seconds while the passenger search has one clear 90-second ceiling.
+  // for 60 seconds (always capped by the search window) while the passenger
+  // search has one clear 90-second ceiling. 60 s, not 30 s: field data showed
+  // 62% of offers expiring with no reaction at all — the push often lands late
+  // on a dozing Android, and 30 s left nothing to decide with. The client
+  // countdown reads the offer's expiresAtMs, so every shipped build follows.
   // Radius expansion is cumulative: drivers already offered the ride are never
   // notified twice, but drivers coming online during the window remain eligible.
-  OFFER_TTL_SECONDS: 30,
+  OFFER_TTL_SECONDS: 60,
   SEARCH_TTL_SECONDS: 90,
   MAX_CANDIDATES: 100,
   DEFAULT_SEARCH_RADIUS_METERS: 15_000,
