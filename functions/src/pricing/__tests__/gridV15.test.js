@@ -5,7 +5,7 @@
 //   - the first LONG_RIDE_FROM_KM kilometres stay cheap (neighbourhood rides);
 //   - kilometres past that threshold cost more (the driver rides back empty);
 //   - the driver's time is actually paid;
-//   - the 18h-22h surcharge exists but ships OFF.
+//   - the 18h-22h surcharge is ON (+20%), and never touches a minimum fare.
 
 const {
   priceRide,
@@ -59,15 +59,34 @@ describe('driver time', () => {
 });
 
 describe('evening peak surcharge', () => {
-  it('ships disabled, so an evening ride costs the same as a midday one', () => {
-    expect(PEAK.enabled).toBe(false);
+  it('adds 20% between 18h and 22h, and nothing outside', () => {
+    expect(PEAK.enabled).toBe(true);
 
-    const midday = priceRide({ vehicleType: 'moto', distanceKm: 8, durationMin: 20, atMs: atLocalHour(14) });
-    const evening = priceRide({ vehicleType: 'moto', distanceKm: 8, durationMin: 20, atMs: atLocalHour(19) });
+    const ride = (hour) => priceRide({
+      vehicleType: 'moto', distanceKm: 8, durationMin: 20, atMs: atLocalHour(hour),
+    });
+    const midday = ride(14);
+    const evening = ride(19);
 
-    expect(evening.passengerFareCentavos).toBe(midday.passengerFareCentavos);
-    expect(evening.peakApplied).toBe(false);
-    expect(evening.peakMultiplierBps).toBe(10000);
+    expect(midday.peakApplied).toBe(false);
+    expect(evening.peakApplied).toBe(true);
+    expect(evening.peakMultiplierBps).toBe(12000);
+    expect(evening.passengerFareCentavos)
+      .toBe(Math.round(midday.passengerFareCentavos * 1.2));
+
+    // Window edges: 17h59 pays plain, 22h00 pays plain again.
+    expect(ride(17).peakApplied).toBe(false);
+    expect(ride(18).peakApplied).toBe(true);
+    expect(ride(21).peakApplied).toBe(true);
+    expect(ride(22).peakApplied).toBe(false);
+  });
+
+  it('never charges the surcharge on a minimum-fare ride', () => {
+    const evening = priceRide({
+      vehicleType: 'moto', distanceKm: 0.5, durationMin: 3, atMs: atLocalHour(20),
+    });
+    expect(evening.passengerFareCentavos).toBe(600);
+    expect(evening.fareBreakdown.minimumApplied).toBe(true);
   });
 
   it('never applies without a clock, whatever the switch says', () => {
@@ -76,17 +95,10 @@ describe('evening peak surcharge', () => {
     expect(isPeak(Number.NaN)).toBe(false);
   });
 
-  it('covers 18:00-21:59 local once enabled', () => {
-    const enabled = { ...PEAK, enabled: true };
-    const inWindow = (hour) => {
-      const h = new Date(atLocalHour(hour) - 3 * 3600 * 1000).getUTCHours();
-      return h >= enabled.fromHour && h < enabled.toHour;
-    };
-
-    expect(inWindow(17)).toBe(false);
-    expect(inWindow(18)).toBe(true);
-    expect(inWindow(21)).toBe(true);
-    expect(inWindow(22)).toBe(false);
+  it('exposes the window it applies to', () => {
+    expect(PEAK).toMatchObject({ fromHour: 18, toHour: 22, multiplierBps: 12000 });
+    expect(isPeak(atLocalHour(19))).toBe(true);
+    expect(isPeak(atLocalHour(9))).toBe(false);
   });
 });
 

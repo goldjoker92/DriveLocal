@@ -20,7 +20,7 @@ const PRICING_CONFIG_VERSION = 'horizonte-1.5.0';
 //   2. a single flat per-km made long rides a loss, because the driver rides
 //      back empty. Kilometres past LONG_RIDE_FROM_KM now cost more.
 //   3. nothing rewarded the 18h-22h window, where demand peaks and almost
-//      nobody is online. That surcharge is implemented but OFF (see PEAK).
+//      nobody is online: that window now carries a +20% surcharge (see PEAK).
 // Short neighbourhood rides stay on the minimum fare on purpose: they are the
 // most frequent ones and must remain cheaper than a local mototaxi.
 //
@@ -60,13 +60,13 @@ const DEFAULT_SERVICE_AREA_ID = 'HORIZONTE_CE_BR';
 // threshold is billed at longRidePerKmCentavos.
 const LONG_RIDE_FROM_KM = 3;
 
-// Horizonte evening peak (local time, UTC-3 all year). Flipping `enabled` to
-// true is the ONLY change needed to switch the surcharge on: quotes, ride
-// snapshots and commission all follow, server side, with no app build.
-// Keep it false while supply is thin — charging more for a service that still
-// fails to find a driver is the fastest way to lose passengers.
+// Horizonte evening peak (local time, UTC-3 all year). `enabled` is the only
+// switch: quotes, ride snapshots and commission all follow, server side, with
+// no app build. Turned ON on 2026-09-22 to pull drivers into the 18h-22h
+// window, where demand peaks and almost nobody is online. Set it back to false
+// if passenger demand drops in that window — the change is one deploy.
 const PEAK = Object.freeze({
-  enabled: false,
+  enabled: true,
   fromHour: 18,
   toHour: 22, // 18:00 -> 21:59 local
   multiplierBps: 12000, // 1.20x
@@ -90,7 +90,10 @@ function localHour(atMs) {
  */
 function isPeak(atMs) {
   if (!PEAK.enabled) return false;
-  if (!Number.isFinite(Number(atMs))) return false;
+  // null/0 are "no clock", not the epoch: Number(null) is 0 and would resolve
+  // to a real hour, silently surcharging callers that never passed a time.
+  if (atMs === null || atMs === undefined) return false;
+  if (!Number.isFinite(Number(atMs)) || Number(atMs) <= 0) return false;
   const hour = localHour(Number(atMs));
   return hour >= PEAK.fromHour && hour < PEAK.toHour;
 }
