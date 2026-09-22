@@ -16,6 +16,7 @@ async function calculateServerRideQuote({
   vehicleType,
   pickup,
   destination,
+  atMs = Date.now(),
 }) {
   const route = await routingAdapter.computeRoute({
     origin: pickup,
@@ -28,6 +29,7 @@ async function calculateServerRideQuote({
     vehicleType,
     distanceKm: route.distanceMeters / 1000,
     durationMin: route.durationSeconds / 60,
+    atMs,
   });
   if (!priced.ok) {
     throw new AppError(ERROR_CODES.INVALID_ARGUMENT, {
@@ -46,6 +48,7 @@ async function calculateServerRideQuote({
     minimumPlatformCommissionCentavos:
       priced.minimumPlatformCommissionCentavos,
     pricingConfigVersion: priced.pricingConfigVersion,
+    peakApplied: priced.peakApplied,
   };
 }
 
