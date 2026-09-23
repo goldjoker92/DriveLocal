@@ -63,7 +63,7 @@ export const SUPPORT_CATEGORIES = Object.freeze([
   }),
   Object.freeze({
     code: 'subscription_issue',
-    label: 'Problema com assinatura',
+    label: 'Pagamento anterior',
     roles: ['driver'],
     requiresRide: false,
   }),

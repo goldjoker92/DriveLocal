@@ -238,7 +238,8 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     ['fin de course', ['ride.awaiting_payment', 'finishRideSecure']],
     ['Pix', ['payment_marked_sent', 'pix_charge_created']],
     ['wallet', ['wallet.', 'wallet_']],
-    ['abonnement', ['subscription', 'assinatura']],
+    ['devis', ['ride.quote.started', 'ride.quote.succeeded']],
+    ['commission chauffeur', ['commercialPolicySnapshot', 'commissionCapturedCentavos']],
     ['notification', ['notification.sent', 'notification.failed']],
     ['restauration', ['restored', 'recovered', 'replayed']],
   ];

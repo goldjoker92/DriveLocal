@@ -34,29 +34,6 @@ function CommercialMetric({ label, value, detail }) {
   );
 }
 
-function subscriptionCopy(subscription) {
-  if (subscription?.mode === 'free') {
-    return {
-      value: 'Grátis',
-      detail: subscription.dateMs ? `até ${formatDateBR(subscription.dateMs)}` : null,
-    };
-  }
-  if (subscription?.mode === 'ride_grace') {
-    const used = Number(subscription.freeRideCountUsed || 0);
-    return {
-      value: 'Grátis',
-      detail: `${used} de 5 corridas usadas`,
-    };
-  }
-  if (subscription?.mode === 'active') {
-    return {
-      value: 'Ativa',
-      detail: subscription.dateMs ? `até ${formatDateBR(subscription.dateMs)}` : null,
-    };
-  }
-  return { value: 'Necessária', detail: 'ative para receber ofertas' };
-}
-
 function walletCopy(summary, commission) {
   if (commission?.mode === 'free') {
     return commission.dateMs
@@ -114,15 +91,12 @@ function RecentRideRow({ item }) {
 export default function DriverCockpitDashboardCard({
   summary,
   commission,
-  subscription,
   onWalletPress,
-  onSubscriptionPress,
 }) {
   const router = useRouter();
   const [recentHistory, setRecentHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState('');
-  const plan = subscriptionCopy(subscription);
   const heldPrefix = summary.walletHeldCentavos > 0
     ? `${formatBRL(summary.walletHeldCentavos)} reservado • `
     : '';
@@ -135,7 +109,6 @@ export default function DriverCockpitDashboardCard({
       params: { reason: 'wallet_required', returnTo: '/driver-home' },
     })
     : onWalletPress || (() => router.push('/wallet'));
-  const openSubscription = onSubscriptionPress || (() => router.push('/subscription-plans'));
   const openAllHistory = () => router.push('/ride-history');
 
   useEffect(() => {
@@ -219,7 +192,6 @@ export default function DriverCockpitDashboardCard({
           value={formatBRL(summary.walletAvailableCentavos)}
           detail={walletDetail}
         />
-        <CommercialMetric label="Assinatura" value={plan.value} detail={plan.detail} />
       </View>
 
       {walletBlocked ? (
@@ -274,7 +246,6 @@ export default function DriverCockpitDashboardCard({
             variant={walletBlocked ? 'primary' : 'ghost'}
             onPress={openWallet}
           />
-          <AppButton title="Ver assinatura" variant="ghost" onPress={openSubscription} />
         </View>
       </View>
     </AppCard>

@@ -32,7 +32,7 @@ export function listenToDriverWallet(driverId, onValue, onError) {
         commissionFreeUntil: data.commissionFreeUntil || null,
         approvedAtMs: data.approvedAtMs ?? null,
         approvedAt: data.approvedAt || null,
-        founderExpiresAt: data.founderExpiresAt || null,
+        verificationStatus: data.verificationStatus || null,
         founderEligible: data.founderEligible === true,
         founderNumber: data.founderNumber ?? null,
         approvalNumber: data.approvalNumber ?? null,

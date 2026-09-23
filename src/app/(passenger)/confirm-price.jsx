@@ -140,7 +140,7 @@ export default function ConfirmPrice() {
               <AdminTableRow label="Duração estimada" value={`${Math.ceil(quote.routeDurationSeconds / 60)} min`} />
               {quote.peakApplied ? (
                 <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
-                  Adicional de horário de pico incluído no preço.
+                  Adicional de horário de pico: {formatBRL(quote.peakSurchargeCentavos || 0)} (já incluído).
                 </Text>
               ) : null}
               <AdminTableRow label="Pagamento" value="Pix direto ao motorista" />

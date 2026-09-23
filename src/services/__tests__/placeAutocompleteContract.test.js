@@ -16,8 +16,8 @@ describe('local-first passenger place autocomplete contract', () => {
     expect(request).toContain('knownLat: destinationLat');
     expect(request).toContain('knownLng: destinationLng');
     expect(request).toContain('resolveAddressToCoords(geocoderQuery(text))');
-    expect(request).toContain('requestRide({');
-    expect(request).toContain('The secure backend validates BOTH points');
+    expect(request).toContain("pathname: '/confirm-price'");
+    expect(request).toContain('resolveAddressToCoords');
     expect(component).toContain('SEARCH_DEBOUNCE_MS = 350');
     expect(component).toContain('Resultados externos fornecidos pelo Google Maps');
   });

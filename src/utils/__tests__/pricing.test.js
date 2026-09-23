@@ -17,8 +17,6 @@ import {
   priceRide,
   getRidePricing,
 } from '../ridePricing';
-import { getSubscriptionEligibility, computeRenewedExpirationMs } from '../driverSubscription';
-import { passesSubscriptionOrTrial } from '../driverEligibility';
 import { isWithinOperatingHours, minuteOfDay } from '../operatingHours';
 import { getVehiclePricing } from '../../constants/pricingConfig';
 
@@ -153,17 +151,17 @@ describe('commission — rate, minimum, driver net, and no-negative', () => {
   });
 });
 
-describe('commission-free window (founder + launch)', () => {
-  const T = 2_000_000_000;
+describe('commission-free window for every approved driver', () => {
+  const T = Date.UTC(2026, 7, 10);
   it('is 0% during the window and normal after (exclusive boundary)', () => {
-    const driver = { commissionFreeUntil: T };
+    const driver = { verificationStatus: 'approved', approvedAtMs: T - 60 * DAY };
     expect(isCommissionFree(driver, T - 1)).toBe(true);
     expect(isCommissionFree(driver, T)).toBe(false);
     expect(calculateCommissionBps('car', 3, driver, T - 1)).toBe(0);
     expect(calculateCommissionBps('car', 3, driver, T)).toBe(1500);
   });
   it('the launch benefit keeps the whole fare and bypasses the minimum commission', () => {
-    const founder = { founderEligible: true, founderExpiresAt: NOW + DAY };
+    const founder = { verificationStatus: 'approved', founderEligible: true, approvedAtMs: NOW - DAY };
     const r = priceRide({ vehicleType: 'moto', distanceKm: 0, durationMin: 0, driver: founder, now: NOW });
     expect(r.passengerFareCentavos).toBe(500);
     expect(r.commissionBps).toBe(0);
@@ -173,72 +171,18 @@ describe('commission-free window (founder + launch)', () => {
   });
 });
 
-describe('founder & subscription eligibility (D6)', () => {
-  const nonFounderInsideLaunchWindow = (used) => ({
-    approvalNumber: 101,
-    founderEligible: false,
-    approvedAtMs: NOW - DAY,
-    commissionFreeUntil: NOW + DAY,
-    freeRideCountUsed: used,
-  });
-
-  it('founder covered during the founder free period (does not use the 5-ride grace)', () => {
-    const founder = { founderEligible: true, subscriptionFreeUntil: NOW + 60 * DAY, freeRideCountUsed: 99 };
-    const e = getSubscriptionEligibility(founder, NOW);
-    expect(e.required).toBe(false);
-    expect(e.freeRidesRemaining).toBe(0);
-  });
-  it('founder requires a subscription after the free period', () => {
-    const founder = { founderEligible: true, subscriptionFreeUntil: NOW - 1 };
-    expect(getSubscriptionEligibility(founder, NOW).required).toBe(true);
-  });
-  it('founder can use an active paid subscription after the free period', () => {
-    const founder = {
-      founderEligible: true,
-      subscriptionFreeUntil: NOW - 1,
-      subscriptionStatus: 'active',
-      subscriptionActive: true,
-      subscriptionExpiresAt: NOW + 30 * DAY,
-    };
-    expect(getSubscriptionEligibility(founder, NOW).required).toBe(false);
-  });
-  it('non-founder rides 0..4 are allowed inside the 60-day launch window', () => {
-    for (let used = 0; used <= 4; used += 1) {
-      const driver = nonFounderInsideLaunchWindow(used);
-      expect(getSubscriptionEligibility(driver, NOW).required).toBe(false);
-      expect(passesSubscriptionOrTrial(driver, NOW)).toBe(true);
+describe('approval-based commission', () => {
+  it('applies the same 60-day rate to #100 and #101 regardless of old counters', () => {
+    for (const approvalNumber of [100, 101]) {
+      const approvedAtMs = Date.UTC(2026, 7, 10);
+      const driver = {
+        verificationStatus: 'approved', approvalNumber,
+        approvedAtMs, freeRideCountUsed: 999,
+        subscriptionActive: false,
+      };
+      expect(calculateCommissionBps('moto', 3, driver, approvedAtMs + 59 * DAY)).toBe(0);
+      expect(calculateCommissionBps('car', 3, driver, approvedAtMs + 60 * DAY)).toBe(1500);
     }
-    expect(getSubscriptionEligibility(nonFounderInsideLaunchWindow(4), NOW).freeRidesRemaining).toBe(1);
-  });
-  it('after 5 completed rides, a subscription is required for the next ride', () => {
-    const driver = nonFounderInsideLaunchWindow(5);
-    const e = getSubscriptionEligibility(driver, NOW);
-    expect(e.required).toBe(true);
-    expect(e.reason).toBe('SUBSCRIPTION_REQUIRED');
-    expect(passesSubscriptionOrTrial(driver, NOW)).toBe(false);
-  });
-  it('day 60 requires a subscription even when grace rides remain', () => {
-    const driver = { ...nonFounderInsideLaunchWindow(1), commissionFreeUntil: NOW };
-    expect(getSubscriptionEligibility(driver, NOW).required).toBe(true);
-    expect(getSubscriptionEligibility(driver, NOW).freeRidesRemaining).toBe(0);
-    expect(passesSubscriptionOrTrial(driver, NOW)).toBe(false);
-  });
-  it('an active subscription covers a driver past the free rides', () => {
-    const driver = {
-      freeRideCountUsed: 20,
-      subscriptionStatus: 'active',
-      subscriptionActive: true,
-      subscriptionExpiresAt: NOW + 30 * DAY,
-    };
-    expect(getSubscriptionEligibility(driver, NOW).required).toBe(false);
-  });
-  it('subscription renewal does NOT modify commissionFreeUntil (independent benefits)', () => {
-    const commissionFreeUntil = NOW + 60 * DAY;
-    const driver = { commissionFreeUntil, subscriptionExpiresAt: NOW + 5 * DAY };
-    const newExpiry = computeRenewedExpirationMs(driver, NOW);
-    expect(newExpiry).toBe(NOW + 5 * DAY + 30 * DAY);
-    expect(driver.commissionFreeUntil).toBe(commissionFreeUntil);
-    expect(isCommissionFree(driver, NOW)).toBe(true);
   });
 });
 

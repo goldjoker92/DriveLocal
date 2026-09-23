@@ -171,7 +171,6 @@ export default function AdminBusinessPulse() {
   const completed = Number(rides.completed || 0);
   const confirmedRevenue = Number(revenue.confirmedRevenueCentavos || 0);
   const commissionRevenue = Number(revenue.commissionRevenueCentavos || 0);
-  const subscriptionRevenue = Number(revenue.subscriptionRevenueCentavos || 0);
   const averageCommission = completed > 0 ? Math.round(commissionRevenue / completed) : 0;
   const averageDailyRevenue = confirmedRevenue > 0
     ? Math.round(confirmedRevenue / selectedDays)
@@ -179,8 +178,6 @@ export default function AdminBusinessPulse() {
   const monthlyGrossProjection = confirmedRevenue > 0
     ? Math.round((confirmedRevenue / selectedDays) * 30)
     : null;
-  const activeSubscriptions = Number(drivers.activeSubscriptions?.total || 0);
-  const theoreticalMrr = Number(drivers.theoreticalMrrCentavos?.total || 0);
   const onlineDrivers = Number(drivers.online || 0);
   const captureRate = Number(revenue.captureRate || 0);
   const expectedCommission = Number(revenue.commissionExpectedCentavos || 0);
@@ -229,13 +226,6 @@ export default function AdminBusinessPulse() {
         detail: `${number(onlineDrivers)} motorista${onlineDrivers !== 1 ? 's' : ''} online no retrato mais recente.`,
       });
     }
-    if (activeSubscriptions > 0) {
-      signals.push({
-        icon: '🔁',
-        title: 'A base recorrente começou',
-        detail: `${number(activeSubscriptions)} assinatura${activeSubscriptions !== 1 ? 's pagas ativas' : ' paga ativa'} · MRR teórico ${money(theoreticalMrr)}.`,
-      });
-    }
     if (confirmedRevenue > 0 && amountAtRisk === 0) {
       signals.push({
         icon: '✅',
@@ -245,7 +235,6 @@ export default function AdminBusinessPulse() {
     }
     return signals.slice(0, 4);
   }, [
-    activeSubscriptions,
     amountAtRisk,
     captureRate,
     completed,
@@ -254,7 +243,6 @@ export default function AdminBusinessPulse() {
     onlineDrivers,
     periodText,
     requests,
-    theoreticalMrr,
   ]);
 
   const headline = confirmedRevenue > 0
@@ -266,10 +254,10 @@ export default function AdminBusinessPulse() {
         : 'O pulso positivo está pronto para acompanhar o lançamento';
 
   const message = confirmedRevenue > 0
-    ? `${money(commissionRevenue)} vieram de comissão e ${money(subscriptionRevenue)} de assinaturas pagas.`
+    ? `${money(commissionRevenue)} de comissão efetivamente capturada.`
     : completed > 0
       ? 'Isso pode ser normal durante a promoção de comissão zero. As corridas concluídas continuam sendo um sinal real de validação.'
-      : 'Assim que houver solicitações, corridas, comissão ou assinaturas, os sinais positivos aparecerão aqui automaticamente.';
+      : 'Assim que houver solicitações, corridas ou comissão, os sinais positivos aparecerão aqui automaticamente.';
 
   function changePeriod(days) {
     if (days === selectedDays || loading) return;
@@ -336,7 +324,7 @@ export default function AdminBusinessPulse() {
           icon="💰"
           label={`Receita confirmada · ${selectedDays}d`}
           value={data ? money(confirmedRevenue) : loading ? '…' : '—'}
-          hint="Comissão + assinaturas pagas"
+          hint="Comissão efetivamente capturada"
           emphasized={confirmedRevenue > 0}
         />
         <PulseMetric
@@ -350,7 +338,7 @@ export default function AdminBusinessPulse() {
           icon="🏁"
           label="Média por corrida concluída"
           value={data && completed > 0 ? money(averageCommission) : loading ? '…' : '—'}
-          hint="Comissão média, sem assinaturas"
+          hint="Comissão média das corridas concluídas"
         />
         <PulseMetric
           icon="🚀"

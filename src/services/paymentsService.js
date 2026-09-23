@@ -1,7 +1,7 @@
 // Payments client service — the ONLY app-side entry point for Mercado Pago Pix
-// driver payments (subscription + wallet top-up). It calls secure Cloud
+// driver wallet top-ups. It calls secure Cloud
 // Functions callables; the app never holds a Mercado Pago access token, never
-// derives prices, and never writes money/wallet/subscription fields directly.
+// derives prices, and never writes money or wallet fields directly.
 //
 // All amounts are integer centavos. The backend is authoritative for prices,
 // promotions, custom wallet bounds, and application of the payment.
@@ -11,20 +11,9 @@ import { functions } from '../config/firebase';
 
 // A short, stable idempotency key (>= 8 chars) so a retried request is not
 // charged twice. Combines purpose + a random suffix.
-function makeIdempotencyKey(purpose) {
+function makeIdempotencyKey() {
   const rand = Math.random().toString(36).slice(2, 12);
-  return `${purpose === 'driver_subscription' ? 'sub' : 'top'}-${rand}${rand}`.slice(0, 40);
-}
-
-// Requests a real Pix charge for the driver's subscription.
-// Returns { localPaymentId, status, qrCode, qrCodeBase64, expiration, amountCentavos }.
-export async function requestSubscriptionPix() {
-  const call = httpsCallable(functions, 'createDriverPixPayment');
-  const res = await call({
-    purpose: 'driver_subscription',
-    idempotencyKey: makeIdempotencyKey('driver_subscription'),
-  });
-  return res.data;
+  return `top-${rand}${rand}`.slice(0, 40);
 }
 
 // Requests a real Pix charge to top up the Saldo DriveLocal. Presets are checked
@@ -36,7 +25,7 @@ export async function requestWalletTopupPix(amountCentavos, { customAmount = fal
     purpose: 'wallet_topup',
     amountCentavos,
     customAmount: customAmount === true,
-    idempotencyKey: makeIdempotencyKey('wallet_topup'),
+    idempotencyKey: makeIdempotencyKey(),
   });
   return res.data;
 }

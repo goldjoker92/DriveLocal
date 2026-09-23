@@ -46,8 +46,6 @@ import {
   commissionFreeUntilMs,
   deriveEligibility,
   rideBlockReasonLabel,
-  subscriptionDisplay,
-  subscriptionFreeUntilMs,
 } from '../../utils/driverCockpit';
 import { deriveDriverCockpitSummary } from '../../utils/driverCockpitSummary';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
@@ -389,14 +387,12 @@ export default function DriverHome() {
   const nowMs = Date.now();
   const uid = auth.currentUser?.uid;
   const eligibility = deriveEligibility(driver);
-  const subscription = subscriptionDisplay(driver, nowMs);
   const commission = commissionDisplay(driver, nowMs);
   const summary = deriveDriverCockpitSummary(driver, nowMs);
   const isAvailable = availability === AVAILABILITY.ONLINE;
   const photoStatus = driverPhotoStatus(driver);
   const activePublicPhoto = hasApprovedDriverPhoto(driver);
   const commissionWarn = benefitWarning('Sua taxa da plataforma zerada', commissionFreeUntilMs(driver), nowMs);
-  const subscriptionWarn = benefitWarning('Sua assinatura gratuita', subscriptionFreeUntilMs(driver), nowMs);
 
   useEffect(() => {
     if (!driver) return;
@@ -411,7 +407,6 @@ export default function DriverHome() {
       founder: driver.founderEligible === true,
       photoStatus,
       commissionBps: commission.bps,
-      subscriptionMode: subscription.mode,
       walletStatus: driver.walletStatus || null,
       statsVersion: summary.statsVersion,
       dayKey: summary.dayKey,
@@ -432,7 +427,6 @@ export default function DriverHome() {
     eligibility.reasonCode,
     photoStatus,
     commission.bps,
-    subscription.mode,
     summary.statsVersion,
     summary.dayKey,
     summary.weekKey,
@@ -699,14 +693,12 @@ export default function DriverHome() {
             <DriverCockpitDashboardCard
               summary={summary}
               commission={commission}
-              subscription={subscription}
               onWalletPress={() => router.push('/wallet')}
             />
 
-            {commissionWarn || subscriptionWarn ? (
+            {commissionWarn ? (
               <AppCard style={styles.compactWarningCard}>
                 {commissionWarn ? <Line tone="warning">{commissionWarn}</Line> : null}
-                {subscriptionWarn ? <Line tone="warning">{subscriptionWarn}</Line> : null}
               </AppCard>
             ) : null}
           </>

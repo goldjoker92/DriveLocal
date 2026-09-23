@@ -4,11 +4,8 @@
 // No Firestore access here: the backend remains authoritative and the cockpit only
 // presents the centralized commercial policy.
 
-import { passesSubscriptionOrTrial } from './driverEligibility';
 import {
   DAY_MS,
-  SUBSCRIPTION_COVERAGE_SOURCE,
-  founderSubscriptionUntilMs,
   freePeriodUntilMs,
   isFounderDriver as policyIsFounderDriver,
   resolveCommercialPolicy,
@@ -48,10 +45,6 @@ export function commissionFreeUntilMs(driver) {
   return freePeriodUntilMs(driver);
 }
 
-export function subscriptionFreeUntilMs(driver) {
-  return founderSubscriptionUntilMs(driver);
-}
-
 export function daysUntil(targetMs, nowMs) {
   if (!targetMs) return null;
   return Math.ceil((targetMs - nowMs) / DAY_MS);
@@ -68,7 +61,6 @@ export function benefitWarning(label, targetMs, nowMs) {
 }
 
 export const RIDE_BLOCK_REASON_LABELS = {
-  subscription_required: 'Ative sua assinatura para receber corridas.',
   correction_required: 'Corrija seu cadastro para continuar.',
   correction_requested: 'Corrija seu cadastro para continuar.',
   rejected: 'Seu cadastro não foi aprovado.',
@@ -84,14 +76,8 @@ export function rideBlockReasonLabel(code) {
   return RIDE_BLOCK_REASON_LABELS[code] || 'Você ainda não pode ficar disponível.';
 }
 
-export function isSubscriptionActive(driver, nowMs) {
-  const s = subscriptionDisplay(driver, nowMs);
-  return s.mode === 'free' || s.mode === 'active';
-}
-
 export function deriveEligibility(driver) {
   const d = driver || {};
-  const nowMs = Date.now();
 
   if (d.verificationStatus !== 'approved') {
     return { eligible: false, reasonCode: d.verificationStatus || 'not_approved' };
@@ -101,50 +87,7 @@ export function deriveEligibility(driver) {
     return { eligible: false, reasonCode: 'suspended' };
   }
 
-  if (passesSubscriptionOrTrial(d, nowMs)) {
-    return { eligible: true, reasonCode: null };
-  }
-
-  return { eligible: false, reasonCode: 'subscription_required' };
-}
-
-export function subscriptionDisplay(driver, nowMs = Date.now()) {
-  const policy = resolveCommercialPolicy(driver, nowMs);
-
-  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.FOUNDER_FREE_WINDOW) {
-    return {
-      mode: 'free',
-      dateMs: policy.founderSubscriptionUntilMs,
-      coverageSource: policy.subscriptionCoverageSource,
-      freeRideCountUsed: policy.freeRideCountUsed,
-      freeRidesRemaining: 0,
-    };
-  }
-  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.NON_FOUNDER_RIDE_GRACE) {
-    return {
-      mode: 'ride_grace',
-      dateMs: policy.freePeriodUntilMs,
-      coverageSource: policy.subscriptionCoverageSource,
-      freeRideCountUsed: policy.freeRideCountUsed,
-      freeRidesRemaining: policy.freeRidesRemaining,
-    };
-  }
-  if (policy.subscriptionCoverageSource === SUBSCRIPTION_COVERAGE_SOURCE.PAID_SUBSCRIPTION) {
-    return {
-      mode: 'active',
-      dateMs: policy.subscriptionExpiresAtMs,
-      coverageSource: policy.subscriptionCoverageSource,
-      freeRideCountUsed: policy.freeRideCountUsed,
-      freeRidesRemaining: policy.freeRidesRemaining,
-    };
-  }
-  return {
-    mode: 'required',
-    dateMs: 0,
-    coverageSource: policy.subscriptionCoverageSource,
-    freeRideCountUsed: policy.freeRideCountUsed,
-    freeRidesRemaining: 0,
-  };
+  return { eligible: true, reasonCode: null };
 }
 
 export function commissionDisplay(driver, nowMs = Date.now()) {

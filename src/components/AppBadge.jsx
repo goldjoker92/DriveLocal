@@ -1,5 +1,5 @@
 // AppBadge
-// Small pill label. Base for DriverStatusBadge / FounderOfferBadge.
+// Small pill label. Base for DriverStatusBadge and other status chips.
 //   tone: 'success' | 'warning' | 'danger' | 'neutral' (default)
 
 import { View, Text } from 'react-native';

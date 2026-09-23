@@ -13,17 +13,6 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { SERVICE_AREA_HORIZONTE_CE_BR } from '../constants/serviceAreaIds';
-import {
-  FOUNDER_DEFAULT_COMMISSION_FREE_DAYS,
-  FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS,
-} from '../constants/founderOfferRules';
-import { assignFounderStatusIfEligible } from './founderService';
-import { SUBSCRIPTION_PAYMENT_MODE } from '../constants/subscriptionRules';
-import {
-  computeRenewedExpirationMs,
-  getSubscriptionMonthlyCentavos,
-} from '../utils/driverSubscription';
 import {
   hasSubmittedCriminalCertificate,
   requiresCriminalCertificate,
@@ -38,7 +27,6 @@ const REQUIRED_PROFILE_FIELDS = [
   'pixKey',
 ];
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Reads drivers/{driverId}. Returns the document data, or null when missing.
 export async function getDriver(driverId) {
@@ -107,83 +95,6 @@ export async function getDriversByStatus(status) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-// Admin approves a driver. Applies founder or standard (#101+) rules and
-// increments the per-service-area approved counter.
-export async function approveDriver(driverId, adminUid) {
-  const driver = (await getDriver(driverId)) || {};
-
-  // Guard against double approval.
-  if (driver.verificationStatus === 'approved') {
-    console.log('[APPROVE] Motorista já aprovado driverId=', driverId, '— ignorado');
-    return { alreadyApproved: true };
-  }
-
-  const serviceAreaId = driver.serviceAreaId || SERVICE_AREA_HORIZONTE_CE_BR;
-  const { approvalNumber, isFounder, founderNumber } =
-    await assignFounderStatusIfEligible(serviceAreaId);
-  const now = new Date();
-
-  const base = {
-    verificationStatus: 'approved',
-    // Both 60-day windows start at the admin approval date.
-    approvedAt: serverTimestamp(),
-    reviewedAt: serverTimestamp(),
-    reviewedBy: adminUid,
-    approvalNumber,
-    walletBalanceCentavos: driver.walletBalanceCentavos != null ? driver.walletBalanceCentavos : 0,
-    freeRideCountUsed: driver.freeRideCountUsed != null ? driver.freeRideCountUsed : 0,
-    statusHistory: arrayUnion({
-      status: 'approved',
-      changedAt: now,
-      changedBy: adminUid,
-    }),
-  };
-
-  let roleFields;
-  if (isFounder) {
-    const founderCommissionFreeUntil = new Date(
-      now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS
-    );
-    const founderSubscriptionFreeUntil = new Date(
-      now.getTime() + FOUNDER_DEFAULT_SUBSCRIPTION_FREE_DAYS * DAY_MS
-    );
-    roleFields = {
-      founderEligible: true,
-      founderNumber,
-      founderGrantedAt: serverTimestamp(),
-      founderExpiresAt: founderCommissionFreeUntil,
-      subscriptionActive: true,
-      subscriptionStatus: 'free_founder',
-      subscriptionFreeUntil: founderSubscriptionFreeUntil,
-      founderFreeUntil: founderSubscriptionFreeUntil,
-      commissionRateBps: 0,
-      commissionFreeUntil: founderCommissionFreeUntil,
-      canReceiveRides: true,
-      canReceiveRidesReason: 'founder_benefit_active',
-      walletStatus: 'not_required_during_commission_free_period',
-    };
-  } else {
-    const nonFounderCommissionFreeUntil = new Date(
-      now.getTime() + FOUNDER_DEFAULT_COMMISSION_FREE_DAYS * DAY_MS
-    );
-    roleFields = {
-      founderEligible: false,
-      subscriptionActive: false,
-      subscriptionStatus: 'required',
-      subscriptionFreeUntil: null,
-      commissionRateBps: 0,
-      commissionFreeUntil: nonFounderCommissionFreeUntil,
-      commissionPromoStatus: 'launch_commission_free',
-      canReceiveRides: false,
-      canReceiveRidesReason: 'subscription_required',
-      walletStatus: 'not_required_during_commission_free_period',
-    };
-  }
-
-  await updateDoc(doc(db, 'drivers', driverId), { ...base, ...roleFields });
-  return { approvalNumber, isFounder, founderNumber };
-}
-
 // Admin rejects a driver with a reason.
 export async function rejectDriver(driverId, adminUid, rejectionReason) {
   const now = new Date();
@@ -218,91 +129,6 @@ export async function requestDriverCorrection(driverId, adminUid, correctionReas
       reason: correctionReason || '',
     }),
   });
-}
-
-// Protects founder fields from non-founder subscription actions.
-function isFounderDriverDoc(driver) {
-  const d = driver || {};
-  return d.founderEligible === true || d.subscriptionStatus === 'free_founder';
-}
-
-// Admin/dev test action: activate or renew a NON-founder subscription for 30 days.
-// Subscription and commission are independent: this action MUST NOT create,
-// restart, extend, shorten or remove the approval-based 60-day commission window.
-export async function activateDriverSubscription(driverId) {
-  const driver = (await getDriver(driverId)) || {};
-  if (isFounderDriverDoc(driver)) {
-    console.log('[SUBSCRIPTION] activate ignorado — motorista fundador driverId=', driverId);
-    return { skipped: 'founder' };
-  }
-
-  const now = new Date();
-  const expiresAt = new Date(computeRenewedExpirationMs(driver, now));
-  console.log('[SubscriptionV1] activate/renew driverId=', driverId, 'expiresAt=', expiresAt.toISOString());
-
-  await updateDoc(doc(db, 'drivers', driverId), {
-    subscriptionStatus: 'active',
-    subscriptionActive: true,
-    subscriptionActivatedAt: serverTimestamp(),
-    subscriptionExpiresAt: expiresAt,
-    subscriptionPaymentMode: SUBSCRIPTION_PAYMENT_MODE.MANUAL_ADMIN_TEST,
-    subscriptionLastConfirmedAt: serverTimestamp(),
-    canReceiveRides: true,
-    canReceiveRidesReason: 'subscription_active',
-    updatedAt: serverTimestamp(),
-  });
-  return { activated: true, expiresAtMs: expiresAt.getTime() };
-}
-
-// Admin/dev test action: reset an approved NON-founder subscription to required.
-// This also leaves commissionFreeUntil untouched; resetting a plan cannot cancel
-// or restart the 60-day commission benefit granted at approval.
-export async function resetDriverSubscription(driverId) {
-  const driver = (await getDriver(driverId)) || {};
-  if (isFounderDriverDoc(driver)) {
-    console.log('[SUBSCRIPTION] reset ignorado — motorista fundador driverId=', driverId);
-    return { skipped: 'founder' };
-  }
-  console.log('[SUBSCRIPTION] reset driverId=', driverId);
-  await updateDoc(doc(db, 'drivers', driverId), {
-    subscriptionStatus: 'required',
-    subscriptionActive: false,
-    subscriptionActivatedAt: null,
-    subscriptionExpiresAt: null,
-    subscriptionPaymentMode: null,
-    subscriptionLastConfirmedAt: null,
-    canReceiveRides: false,
-    canReceiveRidesReason: 'subscription_required',
-    availabilityStatus: 'offline',
-    updatedAt: serverTimestamp(),
-  });
-  return { reset: true };
-}
-
-// Admin action: activate or renew a NON-founder paid subscription after a manual
-// Pix confirmation. Early renewals keep their remaining paid days.
-export async function extendDriverSubscription(driverId, vehicleType) {
-  const driver = (await getDriver(driverId)) || {};
-  if (isFounderDriverDoc(driver)) {
-    console.log('[SubscriptionV1] extend ignored — founder driverId=', driverId);
-    return { skipped: 'founder' };
-  }
-  const now = new Date();
-  const expiresAt = new Date(computeRenewedExpirationMs(driver, now));
-  const monthlyCentavos = getSubscriptionMonthlyCentavos(vehicleType || driver.vehicleType);
-  console.log('[SubscriptionV1] extend driverId=', driverId, 'expiresAt=', expiresAt.toISOString());
-  await updateDoc(doc(db, 'drivers', driverId), {
-    subscriptionStatus: 'active',
-    subscriptionActive: true,
-    subscriptionExpiresAt: expiresAt,
-    subscriptionLastAmountCentavos: monthlyCentavos,
-    subscriptionPaymentMode: SUBSCRIPTION_PAYMENT_MODE.MANUAL_PIX,
-    subscriptionLastConfirmedAt: serverTimestamp(),
-    canReceiveRides: true,
-    canReceiveRidesReason: 'subscription_active',
-    updatedAt: serverTimestamp(),
-  });
-  return { extended: true, expiresAtMs: expiresAt.getTime() };
 }
 
 // Admin action: block / unblock a driver.

@@ -54,7 +54,7 @@ const PERIODS = Object.freeze([
 const INITIAL_EXPANDED = Object.freeze({
   drivers: true,
   finance: false,
-  subscriptions: false,
+  commissionFree: false,
   vehicles: false,
   demand: false,
   peaks: false,
@@ -428,7 +428,7 @@ export default function Dashboard() {
   const disputeCount = Math.max(queues.disputes.length, disputed);
   const pendingCount = Math.max(queues.pendingDrivers.length, Number(drivers.pendingReview || 0));
   const lowWalletCount = Number(drivers.lowWallet?.total || 0);
-  const expiringCount = Number(drivers.expiringWithin7Days?.total || 0);
+  const expiringCount = Number(drivers.commissionFreeEndingWithin7Days?.total || 0);
 
   const completionRate = rate(completed, requests);
   const assignmentRate = rate(assigned, requests);
@@ -488,11 +488,11 @@ export default function Dashboard() {
       route: '/wallets',
     },
     {
-      key: 'subscriptions',
+      key: 'commissionFree',
       icon: '📅',
-      title: 'Assinaturas expirando em 7 dias',
+      title: 'Comissão 0% terminando em 7 dias',
       count: expiringCount,
-      detail: 'Antecipe comunicação e renovação',
+      detail: 'Prepare a comunicação sobre a comissão por corrida',
       tone: expiringCount > 0 ? 'primary' : 'success',
       route: '/wallets',
     },
@@ -744,7 +744,7 @@ export default function Dashboard() {
               icon="💰"
               label="Receita confirmada"
               value={displayMoney(revenue.confirmedRevenueCentavos)}
-              hint="Comissões + assinaturas pagas"
+              hint="Comissões capturadas em corridas pagas"
               tone="success"
             />
           </KpiCell>
@@ -841,7 +841,6 @@ export default function Dashboard() {
         >
           <MetricRow label="Receita DriveLocal" value={displayMoney(revenue.confirmedRevenueCentavos)} strong tone="success" />
           <MetricRow label="Comissões capturadas" value={displayMoney(revenue.commissionRevenueCentavos)} />
-          <MetricRow label="Assinaturas recebidas" value={displayMoney(revenue.subscriptionRevenueCentavos)} />
           <MetricRow label="Comissão esperada" value={displayMoney(revenue.commissionExpectedCentavos)} />
           <MetricRow label="Comissão ainda retida" value={displayMoney(revenue.commissionHeldCentavos)} tone="warning" />
           <MetricRow label="Comissão em disputa" value={displayMoney(revenue.commissionDisputedCentavos)} tone="danger" />
@@ -856,19 +855,16 @@ export default function Dashboard() {
 
         <DisclosureSection
           icon="🔁"
-          title="Assinaturas"
-          subtitle="Pagas, gratuitas, expirações e MRR teórico."
-          badge={drivers.activeSubscriptions?.total != null ? number(drivers.activeSubscriptions.total) : null}
-          expanded={expanded.subscriptions}
-          onToggle={() => toggleSection('subscriptions')}
+          title="Comissão promocional"
+          subtitle="Motoristas aprovados no período de 60 dias a 0%."
+          badge={drivers.commissionFree?.total != null ? number(drivers.commissionFree.total) : null}
+          expanded={expanded.commissionFree}
+          onToggle={() => toggleSection('commissionFree')}
         >
-          <MetricRow label="Moto — pagas ativas" value={displayNumber(drivers.activeSubscriptions?.moto)} hint={`MRR teórico: ${displayMoney(drivers.theoreticalMrrCentavos?.moto)}`} />
-          <MetricRow label="Carro — pagas ativas" value={displayNumber(drivers.activeSubscriptions?.car)} hint={`MRR teórico: ${displayMoney(drivers.theoreticalMrrCentavos?.car)}`} />
-          <MetricRow label="Total pagas ativas" value={displayNumber(drivers.activeSubscriptions?.total)} hint={`MRR teórico total: ${displayMoney(drivers.theoreticalMrrCentavos?.total)}`} strong tone="success" />
-          <MetricRow label="Moto — gratuitas ativas" value={displayNumber(drivers.freeSubscriptions?.moto)} />
-          <MetricRow label="Carro — gratuitas ativas" value={displayNumber(drivers.freeSubscriptions?.car)} />
-          <MetricRow label="Expiram em até 7 dias" value={displayNumber(expiringCount)} tone={expiringCount > 0 ? 'warning' : 'neutral'} />
-          <MetricRow label="Assinaturas expiradas" value={displayNumber(drivers.expiredSubscriptions?.total)} tone="danger" />
+          <MetricRow label="Moto — 0% ativo" value={displayNumber(drivers.commissionFree?.moto)} />
+          <MetricRow label="Carro — 0% ativo" value={displayNumber(drivers.commissionFree?.car)} />
+          <MetricRow label="Total — 0% ativo" value={displayNumber(drivers.commissionFree?.total)} strong tone="success" />
+          <MetricRow label="Terminam em até 7 dias" value={displayNumber(expiringCount)} tone={expiringCount > 0 ? 'warning' : 'neutral'} />
         </DisclosureSection>
 
         <DisclosureSection
