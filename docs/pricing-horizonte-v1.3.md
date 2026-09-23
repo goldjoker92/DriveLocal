@@ -1,7 +1,8 @@
 # Horizonte competitive pilot pricing — V1.3
 
-This release changes ride pricing only. It does not change subscriptions,
-founder benefits, dispatch, wallet rules, driver approval, or payment flows.
+This document describes the historical fare grid. The current driver commission
+rule is in `commercial-policy.md`. This grid is retained for historical reference;
+the server quote uses the current pricing table.
 
 ## Passenger fares
 

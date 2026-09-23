@@ -30,7 +30,7 @@ Read: owner or admin. Delete: never (client).
 | **approvedAt, approvalNumber, reviewedAt, reviewedBy, rejectionReason, correctionReason, correctionRequestedAt, submittedAt, statusHistory** | **server** |
 | **founderEligible, founderNumber, founderGrantedAt, founderExpiresAt, founderFreeUntil** | **server** |
 | **commissionFreeUntil, commissionRateBps, commissionPromoStatus** | **server** |
-| **subscriptionActive, subscriptionStatus, subscriptionFreeUntil, subscriptionExpiresAt, subscriptionActivatedAt, subscriptionPaymentMode, subscriptionLastConfirmedAt, subscriptionLastAmountCentavos** | **server** |
+| **Champs commerciaux historiques déjà enregistrés** | **server; conservés mais ignorés pour l'éligibilité et les commissions** |
 | **walletBalanceCentavos, walletHeldCentavos, walletAvailableCentavos, walletStatus, freeRideCountUsed** | **server** |
 | **canReceiveRides, canReceiveRidesReason, activeRideId** | **server** |
 
@@ -86,7 +86,7 @@ Read: any authenticated client (founder progress). Write: admin client SDK only.
 - auditLogs/{docId}
 - walletTransactions/{docId}
 - paymentRequests/{docId}
-- subscriptionPayments/{docId}
+- subscriptionPayments/{docId} (archive financière en lecture serveur uniquement)
 
 ## admins/{adminId}
 Read: any authenticated client. Write: **forbidden** (server-provisioned).

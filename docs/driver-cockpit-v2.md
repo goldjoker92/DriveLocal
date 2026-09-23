@@ -25,7 +25,7 @@ existing server-authoritative availability/GPS flow unchanged.
    - rides and full Pix fare received this week;
    - commission percentage only (`0%`, `12%`, `15%`);
    - wallet available balance and safe wallet status;
-   - subscription state;
+   - approval-based commission-free period;
    - total completed rides.
 
 ## No mock values
@@ -106,19 +106,10 @@ Allowed commission copy:
 15%
 ```
 
-Removed copy:
-
-```text
-Comissão padrão: 15% por corrida concluída.
-Após ativar sua assinatura, você terá 0% de comissão por 60 dias.
-Ativar assinatura — em breve
-```
-
 The cockpit does not show exact DriveLocal commission centavos.
 
-For drivers 101+ during the ride grace, subscription copy shows the real number
-of the five rides already used. Founder free coverage and paid expiration dates
-come from the same centralized policy.
+Every approved driver sees 0% for 60 days after approval, then 12% Moto or
+15% Carro. The permanent founder badge is independent of the rate.
 
 ## Wallet presentation
 
@@ -162,13 +153,10 @@ driver.cockpit_stats.failed
    - photo/name/vehicle are in one compact card;
    - founder number is visible;
    - commission shows `0%`;
-   - subscription shows free expiration.
-2. Open an approved driver 101+ before five completed rides:
-   - subscription shows `N de 5 corridas usadas`;
-   - no old unlimited grace copy appears.
-3. Open a post-window moto driver with active subscription:
+2. Open an approved driver 101+ inside the 60-day window:
+   - commission also shows `0%` regardless of ride count.
+3. Open a post-window moto driver:
    - commission shows `12%`;
-   - subscription expiration is visible.
 4. Open a post-window car driver:
    - commission shows `15%`.
 5. Start work:
@@ -193,7 +181,6 @@ driver.cockpit_stats.failed
 - fixed active-ride actions: block 16;
 - compact timed offer: block 17;
 - real detailed wallet: block 18;
-- real subscription payment UI: block 19;
 - last-three-rides history: block 20.
 
 ## Deployment rule

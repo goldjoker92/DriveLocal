@@ -48,7 +48,7 @@ fare_payment_issue
 driver_or_vehicle_mismatch
 passenger_no_show_review
 wallet_topup_issue
-subscription_issue
+subscription_issue (code historique : « Pagamento anterior »)
 document_review_issue
 account_access_issue
 technical_error
@@ -88,7 +88,7 @@ Le support ne copie jamais :
 
 ## Contexte de paiement chauffeur
 
-Pour `wallet_topup_issue` et `subscription_issue`, le serveur recherche :
+Pour `wallet_topup_issue` et l'ancien code `subscription_issue` (paiement déjà enregistré), le serveur recherche :
 
 ```text
 driverId == utilisateur authentifié

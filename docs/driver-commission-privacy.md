@@ -19,7 +19,7 @@ The driver may see:
 - `0%`, `12%` or `15%` commission;
 - wallet available and held balances;
 - Pix payment status;
-- subscription status and price.
+- historical payment status and price.
 
 The direct Pix fare and the wallet settlement are separate concepts. `Você
 recebe` means the full Pix amount received from the passenger, not fare minus a
@@ -124,7 +124,7 @@ still does not calculate a centavo amount.
    - fare visible;
    - `Comissão 0%`;
    - `Você recebe` equals the full fare.
-2. Post-window moto driver with active subscription receives a normal offer:
+2. Post-window moto driver receives a normal offer:
    - `Comissão 12%`;
    - no exact commission amount anywhere on screen.
 3. Post-window car driver receives a normal offer:

@@ -11,7 +11,7 @@ DriveLocal is built to be:
 - **Browser/web reserved for Admin operations** — not a passenger/driver channel.
 - **Simple before complex** — ship a market-ready MVP before payment/tracking automation.
 - **Direct payment** — the passenger pays the driver directly by Pix.
-- **Sustainably monetized** — DriveLocal earns via driver commission and subscription, not by holding passenger money.
+- **Sustainably monetized** — DriveLocal earns commission on paid rides after each driver's 60-day launch period.
 
 > ⚠️ **Status note:** This repository is an early MVP. Backend, Firebase, real Pix integration, wallet automation, and live tracking are **planned and not implemented yet** unless explicitly present in the codebase and approved. Nothing here should be read as production-ready.
 
@@ -19,7 +19,7 @@ DriveLocal is built to be:
 
 ## 1. Overview
 
-DriveLocal connects passengers with verified local drivers for moto and car rides in a single pilot city. The passenger pays the driver directly by Pix; DriveLocal monetizes through a driver commission and a monthly subscription. The architecture is designed to scale by service area, but V1 runs in Horizonte only.
+DriveLocal connects passengers with verified local drivers for moto and car rides in a single pilot city. The passenger confirms the server-calculated fare before a ride is created and pays the driver directly by Pix. DriveLocal charges commission on paid rides after the driver's first 60 days. V1 runs in Horizonte only.
 
 | Item | Decision |
 | --------------------- | ------------------------------------- |
@@ -30,7 +30,7 @@ DriveLocal connects passengers with verified local drivers for moto and car ride
 | Driver platform | Android app / mobile-first |
 | Admin platform | Browser/web dashboard |
 | Main payment model | Passenger pays Driver directly by Pix |
-| Platform monetization | Driver commission + subscription |
+| Platform monetization | Commission on paid rides after 60 days |
 | Backend | Planned later with Firebase |
 | Current priority | Simple market-ready MVP |
 
@@ -97,7 +97,7 @@ DriveLocal is **not** an over-engineered Uber clone. It aims to deliver cheaper 
 | Category | Rules |
 | --------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Product rules | Driver must register, submit profile/vehicle/docs, and wait for admin approval before receiving rides |
-| Business rules | Standard commission is 15% per completed ride; subscription applies after the free period |
+| Business rules | 0% for 60 days from approval, then 12% Moto or 15% Carro on paid rides; cancellations carry no commission |
 | Payment rules | Driver receives ride payment directly from Passenger by Pix; Driver pays DriveLocal by recharging Saldo DriveLocal |
 | Wallet rules | Saldo DriveLocal is an internal prepaid balance, **not** a bank account |
 | Safety rules | Driver must use only the Pix key registered and validated in DriveLocal |
@@ -129,13 +129,11 @@ The admin entry route is kept discreet at `/admin-login` and must not collide wi
 
 | Revenue item | Rule |
 | ---------------------------- | ------------------------------------------- |
-| Ride commission | 15% per completed ride for standard drivers |
-| Moto subscription | R$9,90/month after free period |
-| Carro subscription | R$19,90/month after free period |
+| Ride commission | 0% for 60 days from approval, then 12% Moto or 15% Carro for paid rides |
 | Passenger payment | Passenger pays Driver directly by Pix |
 | Driver payment to DriveLocal | Driver recharges Saldo DriveLocal by Pix |
-| Minimum ride price Moto | R$5 |
-| Minimum ride price Carro | R$8 |
+| Minimum ride price Moto | R$6 |
+| Minimum ride price Carro | R$8,50 |
 | Card payment | Not in V1 |
 | Cash payment | Not in V1 |
 | Pix split | Not in V1 |
@@ -144,15 +142,14 @@ The admin entry route is kept discreet at `/admin-login` and must not collide wi
 
 ## 9. Founder driver offer
 
-| Driver group | Commission | Subscription | Notes |
-| ----------------------------- | ----------------------------- | --------------------------- | -------------------------------------- |
-| Drivers #1–100 admin-approved | 0% for 60 days | R$0 for 60 days | Motoristas Fundadores |
-| Drivers #101 onward | 15% from first completed ride | R$0 for first 60 days | Standard commission starts immediately |
-| After 60 days | 15% | Moto R$9,90 / Carro R$19,90 | Normal rules apply |
+| Driver group | Commission | Recognition |
+| ----------------------------- | ----------------------------- | -------------------------------------- |
+| Drivers #1–100 admin-approved | 0% for 60 days, then 12% Moto or 15% Carro | Permanent Motorista Fundador badge |
+| Drivers #101 onward | 0% for 60 days, then 12% Moto or 15% Carro | Standard driver |
 
 - The founder counter is based on **admin-approved** drivers, not registrations.
 - Moto and Carro drivers count together.
-- Founder benefit may be removed after confirmed fraud (post admin review).
+- An app update never restarts the 60-day period.
 
 ---
 
@@ -163,7 +160,7 @@ DriveLocal V1 has **two separate Pix flows**.
 | Flow | Who pays | Who receives | Purpose |
 | ------------------- | --------- | ------------ | ------------------------------------------- |
 | Passenger → Driver | Passenger | Driver | Ride payment |
-| Driver → DriveLocal | Driver | DriveLocal | Wallet recharge for commission/subscription |
+| Driver → DriveLocal | Driver | DriveLocal | Wallet recharge for ride commission |
 
 ### Passenger → Driver Pix
 
@@ -178,21 +175,20 @@ DriveLocal V1 has **two separate Pix flows**.
 - The driver recharges **Saldo DriveLocal**.
 - Saldo DriveLocal is **not** a bank account — it is an internal prepaid ledger.
 - Real money goes to DriveLocal via Pix.
-- The admin validates the top-up **manually** in the MVP.
-- The app then credits the driver's internal balance.
+- A verified Mercado Pago callback credits the driver's internal balance once.
 
 **Example flow:**
 
 | Step | Example |
 | ---------------- | ----------------------------------- |
 | Driver recharge | Carlos sends R$20 Pix to DriveLocal |
-| Admin validation | Admin approves top-up |
+| Provider confirmation | A verified webhook confirms top-up |
 | Internal balance | Carlos has R$20 Saldo DriveLocal |
 | Ride completed | Passenger pays Carlos R$20 |
-| Commission | 15% = R$3 |
+| Carro commission after day 60 | 15% = R$3 |
 | Wallet debit | Carlos balance becomes R$17 |
 
-> **Not implemented yet:** Pix API, PSP integration, webhooks, and automatic reconciliation are **planned only** and require explicit approval before any implementation.
+The payment webhook and wallet ledger are implemented in Functions; production rollout still requires validation.
 
 ---
 
@@ -204,16 +200,16 @@ DriveLocal V1 has **two separate Pix flows**.
 | Low balance warning | Around R$7 |
 | General block | Saldo DriveLocal ≤ R$3 |
 | Per-ride block | Saldo DriveLocal < estimated commission |
-| Commission rate | 15% |
-| Founder exception | No commission wallet block during 60-day 0% promo |
+| Commission rate after day 60 | 12% Moto / 15% Carro |
+| Initial period | No commission wallet block during every approved driver's 60 days at 0% |
 
 **Per-ride commission coverage formula:**
 
 ```
-estimatedCommission = estimatedRidePrice * 15%
+estimatedCommission = estimatedRidePrice * (12% Moto or 15% Carro)
 ```
 
-A standard driver can accept a ride only if `Saldo DriveLocal >= estimatedCommission`.
+A driver past the 60-day window can accept a ride only if their available wallet balance covers the server-held estimate.
 
 | Ride price | Estimated commission | Required balance |
 | ---------- | -------------------: | ---------------: |
@@ -237,7 +233,7 @@ A standard driver can accept a ride only if `Saldo DriveLocal >= estimatedCommis
 | Fake cancellation after contact | Admin review |
 | Repeated cancellations same pair | Fraud flag |
 | Duplicate driver account | Check WhatsApp, email, CNH, plate, Pix key |
-| Off-platform ride | Warning, suspension, founder benefit removal, commission recovery, account removal |
+| Off-platform ride | Warning, suspension, financial review or account action after admin review |
 
 Trust foundations:
 

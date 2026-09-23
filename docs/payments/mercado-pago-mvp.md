@@ -6,8 +6,7 @@
 
 O Mercado Pago é usado somente no fluxo **Motorista → DriveLocal** para:
 
-- recarga do Saldo DriveLocal;
-- pagamento da assinatura mensal do motorista.
+- recarga do Saldo DriveLocal.
 
 O pagamento da corrida continua sendo **Passageiro → Motorista por Pix direto**. Dados pessoais do passageiro não entram nas orders Mercado Pago.
 
@@ -80,11 +79,11 @@ Fluxo seguro:
 2. extrair o Order ID;
 3. buscar a order real em `GET /v1/orders/{id}`;
 4. comparar referência, valor, moeda e ambiente;
-5. aplicar crédito/assinatura de forma idempotente;
+5. aplicar crédito de carteira de forma idempotente; pagamentos anteriores descontinuados seguem para revisão humana;
 6. responder `200` para eventos concluídos, duplicados ou sem ação;
 7. responder `500` somente para falhas transitórias que devem ser reenviadas.
 
-O simulador oficial pode enviar uma order Point sintética. Depois de validar a assinatura, o endpoint responde `200` sem alterar Firestore nem saldo.
+O simulador oficial pode enviar uma order Point sintética. Depois de validar a assinatura criptográfica do webhook, o endpoint responde `200` sem alterar Firestore nem saldo.
 
 ## Logs permitidos
 
