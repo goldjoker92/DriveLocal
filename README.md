@@ -9,11 +9,11 @@ DriveLocal is built to be:
 - **Local-first** — focused on one service area before expanding.
 - **Android-first** for Passenger and Driver — the mobile app is the product.
 - **Browser/web reserved for Admin operations** — not a passenger/driver channel.
-- **Simple before complex** — ship a market-ready MVP before payment/tracking automation.
+- **Simple before complex** — focus the existing payments and tracking flows on the pilot.
 - **Direct payment** — the passenger pays the driver directly by Pix.
 - **Sustainably monetized** — DriveLocal earns commission on paid rides after each driver's 60-day launch period.
 
-> ⚠️ **Status note:** This repository is an early MVP. Backend, Firebase, real Pix integration, wallet automation, and live tracking are **planned and not implemented yet** unless explicitly present in the codebase and approved. Nothing here should be read as production-ready.
+> **Release status:** This repository includes Firebase Functions, Firestore rules, Mercado Pago wallet recharges, and ride tracking. Their presence in source does not imply that this branch has been deployed or that the Android release has passed physical testing.
 
 ---
 
@@ -31,7 +31,7 @@ DriveLocal connects passengers with verified local drivers for moto and car ride
 | Admin platform | Browser/web dashboard |
 | Main payment model | Passenger pays Driver directly by Pix |
 | Platform monetization | Commission on paid rides after 60 days |
-| Backend | Planned later with Firebase |
+| Backend | Firebase Functions and Firestore source implemented; rollout pending validation |
 | Current priority | Simple market-ready MVP |
 
 ---
@@ -84,7 +84,7 @@ DriveLocal is **not** an over-engineered Uber clone. It aims to deliver cheaper 
 | Payment rules | QR Code Pix is primary; Pix Copia e Cola is fallback; passenger should not manually type driver Pix key |
 | Safety rules | Passenger should pay only through the QR Code displayed in DriveLocal; off-platform payment is a fraud/safety risk |
 | Technical rules | Passenger app is Android/mobile-first; Expo Web only for testing |
-| Planned files   | `src/app/(passenger)/select-route.jsx`, `confirm-price.jsx`, `driver-accepted.jsx`, `pix-payment.jsx`, `ride-completed.jsx` |
+| App files   | `src/app/(passenger)/select-route.jsx`, `confirm-price.jsx`, `driver-accepted.jsx`, `pix-payment.jsx`, `ride-completed.jsx` |
 
 **Passenger safety copy (PT-BR):**
 
@@ -102,7 +102,7 @@ DriveLocal is **not** an over-engineered Uber clone. It aims to deliver cheaper 
 | Wallet rules | Saldo DriveLocal is an internal prepaid balance, **not** a bank account |
 | Safety rules | Driver must use only the Pix key registered and validated in DriveLocal |
 | Technical rules | Driver app is Android/mobile-first; navigation uses Google Maps/Waze |
-| Planned files   | `src/app/(driver)/onboarding.jsx`, `profile.jsx`, `documents.jsx`, `active-ride.jsx`, `wallet.jsx` |
+| App files   | `src/app/(driver)/onboarding.jsx`, `profile.jsx`, `documents.jsx`, `active-ride.jsx`, `wallet.jsx` |
 
 **Driver warning copy (PT-BR):**
 
@@ -116,10 +116,10 @@ DriveLocal is **not** an over-engineered Uber clone. It aims to deliver cheaper 
 | --------------- | ------------------------------------------------------------------------------------------------------------------- |
 | Product rules | Admin validates drivers, documents, vehicles, top-ups, ride issues, and fraud signals |
 | Business rules | Admin approval activates driver status and founder eligibility; approval does not debit commission |
-| Payment rules | Admin manually validates driver top-ups in the MVP |
+| Payment rules | Verified provider callbacks credit wallet recharges; Admin handles exceptions |
 | Fraud rules | Admin reviews suspicious cancellations, off-platform payment signals, duplicate accounts |
 | Technical rules | Admin platform is browser/web; admin routes should stay separate from passenger/driver flows |
-| Planned files   | `src/app/(admin)/dashboard.jsx`, `drivers-pending.jsx`, `driver-detail.jsx`, `topups-pending.jsx`, `wallets.jsx`, `reports.jsx` |
+| App files   | `src/app/(admin)/dashboard.jsx`, `drivers-pending.jsx`, `driver-detail.jsx`, `topups-pending.jsx`, `wallets.jsx`, `reports.jsx` |
 
 The admin entry route is kept discreet at `/admin-login` and must not collide with a public `/login`.
 
@@ -211,13 +211,13 @@ estimatedCommission = estimatedRidePrice * (12% Moto or 15% Carro)
 
 A driver past the 60-day window can accept a ride only if their available wallet balance covers the server-held estimate.
 
-| Ride price | Estimated commission | Required balance |
-| ---------- | -------------------: | ---------------: |
-| R$20 | R$3,00 | At least R$3,00 |
-| R$30 | R$4,50 | At least R$4,50 |
-| R$40 | R$6,00 | At least R$6,00 |
+| Ride price | Moto (12%) | Carro (15%) |
+| ---------- | ---------: | ----------: |
+| R$20 | R$2,40 | R$3,00 |
+| R$30 | R$3,60 | R$4,50 |
+| R$40 | R$4,80 | R$6,00 |
 
-**Driver-facing copy (PT-BR):**
+**Driver-facing copy after the first 60 days (PT-BR):**
 
 > _"Mantenha seu Saldo DriveLocal acima de R$3,00 para continuar recebendo corridas."_
 >
