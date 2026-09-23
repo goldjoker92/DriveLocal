@@ -52,6 +52,8 @@ exports.reprocessDriverPayment = paymentCallables.reprocessDriverPayment;
 exports.mercadoPagoWebhook = paymentCallables.mercadoPagoWebhook;
 
 const rideCallables = require('./rides/callables');
+exports.getRideQuoteSecure = rideCallables.getRideQuoteSecure;
+exports.createRideFromQuoteSecure = rideCallables.createRideFromQuoteSecure;
 exports.createRideRequestSecure = rideCallables.createRideRequestSecure;
 exports.acceptDriverOfferSecure = rideCallables.acceptDriverOfferSecure;
 exports.declineDriverOfferSecure = rideCallables.declineDriverOfferSecure;

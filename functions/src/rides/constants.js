@@ -5,6 +5,7 @@
 module.exports = Object.freeze({
   // Collections.
   RIDE_REQUESTS: 'rideRequests',
+  RIDE_QUOTES: 'rideQuotes',
   DRIVER_OFFERS: 'driverOffers',
   ACTIVE_RIDE_LOCATIONS: 'activeRideLocations',
   DRIVERS: 'drivers',

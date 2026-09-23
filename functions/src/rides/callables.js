@@ -12,6 +12,7 @@ const { systemClock } = require('../time/clock');
 const { resolveEnvironment } = require('../config/environment');
 const { createGoogleRoutesAdapter } = require('../routing/googleRoutes');
 const { createRideRequestSecure } = require('./createRideRequest');
+const { getRideQuoteSecure } = require('./rideQuote');
 const { acceptDriverOfferSecure } = require('./acceptOffer');
 const { declineDriverOfferSecure } = require('./declineOffer');
 const { markDriverArrived } = require('./markDriverArrived');
@@ -102,6 +103,30 @@ const createRideRequestSecureFn = onCall(
   )
 );
 
+const getRideQuoteSecureFn = onCall(
+  { region: REGION, secrets: [ROUTING_PROVIDER_API_KEY] },
+  withCallableBoundary('getRideQuoteSecure', (request, context) =>
+    getRideQuoteSecure({
+      db: admin.firestore(), request,
+      context: { ...context, environment: resolveEnvironment() },
+      clock: systemClock,
+      routingAdapter: createGoogleRoutesAdapter({ apiKey: ROUTING_PROVIDER_API_KEY.value() }),
+    })
+  )
+);
+
+const createRideFromQuoteSecureFn = onCall(
+  { region: REGION, secrets: [ROUTING_PROVIDER_API_KEY] },
+  withCallableBoundary('createRideFromQuoteSecure', (request, context) =>
+    createRideRequestSecure({
+      db: admin.firestore(), request,
+      context: { ...context, environment: resolveEnvironment() },
+      clock: systemClock, requireQuote: true,
+      routingAdapter: createGoogleRoutesAdapter({ apiKey: ROUTING_PROVIDER_API_KEY.value() }),
+    })
+  )
+);
+
 const acceptDriverOfferSecureFn = onCall(
   { region: REGION },
   withCallableBoundary('acceptDriverOfferSecure', (request, context) =>
@@ -117,6 +142,8 @@ const declineDriverOfferSecureFn = onCall(
 );
 
 module.exports = {
+  getRideQuoteSecure: getRideQuoteSecureFn,
+  createRideFromQuoteSecure: createRideFromQuoteSecureFn,
   createRideRequestSecure: createRideRequestSecureFn,
   acceptDriverOfferSecure: acceptDriverOfferSecureFn,
   declineDriverOfferSecure: declineDriverOfferSecureFn,

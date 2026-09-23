@@ -42,6 +42,7 @@ describe('authenticated passenger dashboard and history contract', () => {
     const home = source('src/app/(passenger)/passenger-home.jsx');
     const rideCta = source('src/components/PassengerRideRequestCta.jsx');
     const request = source('src/app/(passenger)/request-ride.jsx');
+    const confirm = source('src/app/(passenger)/confirm-price.jsx');
     const locationAction = source('src/components/LocationActionButton.jsx');
 
     expect(home).toContain('Olá, ${firstName} 👋');
@@ -56,8 +57,11 @@ describe('authenticated passenger dashboard and history contract', () => {
     expect(locationAction).toContain('Usar minha localização atual');
     expect(request).toContain('getCurrentLocationWithAddress');
     expect(request).toContain('resolveAddressToCoords');
-    expect(request).toContain('requestRide({');
-    expect(request).toContain("pathname: '/searching'");
+    expect(request).toContain("pathname: '/confirm-price'");
+    expect(request).not.toContain('requestRide({');
+    expect(confirm).toContain('getRideQuote({');
+    expect(confirm).toContain('requestRide({');
+    expect(confirm).toContain("pathname: '/searching'");
   });
 
   it('keeps account data, privacy and safe sign-out together in Meus dados', () => {

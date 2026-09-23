@@ -5,9 +5,8 @@
 //      callable only when the local pack has no strong answer;
 //   2. resolve both points to real coordinates (selected Places result, GPS or
 //      native geocoder);
-//   3. call createRideRequestSecure, where routing, the official Horizonte
-//      geofence, pricing and dispatch remain server-authoritative;
-//   4. continue to /searching with the returned quote summary.
+//   3. show the server-priced confirmation screen without creating a ride;
+//   4. only explicit confirmation creates a ride and starts dispatch.
 //
 // The client never writes rideRequests directly and never supplies fare,
 // distance, duration, commission or service-area values.
@@ -31,7 +30,6 @@ import {
   getCurrentLocationWithAddress,
   resolveAddressToCoords,
 } from '../../services/locationService';
-import { requestRide } from '../../services/ridesService';
 import { showAppAlert } from '../../utils/alertUtils';
 import { logRideClientEvent } from '../../utils/clientRideLog';
 import { goBackOrReplace } from '../../utils/navigation';
@@ -98,7 +96,6 @@ function clientRideErrorMessage(error) {
 export default function RequestRide() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const idempotencyKeyRef = useRef(null);
   const originReferenceRef = useRef(null);
   const destinationRef = useRef(null);
 
@@ -150,12 +147,6 @@ export default function RequestRide() {
       });
   }, [router]);
 
-  function resetRequestAttempt() {
-    // A new input combination must receive a new idempotency key. Network retries
-    // without input changes keep the existing key and cannot create duplicates.
-    idempotencyKeyRef.current = null;
-  }
-
   function openPassengerProfile() {
     logRideClientEvent('ride.request.profile_selected', {
       route: '/passenger-profile',
@@ -202,7 +193,6 @@ export default function RequestRide() {
     setOriginSource('gps');
     if (result.addressText) setOriginText(result.addressText);
     setGpsFound(true);
-    resetRequestAttempt();
 
     logRideClientEvent('ride.request.pickup_gps_succeeded', {
       step: 'pickup_gps',
@@ -219,7 +209,6 @@ export default function RequestRide() {
     setOriginLng(result.lng);
     setOriginSource(result.source);
     setGpsFound(false);
-    resetRequestAttempt();
     logRideClientEvent('ride.request.place_selected', {
       step: 'pickup',
       provider: result.source,
@@ -232,7 +221,6 @@ export default function RequestRide() {
     setDestinationLat(result.lat);
     setDestinationLng(result.lng);
     setDestinationSource(result.source);
-    resetRequestAttempt();
     logRideClientEvent('ride.request.place_selected', {
       step: 'destination',
       provider: result.source,
@@ -272,7 +260,7 @@ export default function RequestRide() {
     return result;
   }
 
-  async function createSecureRide() {
+  async function prepareFareQuote() {
     if (!passenger || submitting) return;
 
     setSubmitting(true);
@@ -280,7 +268,7 @@ export default function RequestRide() {
     const startedAt = Date.now();
 
     logRideClientEvent('ride.request.submit_started', {
-      action: 'requestRide',
+      action: 'prepareFareQuote',
       vehicleType,
       originSource,
       destinationSource,
@@ -315,50 +303,28 @@ export default function RequestRide() {
         .filter(Boolean)
         .join(' — ');
 
-      const ride = await requestRide({
-        vehicleType,
-        pickup: {
-          lat: pickupResult.lat,
-          lng: pickupResult.lng,
-          label: pickupLabel,
-        },
-        destination: {
-          lat: destinationResult.lat,
-          lng: destinationResult.lng,
-          label: destinationText.trim(),
-        },
-        idempotencyKeyRef,
-      });
-
-      if (!ride?.rideId) {
-        throw new Error('A solicitação não retornou uma corrida válida. Tente novamente.');
-      }
-
-      logRideClientEvent('ride.request.navigation_to_searching', {
-        action: 'router.replace',
-        rideId: ride.rideId,
-        resultStatus: ride.status,
+      logRideClientEvent('ride.request.navigation_to_quote', {
+        action: 'router.push',
         vehicleType,
         durationMs: Date.now() - startedAt,
-        ride,
       });
-
-      router.replace({
-        pathname: '/searching',
+      router.push({
+        pathname: '/confirm-price',
         params: {
-          rideId: ride.rideId,
-          status: ride.status || 'searching',
-          vehicleType: ride.vehicleType || vehicleType,
-          estimatedFareCentavos: String(ride.estimatedFareCentavos ?? ''),
-          routeDistanceMeters: String(ride.routeDistanceMeters ?? ''),
-          routeDurationSeconds: String(ride.routeDurationSeconds ?? ''),
+          vehicleType,
+          pickupLat: String(pickupResult.lat),
+          pickupLng: String(pickupResult.lng),
+          pickupLabel,
+          destLat: String(destinationResult.lat),
+          destLng: String(destinationResult.lng),
+          destLabel: destinationText.trim(),
         },
       });
     } catch (submitError) {
       logRideClientEvent(
         'ride.request.submit_failed',
         {
-          action: 'requestRide',
+          action: 'prepareFareQuote',
           vehicleType,
           durationMs: Date.now() - startedAt,
           error: submitError,
@@ -386,9 +352,7 @@ export default function RequestRide() {
       return;
     }
 
-    // The secure backend validates BOTH points against the official Horizonte
-    // polygon before routing or writing the ride.
-    createSecureRide();
+    prepareFareQuote();
   }
 
   return (
@@ -443,7 +407,6 @@ export default function RequestRide() {
             setOriginLat(null);
             setOriginLng(null);
             setGpsFound(false);
-            resetRequestAttempt();
           }}
           onSuggestionSelected={applyOriginSuggestion}
           disabled={submitting}
@@ -458,7 +421,6 @@ export default function RequestRide() {
           value={originReferenceText}
           onChangeText={(text) => {
             setOriginReferenceText(text);
-            resetRequestAttempt();
           }}
           placeholder="Ex: em frente à farmácia, portão azul"
           returnKeyType="next"
@@ -478,7 +440,6 @@ export default function RequestRide() {
             setDestinationLat(null);
             setDestinationLng(null);
             setDestinationSource('manual');
-            resetRequestAttempt();
           }}
           onSuggestionSelected={applyDestinationSuggestion}
           disabled={submitting}
@@ -494,7 +455,6 @@ export default function RequestRide() {
             value={vehicleType}
             onChange={(type) => {
               setVehicleType(type);
-              resetRequestAttempt();
             }}
           />
         </View>
@@ -505,11 +465,11 @@ export default function RequestRide() {
       ) : null}
 
       <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
-        O preço é calculado pelo servidor antes da busca. Pagamento direto por Pix ao motorista.
+        Você verá o preço antes de confirmar. Pagamento direto por Pix ao motorista.
       </Text>
 
       <AppButton
-        title={submitting ? 'Calculando preço e buscando...' : 'Pedir corrida'}
+        title={submitting ? 'Localizando trajeto…' : 'Ver preço'}
         onPress={validateAndSubmit}
         disabled={submitting || !passenger}
       />

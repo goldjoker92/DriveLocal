@@ -6,7 +6,7 @@
 
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
-const { assertShape, validateEnum, validateIdempotencyKey } = require('../validation/validators');
+const { assertShape, validateEnum, validateIdentifier, validateIdempotencyKey } = require('../validation/validators');
 const { logInfo, logWarning } = require('../logging/logger');
 const {
   acquireOperation,
@@ -25,6 +25,28 @@ const { safeRideView } = require('./safeViews');
 const C = require('./constants');
 
 const OPERATION_TYPE = 'create_ride_request';
+
+function checkQuote(quote, { passengerId, vehicleType, pickup, destination, serviceAreaId, nowMs }) {
+  if (!quote || quote.passengerId !== passengerId || quote.serviceAreaId !== serviceAreaId
+    || quote.vehicleType !== vehicleType
+    || quote.pickup?.lat !== pickup.lat || quote.pickup?.lng !== pickup.lng
+    || quote.destination?.lat !== destination.lat || quote.destination?.lng !== destination.lng) {
+    throw new AppError(ERROR_CODES.QUOTE_MISMATCH, {
+      internalMessage: 'quote ownership, route or vehicle mismatch',
+    });
+  }
+  if (!Number.isInteger(quote.estimatedFareCentavos) || quote.estimatedFareCentavos <= 0
+    || !Number.isInteger(quote.estimatedCommissionCentavos)
+    || typeof quote.pricingConfigVersion !== 'string') {
+    throw new AppError(ERROR_CODES.QUOTE_MISMATCH, {
+      internalMessage: 'quote missing authoritative price',
+    });
+  }
+  if (!Number.isInteger(quote.expiresAtMs) || quote.expiresAtMs <= nowMs) {
+    throw new AppError(ERROR_CODES.QUOTE_EXPIRED, { internalMessage: 'quote expired' });
+  }
+  return quote;
+}
 
 function sanitizeCoord(value, field) {
   if (!value || typeof value !== 'object') {
@@ -69,7 +91,7 @@ async function clearPassengerActiveRideIfCurrent({ db, passengerId, rideId }) {
 /**
  * @param {{db:object, request:object, context:object, clock:{now:()=>number}, routingAdapter:object}} args
  */
-async function createRideRequestSecure({ db, request, context, clock, routingAdapter }) {
+async function createRideRequestSecure({ db, request, context, clock, routingAdapter, requireQuote = false }) {
   const traceId = context && context.traceId;
   const passengerId = request && request.auth && request.auth.uid;
   if (!passengerId) {
@@ -80,17 +102,26 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
 
   const payload = assertShape(request && request.data, {
     required: ['vehicleType', 'pickup', 'destination', 'idempotencyKey'],
+    optional: ['quoteId'],
   });
   const vehicleType = validateEnum(payload.vehicleType, C.VEHICLE_TYPES, 'vehicleType');
   const idempotencyKey = validateIdempotencyKey(payload.idempotencyKey);
   const pickup = sanitizeCoord(payload.pickup, 'pickup');
   const destination = sanitizeCoord(payload.destination, 'destination');
   const serviceAreaId = C.DEFAULT_SERVICE_AREA_ID;
+  if (requireQuote && !payload.quoteId) {
+    throw new AppError(ERROR_CODES.QUOTE_MISMATCH, {
+      internalMessage: 'confirmation requires a server quote',
+    });
+  }
+  const quoteId = payload.quoteId ? validateIdentifier(payload.quoteId, 'quoteId') : null;
+  const quoteRef = quoteId ? db.collection(C.RIDE_QUOTES).doc(quoteId) : null;
 
   logInfo(context, 'ride.create.started', {
     operation: OPERATION_TYPE,
     serviceAreaId,
     vehicleType,
+    quoteId,
   });
 
   const acq = await acquireOperation(
@@ -100,7 +131,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       operationType: OPERATION_TYPE,
       actorUid: passengerId,
       traceId,
-      payload: { passengerId, vehicleType, pickup, destination },
+      payload: { passengerId, vehicleType, pickup, destination, quoteId },
     },
     clock
   );
@@ -145,7 +176,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
     }
 
     const activeRideId = passenger.activeRideId || null;
-    if (activeRideId) {
+    if (activeRideId && !quoteRef) {
       const activeSnap = await db.collection(C.RIDE_REQUESTS).doc(activeRideId).get();
       const activeStatus = activeSnap.exists ? (activeSnap.data() || {}).status : null;
       if (activeStatus && C.NON_FINAL_RIDE_STATUSES.includes(activeStatus)) {
@@ -174,18 +205,37 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       locationMaxAgeMs: C.LOCATION_MAX_AGE_MS,
     });
 
-    const quote = await calculateServerRideQuote({
-      routingAdapter,
-      serviceAreaId,
-      vehicleType,
-      pickup,
-      destination,
-    });
-    logInfo(context, 'ride.route.completed', {
-      operation: OPERATION_TYPE,
-      serviceAreaId,
-      vehicleType,
-    });
+    let quote;
+    if (quoteRef) {
+      const quoteSnap = await quoteRef.get();
+      const savedQuote = quoteSnap.exists ? quoteSnap.data() : null;
+      // A network retry after the ride was written may arrive after expiry. The
+      // same key returns that ride; another key cannot consume this quote again.
+      if (savedQuote?.consumedRideId) {
+        if (savedQuote.consumedIdempotencyKey !== idempotencyKey) {
+          throw new AppError(ERROR_CODES.QUOTE_USED);
+        }
+        const existing = await db.collection(C.RIDE_REQUESTS).doc(savedQuote.consumedRideId).get();
+        if (!existing.exists || existing.data()?.passengerId !== passengerId) {
+          throw new AppError(ERROR_CODES.QUOTE_MISMATCH);
+        }
+        const view = safeRideView(savedQuote.consumedRideId, existing.data());
+        await completeOperation(db, idempotencyKey, view, clock);
+        return view;
+      }
+      quote = checkQuote(savedQuote, {
+        passengerId, vehicleType, pickup, destination, serviceAreaId, nowMs: clock.now(),
+      });
+    } else {
+      // Temporary compatibility for passenger builds shipped before the quote
+      // screen. Remove this callable after the passenger minimum build advances.
+      quote = await calculateServerRideQuote({
+        routingAdapter, serviceAreaId, vehicleType, pickup, destination,
+      });
+      logInfo(context, 'ride.create.legacy_without_quote', {
+        operation: OPERATION_TYPE, vehicleType,
+      });
+    }
 
     const rideRef = db.collection(C.RIDE_REQUESTS).doc();
     const rideId = rideRef.id;
@@ -193,6 +243,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
     const ride = {
       rideId,
       passengerId,
+      quoteId,
       serviceAreaId,
       boundaryVersion: svc.config.boundaryVersion || null,
       operationalPolygonVersion: svc.config.operationalPolygonVersion || null,
@@ -212,7 +263,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       acceptedAt: null,
       commissionHoldCentavos: 0,
       reasonCode: null,
-      traceId: traceId || null,
+      traceId: quote.traceId || traceId || null,
       createdAtMs: nowMs,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       searchExpiresAtMs: nowMs + C.SEARCH_TTL_SECONDS * 1000,
@@ -224,11 +275,37 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       offeredDriverIds: [],
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    await rideRef.set(ride);
-    await paxRef.set(
-      { activeRideId: rideId, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
-      { merge: true }
-    );
+    if (quoteRef) {
+      await db.runTransaction(async (tx) => {
+        const currentQuoteSnap = await tx.get(quoteRef);
+        const currentPaxSnap = await tx.get(paxRef);
+        const currentQuote = currentQuoteSnap.exists ? currentQuoteSnap.data() : null;
+        if (currentQuote?.consumedRideId) throw new AppError(ERROR_CODES.QUOTE_USED);
+        checkQuote(currentQuote, {
+          passengerId, vehicleType, pickup, destination, serviceAreaId, nowMs: clock.now(),
+        });
+        if (currentPaxSnap.exists && currentPaxSnap.data()?.activeRideId) {
+          const prior = await tx.get(db.collection(C.RIDE_REQUESTS).doc(currentPaxSnap.data().activeRideId));
+          if (prior.exists && C.NON_FINAL_RIDE_STATUSES.includes(prior.data()?.status)) {
+            throw new AppError(ERROR_CODES.RIDE_IN_PROGRESS);
+          }
+        }
+        tx.set(rideRef, ride);
+        tx.set(paxRef, {
+          activeRideId: rideId, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        tx.set(quoteRef, {
+          consumedRideId: rideId, consumedIdempotencyKey: idempotencyKey,
+          consumedAtMs: nowMs,
+        }, { merge: true });
+      });
+    } else {
+      await rideRef.set(ride);
+      await paxRef.set(
+        { activeRideId: rideId, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+    }
     logInfo(context, 'ride.quote.created', {
       operation: OPERATION_TYPE,
       rideId,
@@ -245,7 +322,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         rideId,
         createdAtMs: nowMs,
         searchExpiresAtMs: ride.searchExpiresAtMs,
-        traceId,
+        traceId: ride.traceId,
         context,
       });
     } catch (error) {
@@ -304,6 +381,11 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
     return view;
   } catch (err) {
     const appErr = AppError.from(err);
+    if (quoteRef && [ERROR_CODES.QUOTE_EXPIRED, ERROR_CODES.QUOTE_MISMATCH, ERROR_CODES.QUOTE_USED].includes(appErr.code)) {
+      logWarning(context, 'ride.create_from_quote.rejected', {
+        operation: OPERATION_TYPE, quoteId, reasonCode: appErr.code,
+      });
+    }
     await recordFailure(db, idempotencyKey, { retryable: appErr.retryable }, clock);
     throw appErr;
   }
