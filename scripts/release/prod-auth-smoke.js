@@ -19,8 +19,8 @@
 //   PROD_AUTH_SMOKE_ROLES=passenger,driver
 //   PROD_EXPECTED_SIGNING_CERT_COUNT=3
 
-const { loadFirebaseBuildConfig } = require('../build/firebaseBuildConfig');
 const { getServiceAccountAccessToken } = require('./googleServiceAccountAuth');
+const { loadProdFirebaseAndroidConfig } = require('./prodFirebaseAndroidConfig');
 
 const REQUIRED_CONFIRMATION = 'DRIVELOCAL_PRODUCTION';
 const EXPECTED_PROJECT_ID = 'drivelocal-prod';
@@ -345,13 +345,13 @@ async function main() {
     androidSigningSha1s,
   } = assertSafeConfiguration();
 
-  const build = loadFirebaseBuildConfig({
-    env: { ...process.env, APP_ENV: 'prod', EAS_BUILD: '1' },
+  const firebaseConfig = loadProdFirebaseAndroidConfig({
+    env: process.env,
     packageName: ANDROID_PACKAGE,
   });
 
-  if (build.firebaseProjectId !== EXPECTED_PROJECT_ID) {
-    throw new Error(`refusing project ${build.firebaseProjectId}; expected ${EXPECTED_PROJECT_ID}`);
+  if (firebaseConfig.projectId !== EXPECTED_PROJECT_ID) {
+    throw new Error(`refusing project ${firebaseConfig.projectId}; expected ${EXPECTED_PROJECT_ID}`);
   }
 
   const adminAccessToken = await getServiceAccountAccessToken({
@@ -359,7 +359,7 @@ async function main() {
   });
   const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   console.log(
-    `[PROD_AUTH_SMOKE] project=${build.firebaseProjectId} roles=${roles.join(',')}`
+    `[PROD_AUTH_SMOKE] project=${firebaseConfig.projectId} roles=${roles.join(',')}`
     + ` signingCerts=${androidSigningSha1s.length} started`
   );
 
@@ -377,7 +377,7 @@ async function main() {
           role,
           email,
           password,
-          firebaseConfig: build.firebaseConfig,
+          firebaseConfig,
           androidSigningSha1,
           adminAccessToken,
           certIndex,

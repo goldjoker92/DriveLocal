@@ -4,8 +4,11 @@
 // required by the DriveLocal closed-test app. This is deliberately PROD-only
 // and requires an explicit confirmation plus a drivelocal-prod service account.
 
-const { loadFirebaseBuildConfig } = require('../build/firebaseBuildConfig');
 const { getServiceAccountAccessToken } = require('./googleServiceAccountAuth');
+const {
+  ANDROID_PACKAGE,
+  loadProdFirebaseAndroidConfig,
+} = require('./prodFirebaseAndroidConfig');
 
 const EXPECTED_PROJECT_ID = 'drivelocal-prod';
 const REQUIRED_CONFIRMATION = 'DRIVELOCAL_PRODUCTION';
@@ -155,7 +158,7 @@ async function patchRequiredSettings(projectId, accessToken, fetchImpl) {
 async function ensureProdEmailAuth({
   env = process.env,
   fetchImpl = globalThis.fetch,
-  loadBuildConfig = loadFirebaseBuildConfig,
+  loadAndroidConfig = loadProdFirebaseAndroidConfig,
   getAccessToken = getServiceAccountAccessToken,
   sleepImpl = sleep,
   logger = console,
@@ -169,12 +172,12 @@ async function ensureProdEmailAuth({
     throw new Error('global fetch is unavailable');
   }
 
-  const build = loadBuildConfig({
-    env: { ...env, APP_ENV: 'prod', EAS_BUILD: '1' },
-    packageName: 'com.drivelocal.app',
+  const androidConfig = loadAndroidConfig({
+    env,
+    packageName: ANDROID_PACKAGE,
   });
-  if (build.firebaseProjectId !== EXPECTED_PROJECT_ID) {
-    throw new Error(`refusing project ${build.firebaseProjectId}; expected ${EXPECTED_PROJECT_ID}`);
+  if (androidConfig.projectId !== EXPECTED_PROJECT_ID) {
+    throw new Error(`refusing project ${androidConfig.projectId}; expected ${EXPECTED_PROJECT_ID}`);
   }
 
   const accessToken = await getAccessToken({ expectedProjectId: EXPECTED_PROJECT_ID });
