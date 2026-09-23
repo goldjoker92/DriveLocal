@@ -32,7 +32,7 @@ function buildServiceAreaConfig(identity, artifact, report, existing = {}) {
     allowedVehicleTypes: existing.allowedVehicleTypes || ['moto', 'car'],
 
     // Progressive launch policy for a medium-sized city with limited initial
-    // supply. Runtime expands through 3/6/10/12/15 km without ever crossing the
+    // supply. Runtime expands through 3/5/6/7/8 km without ever crossing the
     // municipality geofence validated above.
     dispatchMode: 'progressive_launch',
     searchRadiusMeters: C.DEFAULT_SEARCH_RADIUS_METERS,

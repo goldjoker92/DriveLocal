@@ -33,7 +33,7 @@ describe('Horizonte launch dispatch policy', () => {
     const config = buildServiceAreaConfig(identity(), artifact, report, {});
 
     expect(config.dispatchMode).toBe('progressive_launch');
-    expect(config.searchRadiusMeters).toBe(15_000);
+    expect(config.searchRadiusMeters).toBe(8_000);
     expect(config.maxCandidates).toBe(100);
     expect(config.offerTtlSeconds).toBe(C.OFFER_TTL_SECONDS);
     expect(config.offerTtlSeconds).toBe(60);
@@ -51,7 +51,7 @@ describe('Horizonte launch dispatch policy', () => {
     expect(policy).toMatchObject({
       dispatchMode: 'progressive_launch',
       source: 'backend_progressive_fallback',
-      searchRadiusMeters: 15_000,
+      searchRadiusMeters: 8_000,
       maxCandidates: 100,
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
     });
