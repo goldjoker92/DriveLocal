@@ -294,8 +294,8 @@ describe('progressive dispatch lifecycle', () => {
     const db = makeFakeFirestore();
     await seedCity(db);
     await seedRide(db);
-    // Roughly 8.9 km north of pickup: outside 3/6 km, inside 10 km.
-    await seedDriver(db, 'driver_far', { lat: -4.02, lng: -38.49 });
+    // Roughly 5.9 km north of pickup: outside 3/5 km, inside 6 km.
+    await seedDriver(db, 'driver_far', { lat: -4.047, lng: -38.49 });
 
     const initial = await runDispatchWave({
       db,
@@ -313,9 +313,9 @@ describe('progressive dispatch lifecycle', () => {
       .toEqual([0, 1, 2]);
     expect(db._store.has(`${C.DRIVER_OFFERS}/${RIDE_ID}_driver_far`)).toBe(true);
 
-    // A driver comes online around 5.5 km after the early expansion. The normal
-    // t+15s wave still re-queries 6 km and reaches that newcomer exactly once.
-    await seedDriver(db, 'driver_new', { lat: -4.05, lng: -38.49 });
+    // A driver comes online around 4.4 km after the early expansion. The normal
+    // t+15s wave still re-queries 5 km and reaches that newcomer exactly once.
+    await seedDriver(db, 'driver_new', { lat: -4.06, lng: -38.49 });
     const scheduled = await runDispatchWave({
       db,
       rideId: RIDE_ID,
@@ -329,6 +329,6 @@ describe('progressive dispatch lifecycle', () => {
     expect(scheduled.offersCreated).toBe(1);
     const newOffer = db._store.get(`${C.DRIVER_OFFERS}/${RIDE_ID}_driver_new`);
     expect(newOffer.dispatchWaveIndex).toBe(1);
-    expect(newOffer.dispatchWaveRadiusMeters).toBe(6_000);
+    expect(newOffer.dispatchWaveRadiusMeters).toBe(5_000);
   });
 });
