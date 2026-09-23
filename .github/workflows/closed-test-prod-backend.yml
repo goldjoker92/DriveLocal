@@ -71,7 +71,9 @@ jobs:
           node --check scripts/release/ensure-prod-email-auth.js
           node --check scripts/release/ensure-prod-android-api-key.js
           node --check scripts/release/prod-auth-smoke.js
-          npx jest --ci --runInBand --forceExit
+          # App-config unit tests deliberately exercise DEV and PROD modes.
+          # Keep the protected PROD Android file for later validation steps only.
+          GOOGLE_SERVICES_JSON= npx jest --ci --runInBand --forceExit
           npm --prefix functions test -- --forceExit
 
       - name: Validate the PROD target before mutation
