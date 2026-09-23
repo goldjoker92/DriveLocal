@@ -37,6 +37,7 @@ jobs:
       - name: Validate release scripts
         run: |
           node --check scripts/release/googleServiceAccountAuth.js
+          node --check scripts/release/prodFirebaseAndroidConfig.js
           node --check scripts/release/ensure-prod-email-auth.js
           node --check scripts/release/ensure-prod-android-api-key.js
           node --check scripts/release/prod-auth-smoke.js

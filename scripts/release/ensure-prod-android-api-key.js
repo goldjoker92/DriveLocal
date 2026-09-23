@@ -6,11 +6,8 @@
 // preserved. A conflicting browser, iOS, or server client restriction causes a
 // fail-closed error instead of an unsafe overwrite.
 
-const {
-  loadFirebaseBuildConfig,
-  readGoogleServicesJson,
-} = require('../build/firebaseBuildConfig');
 const { getServiceAccountAccessToken } = require('./googleServiceAccountAuth');
+const { loadProdFirebaseAndroidConfig } = require('./prodFirebaseAndroidConfig');
 const {
   normalizeSha1,
   parseSha1Fingerprints,
@@ -186,17 +183,16 @@ async function main() {
     );
   }
 
-  const build = loadFirebaseBuildConfig({
-    env: { ...process.env, APP_ENV: 'prod', EAS_BUILD: '1' },
+  const androidConfig = loadProdFirebaseAndroidConfig({
+    env: process.env,
     packageName: ANDROID_PACKAGE,
   });
 
-  if (build.firebaseProjectId !== EXPECTED_PROJECT_ID) {
-    throw new Error(`refusing project ${build.firebaseProjectId}; expected ${EXPECTED_PROJECT_ID}`);
+  if (androidConfig.projectId !== EXPECTED_PROJECT_ID) {
+    throw new Error(`refusing project ${androidConfig.projectId}; expected ${EXPECTED_PROJECT_ID}`);
   }
 
-  const { parsed: googleServices } = readGoogleServicesJson(build.googleServicesResolvedPath);
-  const projectNumber = String(googleServices?.project_info?.project_number || '').trim();
+  const projectNumber = String(androidConfig.projectNumber || '').trim();
   if (!/^\d+$/.test(projectNumber)) {
     throw new Error('google-services PROD is missing a valid project number');
   }
@@ -210,7 +206,7 @@ async function main() {
     + ` signingCerts=${fingerprints.length} lookup started`
   );
 
-  const apiKey = build.firebaseConfig.apiKey;
+  const apiKey = androidConfig.apiKey;
   const lookup = await authorizedRequest(
     `${API_KEYS_BASE_URL}/keys:lookupKey?keyString=${encodeURIComponent(apiKey)}`,
     accessToken
@@ -262,7 +258,7 @@ async function main() {
 
   const firebaseShaResult = await ensureFirebaseAndroidShaCertificates({
     projectId: EXPECTED_PROJECT_ID,
-    appId: build.firebaseConfig.appId,
+    appId: androidConfig.appId,
     fingerprints,
     accessToken,
   });

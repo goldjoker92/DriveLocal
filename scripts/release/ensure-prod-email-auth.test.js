@@ -37,7 +37,7 @@ function dependencies(fetchImpl) {
       CONFIRM_PRODUCTION_AUTH_CONFIG: REQUIRED_CONFIRMATION,
     },
     fetchImpl,
-    loadBuildConfig: jest.fn(() => ({ firebaseProjectId: EXPECTED_PROJECT_ID })),
+    loadAndroidConfig: jest.fn(() => ({ projectId: EXPECTED_PROJECT_ID })),
     getAccessToken: jest.fn(async () => 'access-token'),
     sleepImpl: jest.fn(async () => undefined),
     logger: {
@@ -103,6 +103,10 @@ describe('ensureProdEmailAuth', () => {
 
     await ensureProdEmailAuth(options);
 
+    expect(options.loadAndroidConfig).toHaveBeenCalledWith({
+      env: options.env,
+      packageName: 'com.drivelocal.app',
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(options.logger.log).toHaveBeenCalledWith(
       '[PROD_AUTH_CONFIG] project=drivelocal-prod email_password=enabled signup=enabled OK'
