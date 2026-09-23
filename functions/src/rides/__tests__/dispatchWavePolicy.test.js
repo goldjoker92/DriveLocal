@@ -9,18 +9,19 @@ const {
 } = require('../dispatchWavePolicy');
 
 describe('progressive dispatch wave policy', () => {
-  it('locks the agreed 3/6/10/12/15 km cadence inside one 90-second search', () => {
+  it('locks the agreed 3/5/6/7/8 km cadence inside one 90-second search', () => {
     expect(assertWavePlan()).toBe(true);
     expect(C.DISPATCH_WAVES).toEqual([
       { index: 0, offsetMs: 0, radiusMeters: 3_000 },
-      { index: 1, offsetMs: 15_000, radiusMeters: 6_000 },
-      { index: 2, offsetMs: 30_000, radiusMeters: 10_000 },
-      { index: 3, offsetMs: 45_000, radiusMeters: 12_000 },
-      { index: 4, offsetMs: 60_000, radiusMeters: 15_000 },
+      { index: 1, offsetMs: 15_000, radiusMeters: 5_000 },
+      { index: 2, offsetMs: 30_000, radiusMeters: 6_000 },
+      { index: 3, offsetMs: 45_000, radiusMeters: 7_000 },
+      { index: 4, offsetMs: 60_000, radiusMeters: 8_000 },
     ]);
+    expect(C.DISPATCH_WAVE_PLAN_VERSION).toBe('horizonte-progressive-8km-v2');
     expect(C.OFFER_TTL_SECONDS).toBe(60);
     expect(C.SEARCH_TTL_SECONDS).toBe(90);
-    expect(C.DEFAULT_SEARCH_RADIUS_METERS).toBe(15_000);
+    expect(C.DEFAULT_SEARCH_RADIUS_METERS).toBe(8_000);
   });
 
   it('resolves due/next waves deterministically at every boundary', () => {

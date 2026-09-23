@@ -123,17 +123,19 @@ module.exports = Object.freeze({
   // countdown reads the offer's expiresAtMs, so every shipped build follows.
   // Radius expansion is cumulative: drivers already offered the ride are never
   // notified twice, but drivers coming online during the window remain eligible.
+  // Field data showed refusals at a 7.4 km median pickup distance, so Horizonte
+  // now stops at 8 km instead of asking drivers to travel farther unpaid.
   OFFER_TTL_SECONDS: 60,
   SEARCH_TTL_SECONDS: 90,
   MAX_CANDIDATES: 100,
-  DEFAULT_SEARCH_RADIUS_METERS: 15_000,
-  DISPATCH_WAVE_PLAN_VERSION: 'horizonte-progressive-v1',
+  DEFAULT_SEARCH_RADIUS_METERS: 8_000,
+  DISPATCH_WAVE_PLAN_VERSION: 'horizonte-progressive-8km-v2',
   DISPATCH_WAVES: Object.freeze([
     Object.freeze({ index: 0, offsetMs: 0, radiusMeters: 3_000 }),
-    Object.freeze({ index: 1, offsetMs: 15_000, radiusMeters: 6_000 }),
-    Object.freeze({ index: 2, offsetMs: 30_000, radiusMeters: 10_000 }),
-    Object.freeze({ index: 3, offsetMs: 45_000, radiusMeters: 12_000 }),
-    Object.freeze({ index: 4, offsetMs: 60_000, radiusMeters: 15_000 }),
+    Object.freeze({ index: 1, offsetMs: 15_000, radiusMeters: 5_000 }),
+    Object.freeze({ index: 2, offsetMs: 30_000, radiusMeters: 6_000 }),
+    Object.freeze({ index: 3, offsetMs: 45_000, radiusMeters: 7_000 }),
+    Object.freeze({ index: 4, offsetMs: 60_000, radiusMeters: 8_000 }),
   ]),
   // Launch reality: the work session is refreshed ONLY by a published GPS point
   // (see driverLocationTracking.driverLocationUpdate). Any Android battery
