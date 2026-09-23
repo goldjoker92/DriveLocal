@@ -1,5 +1,5 @@
 // @ts-check
-// Secure driver approval. One transaction owns the atomic per-city approval
+// Secure driver approval. One transaction owns the atomic shared approval
 // counter and founder assignment. Before approval, a bounded server-side duplicate
 // scan checks CPF, plate, Pix, phone and email without logging or returning values.
 // A conflict requires explicit admin review/override; it never auto-bans a driver.
@@ -80,7 +80,8 @@ async function approveDriver({ db, request, context, clock }) {
     });
   }
   const initial = initialSnap.data() || {};
-  if (initial.approvalNumber != null) {
+  if (initial.approvalNumber != null
+    || (initial.verificationStatus === 'approved' && (initial.approvedAtMs || initial.approvedAt))) {
     logInfo(context, 'driver.approval.duplicate_ignored', {
       operation: 'approve_driver',
       reasonCode: 'ALREADY_APPROVED',
@@ -163,7 +164,10 @@ async function approveDriver({ db, request, context, clock }) {
     const before = snap.data() || {};
 
     // Idempotent replay: never restart benefits or increment the counter twice.
-    if (before.approvalNumber != null) return { replay: true, after: before };
+    if (before.approvalNumber != null
+      || (before.verificationStatus === 'approved' && (before.approvedAtMs || before.approvedAt))) {
+      return { replay: true, after: before };
+    }
 
     const photoApproved = before.driverPhotoReviewStatus === 'approved'
       && typeof before.driverPhotoPublicPath === 'string'
@@ -188,8 +192,8 @@ async function approveDriver({ db, request, context, clock }) {
       });
     }
 
-    const serviceAreaId = validateIdentifier(before.serviceAreaId, 'serviceAreaId');
-    const counterRef = db.collection(C.COUNTERS).doc(serviceAreaId);
+    validateIdentifier(before.serviceAreaId, 'serviceAreaId');
+    const counterRef = db.collection(C.COUNTERS).doc(C.FOUNDER_COUNTER_ID);
     const counterSnap = await tx.get(counterRef);
     const current = counterSnap.exists
       ? Number((counterSnap.data() || {}).approvedCount || 0)
@@ -208,9 +212,8 @@ async function approveDriver({ db, request, context, clock }) {
       founderEligible: isFounder,
       founderNumber: isFounder ? approvalNumber : null,
       founderGrantedAt: isFounder ? admin.firestore.FieldValue.serverTimestamp() : null,
-      founderExpiresAt: isFounder ? freePeriodEnd : null,
+      // The badge has no expiration; only the commission promotion does.
       commissionFreeUntil: freePeriodEnd,
-      subscriptionFreeUntil: isFounder ? freePeriodEnd : null,
       commercialPolicyVersion: COMMERCIAL_POLICY_VERSION,
       commercialPolicyAssignedAtMs: nowMs,
       duplicateCheckStatus,
@@ -231,7 +234,6 @@ async function approveDriver({ db, request, context, clock }) {
       availabilityUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    if (before.freeRideCountUsed == null) update.freeRideCountUsed = 0;
     if (before.walletBalanceCentavos == null) update.walletBalanceCentavos = 0;
     if (before.walletHeldCentavos == null) update.walletHeldCentavos = 0;
     if (before.walletAvailableCentavos == null) update.walletAvailableCentavos = 0;
@@ -245,7 +247,7 @@ async function approveDriver({ db, request, context, clock }) {
     }
 
     tx.set(counterRef, {
-      serviceAreaId,
+      serviceAreaId: C.FOUNDER_COUNTER_ID,
       approvedCount: approvalNumber,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -281,7 +283,6 @@ async function approveDriver({ db, request, context, clock }) {
         founderNumber: outcome.after.founderNumber,
         commercialPolicyVersion: COMMERCIAL_POLICY_VERSION,
         commissionFreeDays: C.FREE_PERIOD_DAYS,
-        subscriptionGraceRideLimit: outcome.after.founderEligible ? 0 : C.FREE_RIDE_LIMIT,
         driverPhotoPublicVersion: outcome.after.driverPhotoPublicVersion || null,
         criminalCertificateStatus: outcome.after.criminalCertificateStatus || null,
         driverDocumentPolicyVersion: outcome.after.driverDocumentPolicyVersion || null,
@@ -300,7 +301,6 @@ async function approveDriver({ db, request, context, clock }) {
       approvalNumber: outcome.after.approvalNumber,
       founder: outcome.after.founderEligible === true,
       freePeriodDays: C.FREE_PERIOD_DAYS,
-      subscriptionGraceRideLimit: outcome.after.founderEligible ? 0 : C.FREE_RIDE_LIMIT,
       vehicleType: outcome.after.vehicleType || null,
     });
   }

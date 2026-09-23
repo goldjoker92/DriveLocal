@@ -12,14 +12,13 @@ const { defineSecret } = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 const { withCallableBoundary } = require('../errors/boundary');
-const { AppError } = require('../errors/appError');
+const { AppError, ERROR_CODES } = require('../errors/appError');
 const { systemClock } = require('../time/clock');
 const { createLoggerContext, logError } = require('../logging/logger');
 const { resolveEnvironment } = require('../config/environment');
 const { createMercadoPagoAdapter } = require('./mercadoPago');
 const { createDriverPixPayment } = require('./createPixPayment');
 const { getDriverPaymentStatus, reprocessDriverPayment } = require('./paymentStatus');
-const { getDriverSubscriptionSnapshot } = require('./subscriptionSnapshot');
 const { handleWebhook } = require('./webhook');
 
 const REGION = 'southamerica-east1';
@@ -54,18 +53,13 @@ const getDriverPaymentStatusFn = onCall(
   )
 );
 
-// Restores only the latest actionable subscription payment for the authenticated
-// driver. Raw paymentRequests remain server-only and no provider secret is needed.
+// Keep the old callable deployed until old APKs are retired. It cannot
+// reactivate or request another charge.
 const getDriverSubscriptionSnapshotFn = onCall(
   { region: REGION },
-  withCallableBoundary('getDriverSubscriptionSnapshot', (request, context) =>
-    getDriverSubscriptionSnapshot({
-      db: admin.firestore(),
-      request,
-      context,
-      clock: systemClock,
-    })
-  )
+  withCallableBoundary('getDriverSubscriptionSnapshot', async () => {
+    throw new AppError(ERROR_CODES.APP_UPDATE_REQUIRED);
+  })
 );
 
 // reprocessDriverPayment — admin only; needs the access token to re-fetch.

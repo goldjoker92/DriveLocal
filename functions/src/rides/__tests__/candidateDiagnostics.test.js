@@ -49,7 +49,7 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
         locationAvailabilitySessionId: 'work_previous_session_987654321',
       }),
       candidate('busy', { activeRideId: 'other-ride' }),
-      candidate('subscription-required', {
+      candidate('previously-plan-blocked', {
         founderEligible: true,
         subscriptionFreeUntil: NOW - 1,
         subscriptionActive: false,
@@ -62,20 +62,19 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
       clock,
     });
 
-    expect(eligible.map((item) => item.driverId)).toEqual(['fresh', 'stale-recoverable']);
+    expect(eligible.map((item) => item.driverId)).toEqual(['fresh', 'previously-plan-blocked', 'stale-recoverable']);
     expect(eligible[0].locationFreshness).toBe('fresh');
-    expect(eligible[1].locationFreshness).toBe('stale_online_fallback');
+    expect(eligible[2].locationFreshness).toBe('stale_online_fallback');
     expect(diagnostics).toMatchObject({
       candidateCount: 7,
-      eligibleCount: 2,
-      freshEligibleCount: 1,
+      eligibleCount: 3,
+      freshEligibleCount: 2,
       staleFallbackEligibleCount: 1,
-      rejectedCount: 5,
+      rejectedCount: 4,
       rejectedBusy: 1,
       rejectedMissingWorkSession: 1,
       rejectedStaleWorkSession: 1,
       rejectedStaleLocation: 1,
-      rejectedSubscriptionRequired: 1,
       searchRadiusMeters: 8_000,
       locationMaxAgeMs: 15 * 60 * 1000,
       availabilitySessionMaxAgeMs: 20 * 60 * 1000,

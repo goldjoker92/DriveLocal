@@ -64,7 +64,7 @@ describe('hourly driver supply analytics', () => {
     const staleSession = eligibleDriver({ availabilityUpdatedAtMs: AT_18H - 25 * 60 * 1000 });
     const review = eligibleDriver({ financialReviewRequired: true });
     const emptyWallet = eligibleDriver({
-      commissionFreeUntil: AT_18H - 1,
+      approvedAtMs: AT_18H - 61 * DAY_MS,
       freeRideCountUsed: 5,
       subscriptionActive: true,
       subscriptionExpiresAt: AT_18H + DAY_MS,

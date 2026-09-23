@@ -7,7 +7,6 @@ const {
 } = require('../acceptOffer');
 const {
   COMMERCIAL_POLICY_VERSION,
-  COVERAGE_SOURCE,
   buildCommercialPolicySnapshot,
 } = require('../../drivers/commercialPolicy');
 
@@ -18,14 +17,12 @@ const FREE_UNTIL = APPROVED_AT + 60 * DAY_MS;
 function driver(overrides = {}) {
   return {
     approvalNumber: 101,
+    verificationStatus: 'approved',
     founderEligible: false,
     vehicleType: 'moto',
     serviceAreaId: 'HORIZONTE_CE_BR',
     approvedAtMs: APPROVED_AT,
     commissionFreeUntil: FREE_UNTIL,
-    subscriptionActive: false,
-    subscriptionExpiresAt: 0,
-    freeRideCountUsed: 4,
     ...overrides,
   };
 }
@@ -58,25 +55,23 @@ describe('commercial policy snapshots at acceptance', () => {
     });
   });
 
-  it('freezes the non-founder grace source before ride completion', () => {
-    const snapshot = buildCommercialPolicySnapshot(driver(), FREE_UNTIL - 1);
+  it('freezes the 0% rate before ride completion despite old five-ride data', () => {
+    const snapshot = buildCommercialPolicySnapshot(driver({ freeRideCountUsed: 5 }), FREE_UNTIL - 1);
 
     expect(snapshot.policyVersion).toBe(COMMERCIAL_POLICY_VERSION);
     expect(snapshot.commissionBpsAtAcceptance).toBe(0);
-    expect(snapshot.subscriptionCoverageSource)
-      .toBe(COVERAGE_SOURCE.NON_FOUNDER_RIDE_GRACE);
-    expect(snapshot.freeRideCountUsedAtAcceptance).toBe(4);
-    expect(snapshot.freeRideLimit).toBe(5);
+    expect(snapshot.commissionFreeAtAcceptance).toBe(true);
+    expect(snapshot).not.toHaveProperty('freeRideLimit');
   });
 
-  it('freezes paid subscription coverage independently from the free-period date', () => {
+  it('freezes the normal rate on day 60 regardless of a legacy paid plan', () => {
     const snapshot = buildCommercialPolicySnapshot(driver({
       freeRideCountUsed: 5,
       subscriptionActive: true,
       subscriptionExpiresAt: FREE_UNTIL + 30 * DAY_MS,
-    }), FREE_UNTIL - 1);
+    }), FREE_UNTIL);
 
-    expect(snapshot.subscriptionCoverageSource).toBe(COVERAGE_SOURCE.PAID_SUBSCRIPTION);
-    expect(snapshot.commissionFreeAtAcceptance).toBe(true);
+    expect(snapshot.commissionBpsAtAcceptance).toBe(1200);
+    expect(snapshot.commissionFreeAtAcceptance).toBe(false);
   });
 });

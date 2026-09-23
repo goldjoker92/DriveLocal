@@ -1,20 +1,18 @@
 // @ts-check
 // Fixed server-owned constants for the Mercado Pago Pix payment domain.
 // All money is integer centavos; conversion to BRL decimal happens ONLY at the
-// provider boundary (see mercadoPago.js). The client never supplies plan prices,
-// and wallet top-ups remain bounded by this authoritative policy.
+// provider boundary (see mercadoPago.js). Wallet top-ups remain bounded.
 
 module.exports = Object.freeze({
   // Server-only Firestore collections (see backend/firebase/rules/firestore.rules).
   PAYMENT_REQUESTS: 'paymentRequests',
   WALLET_TRANSACTIONS: 'walletTransactions',
-  SUBSCRIPTION_PAYMENTS: 'subscriptionPayments',
 
   PROVIDER: 'mercado_pago',
   CURRENCY: 'BRL',
 
   // Payment purposes accepted from an authenticated driver.
-  PURPOSES: Object.freeze(['driver_subscription', 'wallet_topup']),
+  PURPOSES: Object.freeze(['wallet_topup']),
 
   // Normalized DriveLocal payment states (provider states map into these).
   STATUS: Object.freeze({

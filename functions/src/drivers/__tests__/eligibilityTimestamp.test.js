@@ -24,18 +24,16 @@ describe('driver backend eligibility timestamp normalization', () => {
         pixKeyType: 'E-mail',
         pixKey: 'timestamp_driver@pix.test.drivelocal.local',
         founderEligible: true,
-        subscriptionFreeUntil: timestampLike(NOW_MS + 60_000),
         commissionFreeUntil: timestampLike(NOW_MS + 60_000),
       },
       clock
     );
 
     expect(result.canReceiveRides).toBe(true);
-    expect(result.subscriptionCovered).toBe(true);
     expect(result.commissionFree).toBe(true);
   });
 
-  it('accepts a paid subscription stored as a Firestore Timestamp', () => {
+  it('ignores an old plan date and remains available at the normal rate', () => {
     const result = evaluateRideEligibility(
       {
         verificationStatus: 'approved',
@@ -43,31 +41,31 @@ describe('driver backend eligibility timestamp normalization', () => {
         pixKey: 'timestamp_driver@pix.test.drivelocal.local',
         founderEligible: true,
         subscriptionActive: true,
-        subscriptionFreeUntil: timestampLike(NOW_MS - 1),
+        commissionFreeUntil: timestampLike(NOW_MS - 1),
         subscriptionExpiresAt: timestampLike(NOW_MS + 30 * 24 * 60 * 60 * 1000),
       },
       clock
     );
 
     expect(result.canReceiveRides).toBe(true);
-    expect(result.requiresSubscription).toBe(false);
+    expect(result.commissionFree).toBe(false);
   });
 
-  it('rejects an expired founder without a paid subscription', () => {
+  it('keeps an expired founder available and retains the badge', () => {
     const result = evaluateRideEligibility(
       {
         verificationStatus: 'approved',
         pixKeyType: 'E-mail',
         pixKey: 'timestamp_driver@pix.test.drivelocal.local',
         founderEligible: true,
-        subscriptionFreeUntil: timestampLike(NOW_MS - 1),
+        commissionFreeUntil: timestampLike(NOW_MS - 1),
         subscriptionActive: false,
       },
       clock
     );
 
-    expect(result.canReceiveRides).toBe(false);
-    expect(result.requiresSubscription).toBe(true);
+    expect(result.canReceiveRides).toBe(true);
+    expect(result.isFounder).toBe(true);
   });
 
   it('normalizes Date, epoch milliseconds and seconds/nanoseconds shapes', () => {

@@ -160,6 +160,8 @@ function priceRide(input = {}) {
   const passengerFareCentavos = minimumApplied
     ? vp.minimumPassengerFareCentavos
     : computedFare;
+  const regularFareCentavos = Math.max(vp.minimumPassengerFareCentavos, roundCentavos(rawFare));
+  const peakSurchargeCentavos = Math.max(0, passengerFareCentavos - regularFareCentavos);
 
   const minimumPlatformCommissionCentavos = Math.max(
     0,
@@ -197,6 +199,7 @@ function priceRide(input = {}) {
     driverNetCentavos: passengerFareCentavos - commissionCentavos,
     commissionBps: vp.normalCommissionBps,
     peakApplied,
+    peakSurchargeCentavos,
     peakMultiplierBps,
     fareBreakdown: {
       baseFareCentavos: vp.baseFareCentavos,

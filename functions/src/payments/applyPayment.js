@@ -9,7 +9,6 @@
 const admin = require('firebase-admin');
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { writeAuditLog } = require('../audit/auditLog');
-const { computeSubscriptionExtension } = require('../drivers/subscriptionDomain');
 const DRIVERS = require('../drivers/constants').DRIVERS;
 const C = require('./constants');
 
@@ -91,90 +90,6 @@ async function applyWalletTopup({ db, paymentRef, driverId, amountCentavos, trac
 }
 
 /**
- * Applies a paid subscription in a single transaction, reusing the shared
- * extension math. Never changes approvedAt, founderNumber, commissionFreeUntil,
- * or freeRideCountUsed.
- * @param {{db:object, paymentRef:object, driverId:string, amountCentavos:number,
- *          processingMs:number, traceId?:string, clock:{now:()=>number}}} args
- * @returns {Promise<{applied:boolean, duplicate:boolean, event:string}>}
- */
-async function applySubscription({ db, paymentRef, driverId, amountCentavos, processingMs, traceId, clock }) {
-  const driverRef = db.collection(DRIVERS).doc(driverId);
-  const subPayRef = db.collection(C.SUBSCRIPTION_PAYMENTS).doc();
-  const nowMs = clock.now();
-  // Expired/none subscriptions start from the provider-confirmed processing time
-  // when available; otherwise a safe server time.
-  const effectiveMs = Number.isFinite(processingMs) && processingMs > 0 ? processingMs : nowMs;
-
-  const outcome = await db.runTransaction(async (tx) => {
-    const paySnap = await tx.get(paymentRef);
-    const pay = paySnap.exists ? paySnap.data() || {} : {};
-    if (pay.status === C.STATUS.PAID && pay.appliedAtMs != null) {
-      return { applied: false, duplicate: true };
-    }
-
-    const drvSnap = await tx.get(driverRef);
-    if (!drvSnap.exists) {
-      throw new AppError(ERROR_CODES.INVALID_ARGUMENT, { internalMessage: `driver not found: ${driverId}` });
-    }
-    const drv = drvSnap.data() || {};
-    const { newExpiry, isActive } = computeSubscriptionExtension(drv, effectiveMs);
-
-    tx.set(
-      driverRef,
-      {
-        subscriptionActive: true,
-        subscriptionStatus: 'active',
-        subscriptionExpiresAt: newExpiry,
-        subscriptionActivatedAt: ts(),
-        subscriptionActivatedAtMs: nowMs,
-        subscriptionPaymentMode: C.PROVIDER,
-        subscriptionLastAmountCentavos: amountCentavos,
-        subscriptionLastConfirmedAtMs: effectiveMs,
-        updatedAt: ts(),
-        // approvedAt, founderNumber, commissionFreeUntil, freeRideCountUsed: untouched.
-      },
-      { merge: true }
-    );
-    tx.set(subPayRef, {
-      driverId,
-      amountCentavos,
-      currency: C.CURRENCY,
-      source: C.PROVIDER,
-      paymentId: paymentRef.id,
-      subscriptionExpiresAt: newExpiry,
-      extendedFromActive: isActive,
-      createdAtMs: nowMs,
-      createdAt: ts(),
-    });
-    tx.set(
-      paymentRef,
-      { status: C.STATUS.PAID, appliedAtMs: nowMs, appliedAt: ts(), updatedAt: ts() },
-      { merge: true }
-    );
-    return { applied: true, duplicate: false, newExpiry };
-  });
-
-  if (outcome.applied) {
-    await writeAuditLog(
-      db,
-      {
-        actorUid: 'system',
-        actorType: 'system',
-        action: 'subscription_activated_payment',
-        targetType: 'driver',
-        targetId: driverId,
-        traceId: traceId || null,
-        afterSummary: { amountCentavos, paymentId: paymentRef.id, subscriptionExpiresAt: outcome.newExpiry },
-      },
-      clock
-    );
-    return { applied: true, duplicate: false, event: 'payment.subscription_activated' };
-  }
-  return { applied: false, duplicate: true, event: 'payment.duplicate_ignored' };
-}
-
-/**
  * Flags a payment for manual review (mismatch, refund-after-apply, inconsistent
  * provider state). Never silently changes money or dates.
  * @param {{db:object, paymentRef:object, driverId?:string, reason:string,
@@ -201,4 +116,4 @@ async function markManualReview({ db, paymentRef, driverId, reason, traceId, clo
   return { applied: false, duplicate: false, event: 'payment.manual_review' };
 }
 
-module.exports = { applyWalletTopup, applySubscription, markManualReview };
+module.exports = { applyWalletTopup, markManualReview };

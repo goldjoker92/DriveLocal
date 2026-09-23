@@ -6,7 +6,7 @@
 //     whether an approved driver may currently receive rides.
 //
 // canReceiveRides is COMPUTED here on demand and is never stored as a
-// client-authoritative flag. Commercial dates, rates and subscription grace come
+// client-authoritative flag. Commercial dates and rates come
 // exclusively from commercialPolicy.js so dispatch and acceptance cannot diverge.
 
 const { activeRiskRestrictionState } = require('../risk/restrictions');
@@ -27,9 +27,6 @@ function safeDriverView(driverId, d = {}) {
     founderNumber: d.founderNumber != null ? d.founderNumber : null,
     approvedAtMs: d.approvedAtMs != null ? d.approvedAtMs : null,
     commissionFreeUntil: d.commissionFreeUntil != null ? d.commissionFreeUntil : null,
-    subscriptionFreeUntil: d.subscriptionFreeUntil != null ? d.subscriptionFreeUntil : null,
-    subscriptionActive: d.subscriptionActive === true,
-    subscriptionExpiresAt: d.subscriptionExpiresAt != null ? d.subscriptionExpiresAt : null,
     isBlocked: d.isBlocked === true,
     financialReviewRequired: d.financialReviewRequired === true,
     riskRestrictionUntilMs: d.riskRestrictionUntilMs != null ? d.riskRestrictionUntilMs : null,
@@ -41,10 +38,8 @@ function safeDriverView(driverId, d = {}) {
  *
  * Commercial invariants:
  *   - all drivers are at 0% commission for 60 days from approval;
- *   - founders #1..#100 are subscription-covered for those 60 days;
- *   - drivers #101+ have at most five completed rides without subscription and
- *     only while the same 60-day window is active;
- *   - after day 60, an active paid subscription is mandatory for everyone.
+ *   - founders #1..#100 keep the badge without a financial exception;
+ *   - thereafter 12% moto or 15% car is charged on completed paid rides.
  *
  * Unresolved payment review or an active admin risk restriction blocks NEW
  * offers without changing an accepted ride or its frozen financial snapshot.
@@ -69,10 +64,6 @@ function evaluateRideEligibility(d = {}, clock) {
     commissionBps: commercial.commissionBps,
     standardCommissionBps: commercial.standardCommissionBps,
     freePeriodUntilMs: commercial.freePeriodUntilMs,
-    subscriptionCovered: commercial.subscriptionCovered,
-    requiresSubscription: commercial.subscriptionRequired,
-    subscriptionCoverageSource: commercial.subscriptionCoverageSource,
-    freeRidesRemaining: commercial.freeRidesRemaining,
     commercialPolicyVersion: commercial.policyVersion,
     financialReviewRequired,
     riskRestricted,
@@ -84,8 +75,7 @@ function evaluateRideEligibility(d = {}, clock) {
       approved
       && !blocked
       && !riskRestricted
-      && pixKeyValidation.valid
-      && commercial.subscriptionCovered,
+      && pixKeyValidation.valid,
   };
 }
 

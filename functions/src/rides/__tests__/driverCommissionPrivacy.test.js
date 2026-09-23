@@ -74,6 +74,7 @@ describe('driver commission privacy boundary', () => {
     const bps = commissionDisplayBpsForOffer(
       { vehicleType: 'moto', estimatedCommissionCentavos: 108 },
       {
+        verificationStatus: 'approved',
         approvalNumber: 101,
         founderEligible: false,
         approvedAtMs: NOW - DAY_MS,

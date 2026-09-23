@@ -101,7 +101,7 @@ function buildDriverPayer(input = {}) {
 }
 
 /**
- * One digital item represents one wallet top-up or subscription purchase.
+ * One digital item represents one wallet top-up.
  * @param {{purpose:string, vehicleType?:string, amountCentavos:number}} input
  */
 function buildOrderItem(input) {
@@ -119,16 +119,7 @@ function buildOrderItem(input) {
   let description;
   let externalCode;
 
-  if (purpose === 'driver_subscription') {
-    const vehicleLabel = vehicleType === 'moto' ? 'Moto' : vehicleType === 'car' ? 'Carro' : null;
-    title = vehicleLabel ? `Assinatura DriveLocal ${vehicleLabel}` : 'Assinatura DriveLocal';
-    description = 'Assinatura mensal do motorista parceiro DriveLocal';
-    externalCode = vehicleType === 'moto'
-      ? 'driver_subscription_moto'
-      : vehicleType === 'car'
-        ? 'driver_subscription_car'
-        : 'driver_subscription';
-  } else if (purpose === 'wallet_topup') {
+  if (purpose === 'wallet_topup') {
     title = 'Recarga Saldo DriveLocal';
     description = 'Recarga digital do saldo operacional do motorista parceiro';
     externalCode = 'driver_wallet_topup';

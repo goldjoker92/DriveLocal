@@ -1,7 +1,7 @@
 // @ts-check
 // Deterministic launch platform flow using fixed Horizonte coordinates:
 // application -> approved public photo -> admin approval #101 -> explicit work
-// session -> 0% launch ride -> exact promotion expiry -> paid plan -> wallet gate
+// session -> 0% launch ride -> exact promotion expiry -> wallet gate
 // -> normal commission hold and capture.
 
 const { approveDriver } = require('../drivers/approveDriver');
@@ -195,7 +195,6 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
       approvalNumber: 101,
       founderEligible: false,
       founderNumber: null,
-      subscriptionFreeUntil: null,
     });
     expect(approved.commissionFreeUntil).toBe(AT_18H + 60 * DRIVER_C.DAY_MS);
     expect(db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`)).toMatchObject({
@@ -243,15 +242,14 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
     const firstCompleted = await completeRide(db, clock, first.rideId, 'launch-0001');
     expect(firstCompleted.commissionCapturedCentavos).toBe(0);
 
-    // Exact expiry is exclusive: an active paid plan becomes mandatory and the
-    // normal 15% commission applies immediately. Wallet remains a separate gate.
+    // At day 60 the normal 15% commission applies. An old plan field has no
+    // effect; the wallet remains the separate, legitimate acceptance gate.
     clock.advance(60 * DRIVER_C.DAY_MS);
     await db.collection(DRIVER_C.DRIVERS).doc(DRIVER_ID).set({
       availabilityUpdatedAtMs: clock.now(),
       locationUpdatedAtMs: clock.now(),
-      subscriptionActive: true,
-      subscriptionStatus: 'active',
-      subscriptionExpiresAt: clock.now() + 30 * DRIVER_C.DAY_MS,
+      subscriptionActive: false,
+      subscriptionStatus: 'required',
       walletBalanceCentavos: 0,
       walletAvailableCentavos: 0,
       walletHeldCentavos: 0,

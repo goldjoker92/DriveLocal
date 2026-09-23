@@ -49,6 +49,7 @@ async function calculateServerRideQuote({
       priced.minimumPlatformCommissionCentavos,
     pricingConfigVersion: priced.pricingConfigVersion,
     peakApplied: priced.peakApplied,
+    peakSurchargeCentavos: priced.peakSurchargeCentavos,
   };
 }
 

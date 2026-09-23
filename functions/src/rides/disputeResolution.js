@@ -25,7 +25,6 @@ const { writeAuditLog } = require('../audit/auditLog');
 const { requireAdmin } = require('../auth/adminAuth');
 const { logInfo, shortHash } = require('../logging/logger');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
-const driverC = require('../drivers/constants');
 const C = require('./constants');
 
 const OUTCOMES = [
@@ -178,12 +177,6 @@ async function resolveRideDispute({ db, request, context, clock }) {
         // The disputed ride was already detached. Never clear a newer active ride
         // accepted while this old case waited for admin review.
         if (driver.activeRideId === rideId) driverUpdate.activeRideId = null;
-        if (
-          driver.founderEligible !== true
-          && Number(driver.freeRideCountUsed || 0) < driverC.FREE_RIDE_LIMIT
-        ) {
-          driverUpdate.freeRideCountUsed = Number(driver.freeRideCountUsed || 0) + 1;
-        }
         tx.set(driverRef, driverUpdate, { merge: true });
       }
       clearActiveRideIfCurrentTx(tx, passengerRef, passengerSnap, rideId);

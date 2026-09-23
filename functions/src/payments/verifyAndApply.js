@@ -9,7 +9,7 @@
 
 const { AppError, ERROR_CODES } = require('../errors/appError');
 const { logInfo, logWarning } = require('../logging/logger');
-const { applyWalletTopup, applySubscription, markManualReview } = require('./applyPayment');
+const { applyWalletTopup, markManualReview } = require('./applyPayment');
 const C = require('./constants');
 
 function accountDeletedPayment(pay) {
@@ -50,7 +50,7 @@ async function verifyAndApplyOrder({ db, adapter, providerOrderId, context, cloc
 
   // Account deletion is a terminal application barrier. A provider callback can
   // arrive after the local request was cancelled/pseudonymized; it must never
-  // recreate a wallet balance or subscription for a deleted Firebase account.
+  // recreate a wallet balance for a deleted Firebase account.
   if (accountDeletedPayment(pay)) {
     const providerPaid = order.normalizedStatus === C.STATUS.PAID
       || order.normalizedStatus === C.STATUS.REFUNDED;
@@ -146,21 +146,28 @@ async function verifyAndApplyOrder({ db, adapter, providerOrderId, context, cloc
     };
   }
 
+  // Historical charges must receive human review for treatment or refund.
+  // No legacy webhook may grant a new plan or alter the 60-day commission date.
+  if (pay.purpose === 'driver_subscription') {
+    if (pay.status === C.STATUS.MANUAL_REVIEW
+      && pay.manualReviewReason === 'legacy_paid_plan_requires_resolution') {
+      return { outcome: 'manual_review', event: 'payment.duplicate_ignored', localPaymentId };
+    }
+    return {
+      ...(await markManualReview({
+        db, paymentRef, driverId: pay.driverId,
+        reason: 'legacy_paid_plan_requires_resolution', traceId, clock,
+      })),
+      outcome: 'manual_review',
+      localPaymentId,
+    };
+  }
+
   // 8. PAID -> apply exactly once (idempotent inside the transaction).
   let applyRes;
   if (pay.purpose === 'wallet_topup') {
     applyRes = await applyWalletTopup({
       db, paymentRef, driverId: pay.driverId, amountCentavos: pay.amountCentavos, traceId, clock,
-    });
-  } else if (pay.purpose === 'driver_subscription') {
-    applyRes = await applySubscription({
-      db,
-      paymentRef,
-      driverId: pay.driverId,
-      amountCentavos: pay.amountCentavos,
-      processingMs: order.processingMs,
-      traceId,
-      clock,
     });
   } else {
     throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {

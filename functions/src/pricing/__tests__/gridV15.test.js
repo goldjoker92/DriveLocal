@@ -70,6 +70,7 @@ describe('evening peak surcharge', () => {
 
     expect(midday.peakApplied).toBe(false);
     expect(evening.peakApplied).toBe(true);
+    expect(evening.peakSurchargeCentavos).toBe(evening.passengerFareCentavos - midday.passengerFareCentavos);
     expect(evening.peakMultiplierBps).toBe(12000);
     expect(evening.passengerFareCentavos)
       .toBe(Math.round(midday.passengerFareCentavos * 1.2));

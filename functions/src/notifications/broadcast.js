@@ -74,7 +74,7 @@ function validateMessageText(value, field, maxLength) {
 }
 
 /**
- * A driver is a valid recipient when the account is usable today. Subscription
+ * A driver is a valid recipient when the account is usable today. Commercial
  * and wallet state are NOT checked: a driver who cannot currently take rides
  * still needs to hear that a new version exists.
  * @param {object} d driver document data

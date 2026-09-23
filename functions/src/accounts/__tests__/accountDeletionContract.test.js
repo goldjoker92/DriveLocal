@@ -65,15 +65,14 @@ describe('account deletion integration contracts', () => {
     expect(policy).toContain("update.status = 'cancelled'");
   });
 
-  it('blocks late provider callbacks from recreating deleted wallet or subscription state', () => {
+  it('blocks late provider callbacks from recreating a deleted wallet', () => {
     const verification = source('src/payments/verifyAndApply.js');
     const barrierIndex = verification.indexOf('if (accountDeletedPayment(pay))');
     const walletIndex = verification.indexOf('applyWalletTopup({');
-    const subscriptionIndex = verification.indexOf('applySubscription({');
 
     expect(barrierIndex).toBeGreaterThan(-1);
     expect(barrierIndex).toBeLessThan(walletIndex);
-    expect(barrierIndex).toBeLessThan(subscriptionIndex);
+    expect(verification).not.toContain('applySubscription({');
     expect(verification).toContain('payment.account_deleted_ignored');
     expect(verification).toContain('account_deleted_provider_payment');
     expect(verification).toContain('updatedAt: clock.now()');

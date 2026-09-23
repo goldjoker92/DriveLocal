@@ -123,6 +123,9 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
     vehicleType,
     quoteId,
   });
+  if (quoteRef) logInfo(context, 'ride.create_from_quote.started', {
+    operation: OPERATION_TYPE, quoteId, vehicleType,
+  });
 
   const acq = await acquireOperation(
     db,
@@ -258,6 +261,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       minimumPlatformCommissionCentavos:
         quote.minimumPlatformCommissionCentavos,
       pricingConfigVersion: quote.pricingConfigVersion,
+      peakSurchargeCentavos: quote.peakSurchargeCentavos || 0,
       status: C.RIDE_STATUS.SEARCHING,
       acceptedDriverId: null,
       acceptedAt: null,
@@ -323,7 +327,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         createdAtMs: nowMs,
         searchExpiresAtMs: ride.searchExpiresAtMs,
         traceId: ride.traceId,
-        context,
+        context: { ...context, traceId: ride.traceId },
       });
     } catch (error) {
       // The minute sweep remains an independent fallback even if the task API
@@ -351,7 +355,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       trigger: 'initial_callable',
       expandIfEmpty: true,
       resolvedServiceArea: svc,
-      context,
+      context: { ...context, traceId: ride.traceId },
       clock,
     });
 
@@ -378,9 +382,17 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       reasonCode: dispatch.reasonCode,
     });
     await completeOperation(db, idempotencyKey, view, clock);
+    if (quoteRef) logInfo(context, 'ride.create_from_quote.succeeded', {
+      operation: OPERATION_TYPE, quoteId, rideId, traceId: ride.traceId,
+    });
     return view;
   } catch (err) {
     const appErr = AppError.from(err);
+    if (quoteRef && appErr.code === ERROR_CODES.QUOTE_EXPIRED) {
+      logWarning(context, 'ride.quote.expired', {
+        operation: OPERATION_TYPE, quoteId, reasonCode: appErr.code,
+      });
+    }
     if (quoteRef && [ERROR_CODES.QUOTE_EXPIRED, ERROR_CODES.QUOTE_MISMATCH, ERROR_CODES.QUOTE_USED].includes(appErr.code)) {
       logWarning(context, 'ride.create_from_quote.rejected', {
         operation: OPERATION_TYPE, quoteId, reasonCode: appErr.code,

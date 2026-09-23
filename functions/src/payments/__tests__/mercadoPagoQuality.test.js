@@ -39,7 +39,7 @@ describe('Mercado Pago MVP quality data', () => {
     expect(payer).toEqual({ email: 'driver@example.com', first_name: 'Ana' });
   });
 
-  test('builds one correctly-priced digital item per payment purpose', () => {
+  test('builds only the wallet top-up item', () => {
     expect(buildOrderItem({
       purpose: 'wallet_topup',
       vehicleType: 'moto',
@@ -53,16 +53,11 @@ describe('Mercado Pago MVP quality data', () => {
       external_code: 'driver_wallet_topup',
     });
 
-    expect(buildOrderItem({
+    expect(() => buildOrderItem({
       purpose: 'driver_subscription',
       vehicleType: 'car',
       amountCentavos: 1990,
-    })).toMatchObject({
-      title: 'Assinatura DriveLocal Carro',
-      quantity: 1,
-      unit_price: '19.90',
-      external_code: 'driver_subscription_car',
-    });
+    })).toThrow();
   });
 
   test('adds registration date only when a valid profile timestamp exists', () => {

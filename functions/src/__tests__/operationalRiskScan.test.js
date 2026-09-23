@@ -96,4 +96,21 @@ describe('operational launch antifraud scan', () => {
     }], NOW);
     expect(signals).toEqual([]);
   });
+
+  it('does not treat many legitimate zero-commission rides as a usage limit', () => {
+    const rides = Array.from({ length: 12 }, (_, index) => ({
+      rideId: `free_${index}`,
+      status: 'completed',
+      passengerId: `passenger_${index}`,
+      acceptedDriverId: 'driver_101',
+      commissionPolicySnapshot: { commissionFreeAtAcceptance: true },
+      routeDistanceMeters: 5000,
+      routeDurationSeconds: 900,
+      startedAtMs: NOW - 1_000_000,
+      completedAtMs: NOW,
+    }));
+    expect(reasonSignals(
+      detectOperationalPatterns(rides, NOW), riskC.REASON.PROMOTION_ABUSE_PATTERN,
+    )).toEqual([]);
+  });
 });
