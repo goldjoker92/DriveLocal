@@ -18,7 +18,7 @@ La politique figée à l'acceptation de la course conserve `policyVersion`, `app
 
 ## Mise en service
 
-1. Exécuter les tests et l'audit en lecture seule des anciens paiements encaissés. Traiter chaque cas avec une décision humaine vérifiable.
+1. Exécuter les tests et l'audit en lecture seule des anciens paiements encaissés, y compris les profils ayant une activation manuelle. Rapprocher les reçus Pix manuels et les relevés bancaires ; traiter chaque cas avec une décision humaine vérifiable.
    Vérifier aussi que le compteur des approbations correspond aux chauffeurs déjà approuvés avant toute ouverture d'une nouvelle zone.
 2. Publier la nouvelle AAB et confirmer sa disponibilité sur Google Play.
 3. Augmenter ensuite la version minimale obligatoire dans la configuration serveur. Les anciens chauffeurs voient un message de mise à jour et ouvrent Google Play. Leur session Firebase est conservée.

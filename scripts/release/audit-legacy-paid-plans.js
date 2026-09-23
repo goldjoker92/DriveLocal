@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 // Read-only release gate. Run with an explicitly selected Firebase project after
-// approval to access that environment. Only opaque payment IDs are printed.
+// approval to access that environment. Only opaque payment/driver IDs are printed.
 const admin = require('../../functions/node_modules/firebase-admin');
+const { classifyLegacyPaidPlans } = require('./legacy-paid-plan-audit');
 
 const projectArg = process.argv.find((arg) => arg.startsWith('--project-id='));
 const projectId = projectArg?.slice('--project-id='.length);
@@ -30,31 +31,12 @@ async function allDocs(collectionName) {
 }
 
 async function main() {
-  const [requests, previousPayments] = await Promise.all([
-    allDocs('paymentRequests'), allDocs('subscriptionPayments'),
+  const [requests, previousPayments, drivers] = await Promise.all([
+    allDocs('paymentRequests'), allDocs('subscriptionPayments'), allDocs('drivers'),
   ]);
-  const oldRequests = requests.filter((doc) => doc.data()?.purpose === 'driver_subscription');
-  const previousIds = new Set(previousPayments.map((doc) => doc.data()?.paymentId).filter(Boolean));
-  const unresolved = new Set();
-  const providerCheck = new Set();
-  for (const doc of oldRequests) {
-    const data = doc.data() || {};
-    if (data.status === 'refunded' || data.legacyResolutionReviewedAtMs) continue;
-    if (['paid', 'manual_review'].includes(data.status) || previousIds.has(doc.id)) {
-      unresolved.add(doc.id);
-    } else if (!['cancelled', 'expired', 'failed'].includes(data.status)) {
-      providerCheck.add(doc.id);
-    }
-  }
-  const orphaned = [...previousIds].filter((id) => !oldRequests.some((doc) => doc.id === id));
-  process.stdout.write(`${JSON.stringify({
-    projectId, historicalRequests: oldRequests.length,
-    paidRecords: previousPayments.length,
-    unresolvedPaymentIds: [...unresolved].sort(),
-    providerCheckPaymentIds: [...providerCheck].sort(),
-    orphanedPaymentIds: orphaned.sort(),
-  }, null, 2)}\n`);
-  if (unresolved.size || providerCheck.size || orphaned.length) process.exitCode = 2;
+  const { needsReview, ...report } = classifyLegacyPaidPlans({ requests, previousPayments, drivers });
+  process.stdout.write(`${JSON.stringify({ projectId, ...report }, null, 2)}\n`);
+  if (needsReview) process.exitCode = 2;
 }
 
 main().catch((error) => {
