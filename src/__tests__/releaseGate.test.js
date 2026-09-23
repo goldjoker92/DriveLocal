@@ -70,6 +70,15 @@ describe('production release gate', () => {
     expect(releaseCheck).not.toContain("runCommand('Preview'");
   });
 
+  it('isolates mobile tests from the protected PROD Android configuration', () => {
+    const workflow = source('.github/workflows/closed-test-prod-backend.yml');
+
+    expect(workflow).toContain(
+      'GOOGLE_SERVICES_JSON= npx jest --ci --runInBand --forceExit'
+    );
+    expect(workflow).toContain('npm --prefix functions test -- --forceExit');
+  });
+
   it('keeps the production source audit green on the committed codebase', () => {
     expect(OPERATIONAL_PHASES).toEqual([
       'requested',
