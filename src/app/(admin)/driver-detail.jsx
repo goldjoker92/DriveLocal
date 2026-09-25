@@ -50,6 +50,7 @@ import {
   requiresDuplicateApprovalReview,
 } from '../../utils/adminDriverApproval';
 import { requiresCriminalCertificate } from '../../utils/driverDocumentPolicy';
+import { isFounderDriver } from '../../utils/commercialPolicy';
 
 // Documents affichables avec leur champ URL sur le document driver.
 const DOC_LINKS = [
@@ -428,9 +429,7 @@ export default function DriverDetail() {
   const criminalCertificateRequired = requiresCriminalCertificate(driver);
   const criminalCertificateReady = hasCriminalCertificateForDriverApproval(driver, driverId);
   const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
-  const isFounder = driver && (Number(driver.approvalNumber) > 0
-    ? Number(driver.approvalNumber) <= 100
-    : driver.founderEligible === true);
+  const isFounder = isFounderDriver(driver);
   const history = (driver && Array.isArray(driver.statusHistory) ? [...driver.statusHistory] : []).sort(
     (a, b) => toMillis(a.changedAt) - toMillis(b.changedAt)
   );

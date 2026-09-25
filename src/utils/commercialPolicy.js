@@ -25,7 +25,8 @@ function positiveInteger(value) {
 export function isFounderDriver(driver = {}) {
   const number = positiveInteger(driver.approvalNumber);
   if (number > 0) return number <= 100;
-  return driver.founderEligible === true && positiveInteger(driver.founderNumber) <= 100;
+  const legacyNumber = positiveInteger(driver.founderNumber);
+  return driver.founderEligible === true && legacyNumber > 0 && legacyNumber <= 100;
 }
 
 export function approvalTimeMs(driver = {}) {

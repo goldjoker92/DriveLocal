@@ -30,8 +30,9 @@ function isFounderDriver(driver = {}) {
   if (number > 0) return number <= C.FOUNDER_LIMIT;
   // Older approved profiles can predate approvalNumber. Keep their badge if
   // it was granted, without creating any extra commission entitlement.
+  const legacyNumber = positiveInteger(driver.founderNumber);
   return driver.founderEligible === true
-    && positiveInteger(driver.founderNumber) <= C.FOUNDER_LIMIT;
+    && legacyNumber > 0 && legacyNumber <= C.FOUNDER_LIMIT;
 }
 
 function approvalTimeMs(driver = {}) {

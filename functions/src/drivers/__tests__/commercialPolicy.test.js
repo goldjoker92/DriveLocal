@@ -25,6 +25,12 @@ describe('60-day commission and founder badge', () => {
     expect(resolveCommercialPolicy(driver({ approvalNumber: 100 }), end).founder).toBe(true);
   });
 
+  it('requires a confirmed founder number on legacy profiles without an approval number', () => {
+    expect(resolveCommercialPolicy(driver({ approvalNumber: null, founderEligible: true, founderNumber: 100 }), end).founder).toBe(true);
+    expect(resolveCommercialPolicy(driver({ approvalNumber: null, founderEligible: true, founderNumber: null }), end).founder).toBe(false);
+    expect(resolveCommercialPolicy(driver({ approvalNumber: null, founderEligible: true, founderNumber: 101 }), end).founder).toBe(false);
+  });
+
   it('ignores old plan and five-ride fields, including after the fifth and after expiry', () => {
     const old = driver({
       freeRideCountUsed: 500, subscriptionActive: false, subscriptionExpiresAt: 0,

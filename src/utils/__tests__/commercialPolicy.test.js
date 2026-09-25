@@ -41,4 +41,11 @@ describe('mobile commercial policy mirror', () => {
     expect(commissionDisplay(driver({ vehicleType: 'moto' }), day60).label).toBe('12%');
     expect(commissionDisplay(driver({ vehicleType: 'car' }), day60).label).toBe('15%');
   });
+
+  it('shows the legacy badge only when its recorded founder number is within the first 100', () => {
+    const oldProfile = { approvalNumber: null, founderEligible: true };
+    expect(resolveCommercialPolicy(driver({ ...oldProfile, founderNumber: 100 }), APPROVED_AT).founder).toBe(true);
+    expect(resolveCommercialPolicy(driver({ ...oldProfile, founderNumber: null }), APPROVED_AT).founder).toBe(false);
+    expect(resolveCommercialPolicy(driver({ ...oldProfile, founderNumber: 101 }), APPROVED_AT).founder).toBe(false);
+  });
 });

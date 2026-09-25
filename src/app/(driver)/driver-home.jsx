@@ -45,6 +45,7 @@ import {
   commissionDisplay,
   commissionFreeUntilMs,
   deriveEligibility,
+  isFounderDriver,
   rideBlockReasonLabel,
 } from '../../utils/driverCockpit';
 import { deriveDriverCockpitSummary } from '../../utils/driverCockpitSummary';
@@ -404,7 +405,7 @@ export default function DriverHome() {
       eligible: eligibility.eligible,
       reasonCode: eligibility.reasonCode,
       vehicleType: driver.vehicleType || null,
-      founder: driver.founderEligible === true,
+      founder: isFounderDriver(driver),
       photoStatus,
       commissionBps: commission.bps,
       walletStatus: driver.walletStatus || null,

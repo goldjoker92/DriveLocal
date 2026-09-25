@@ -58,6 +58,7 @@ describe('driver backend eligibility timestamp normalization', () => {
         pixKeyType: 'E-mail',
         pixKey: 'timestamp_driver@pix.test.drivelocal.local',
         founderEligible: true,
+        founderNumber: 100,
         commissionFreeUntil: timestampLike(NOW_MS - 1),
         subscriptionActive: false,
       },
