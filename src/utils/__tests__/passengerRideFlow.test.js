@@ -32,7 +32,7 @@ describe('passenger quoted ride flow contracts', () => {
     const passengerHome = source('src/app/(passenger)/passenger-home.jsx');
 
     expect(searching).toContain('Resumo da corrida');
-    expect(searching).toContain('Preço estimado');
+    expect(searching).toContain('Preço da corrida');
     expect(searching).toContain('formatBRL');
     expect(searching).toContain('formatDistanceKm');
     expect(searching).toContain('formatDurationMinutes');

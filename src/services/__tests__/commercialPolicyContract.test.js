@@ -23,11 +23,16 @@ describe('commercial policy integration contract', () => {
 
   it('keeps the founder badge and approval-based 60-day commission explicit', () => {
     const backend = source('functions/src/drivers/commercialPolicy.js');
+    const entry = source('src/app/(auth)/driver-auth.jsx');
+    const onboarding = source('src/app/(driver)/onboarding.jsx');
 
     expect(backend).toContain('FOUNDER_LIMIT');
     expect(backend).toContain('approvedAtMs + C.FREE_PERIOD_DAYS * C.DAY_MS');
     expect(backend).toContain('commissionBps = freePeriodActive ? 0 : standardBps');
     expect(backend).not.toContain('freeRideCountUsed');
+    expect(entry).toContain('Todos os motoristas aprovados têm 0% de comissão por 60 dias a partir da aprovação.');
+    expect(entry).not.toMatch(/60 dias para os 100 primeiros/);
+    expect(onboarding).not.toContain('100% do valor da corrida');
   });
 
   it('routes dispatch and acceptance through the authoritative backend policy', () => {

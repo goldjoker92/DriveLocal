@@ -30,7 +30,11 @@ export default function DriverAuth() {
             Dirija na sua cidade, com menos comissão.
           </Text>
           <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
-            0% de comissão por 60 dias para os 100 primeiros motoristas aprovados em Horizonte.
+            Todos os motoristas aprovados têm 0% de comissão por 60 dias a partir da aprovação.
+            Depois, 12% na Moto ou 15% no Carro, apenas nas corridas pagas.
+          </Text>
+          <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
+            Os 100 primeiros aprovados recebem o badge permanente Motorista Fundador.
           </Text>
         </AppCard>
 

@@ -48,10 +48,11 @@ export default function Onboarding() {
         <Header title="Seja motorista" subtitle="DriveLocal em Horizonte/CE" />
         <AppCard>
           <AdminTableRow label="Oferta" value={FOUNDER_OFFER_HEADLINE_PT_BR} />
-          <AdminTableRow label="Comissão 0% para todos os aprovados" value={`${COMMISSION_FREE_DAYS} dias`} />
+          <AdminTableRow label="Comissão 0% para todos os aprovados" value={`${COMMISSION_FREE_DAYS} dias após a aprovação`} />
+          <AdminTableRow label="Depois dos 60 dias" value="12% Moto · 15% Carro, só em corridas pagas" />
           <AdminTableRow label="Vagas fundador restantes" value={remainingLabel} />
           <AdminTableRow label="Motorista Fundador" value="Badge permanente apenas para os 100 primeiros aprovados" />
-          <AdminTableRow label="Pix" value="100% do valor da corrida" />
+          <AdminTableRow label="Pix" value="Pagamento direto ao motorista" />
         </AppCard>
         <AppButton title="Começar cadastro" onPress={() => router.push('/(driver)/profile')} />
       </ScrollView>

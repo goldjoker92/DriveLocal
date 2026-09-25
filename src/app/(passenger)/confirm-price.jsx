@@ -28,7 +28,7 @@ function messageFor(error) {
   if (code.includes('OUT_OF_SERVICE_AREA')) {
     return 'A origem e o destino precisam estar dentro de Horizonte.';
   }
-  return error?.details?.message || 'Não foi possível calcular o preço. Tente novamente.';
+  return error?.details?.message || 'Não foi possível continuar. Confira sua conexão e tente novamente.';
 }
 
 export default function ConfirmPrice() {
@@ -138,7 +138,7 @@ export default function ConfirmPrice() {
               </Text>
               <AdminTableRow label="Distância estimada" value={`${(quote.routeDistanceMeters / 1000).toFixed(1).replace('.', ',')} km`} />
               <AdminTableRow label="Duração estimada" value={`${Math.ceil(quote.routeDurationSeconds / 60)} min`} />
-              {quote.peakApplied ? (
+              {Number(quote.peakSurchargeCentavos) > 0 ? (
                 <Text style={[{ fontFamily, color: colors.textMuted }, typography.small]}>
                   Adicional de horário de pico: {formatBRL(quote.peakSurchargeCentavos || 0)} (já incluído).
                 </Text>
