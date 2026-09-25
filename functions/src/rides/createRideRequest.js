@@ -25,6 +25,19 @@ const { safeRideView } = require('./safeViews');
 const C = require('./constants');
 
 const OPERATION_TYPE = 'create_ride_request';
+// The price promise lasts three minutes, but a consumed quote must outlive a
+// dropped network response so its original confirmation can recover the ride.
+const CONSUMED_QUOTE_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function consumedRideView({ db, savedQuote, passengerId, idempotencyKey }) {
+  if (!savedQuote?.consumedRideId || savedQuote.consumedIdempotencyKey !== idempotencyKey
+    || savedQuote.passengerId !== passengerId) return null;
+  const existing = await db.collection(C.RIDE_REQUESTS).doc(savedQuote.consumedRideId).get();
+  if (!existing.exists || existing.data()?.passengerId !== passengerId) {
+    throw new AppError(ERROR_CODES.QUOTE_MISMATCH);
+  }
+  return safeRideView(savedQuote.consumedRideId, existing.data());
+}
 
 function checkQuote(quote, { passengerId, vehicleType, pickup, destination, serviceAreaId, nowMs }) {
   if (!quote || quote.passengerId !== passengerId || quote.serviceAreaId !== serviceAreaId
@@ -140,6 +153,19 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
   );
   if (!acq.acquired) {
     if (acq.state === OPERATION_STATES.COMPLETED) return acq.resultReference || null;
+    if (quoteRef) {
+      const saved = await quoteRef.get();
+      const view = await consumedRideView({
+        db, savedQuote: saved.exists ? saved.data() : null, passengerId, idempotencyKey,
+      });
+      if (view) {
+        await completeOperation(db, idempotencyKey, view, clock);
+        logInfo(context, 'ride.create_from_quote.recovered', {
+          operation: OPERATION_TYPE, quoteId, rideId: view.rideId,
+        });
+        return view;
+      }
+    }
     throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT, {
       internalMessage: 'ride creation already in progress for this idempotency operation',
     });
@@ -196,6 +222,15 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
       pickup,
       destination,
     });
+    // Compatibility stays open while the new Android build propagates through
+    // Play. The operator closes it only after passengers can install the quote
+    // screen; from then on old builds cannot create a ride without a quote.
+    if (!quoteRef && svc.config.requirePassengerQuote === true) {
+      logWarning(context, 'ride.create.legacy_quote_required', {
+        operation: OPERATION_TYPE, reasonCode: 'PASSENGER_UPDATE_REQUIRED',
+      });
+      throw new AppError(ERROR_CODES.PASSENGER_UPDATE_REQUIRED);
+    }
     logInfo(context, 'ride.dispatch.policy_resolved', {
       operation: OPERATION_TYPE,
       serviceAreaId,
@@ -218,11 +253,8 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         if (savedQuote.consumedIdempotencyKey !== idempotencyKey) {
           throw new AppError(ERROR_CODES.QUOTE_USED);
         }
-        const existing = await db.collection(C.RIDE_REQUESTS).doc(savedQuote.consumedRideId).get();
-        if (!existing.exists || existing.data()?.passengerId !== passengerId) {
-          throw new AppError(ERROR_CODES.QUOTE_MISMATCH);
-        }
-        const view = safeRideView(savedQuote.consumedRideId, existing.data());
+        const view = await consumedRideView({ db, savedQuote, passengerId, idempotencyKey });
+        if (!view) throw new AppError(ERROR_CODES.QUOTE_MISMATCH);
         await completeOperation(db, idempotencyKey, view, clock);
         return view;
       }
@@ -301,6 +333,7 @@ async function createRideRequestSecure({ db, request, context, clock, routingAda
         tx.set(quoteRef, {
           consumedRideId: rideId, consumedIdempotencyKey: idempotencyKey,
           consumedAtMs: nowMs,
+          expiresAt: admin.firestore.Timestamp.fromMillis(nowMs + CONSUMED_QUOTE_TTL_MS),
         }, { merge: true });
       });
     } else {

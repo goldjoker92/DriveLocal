@@ -1,5 +1,6 @@
 const { getRideQuoteSecure, QUOTE_TTL_MS } = require('../rideQuote');
 const { createRideRequestSecure } = require('../createRideRequest');
+const { runDispatchWave } = require('../dispatchWaveTask');
 const { makeFakeFirestore } = require('../../__tests__/helpers/fakeFirestore');
 const C = require('../constants');
 
@@ -44,7 +45,11 @@ function rides(db) {
 }
 
 describe('server quote before passenger confirmation', () => {
-  beforeEach(() => { nowMs = Date.parse('2026-09-23T12:00:00Z'); route.computeRoute.mockClear(); });
+  beforeEach(() => {
+    nowMs = Date.parse('2026-09-23T12:00:00Z');
+    route.computeRoute.mockClear();
+    runDispatchWave.mockClear();
+  });
 
   it('returns the exact price before any ride or driver offer exists; confirmation uses it once', async () => {
     const db = seed();
@@ -94,6 +99,24 @@ describe('server quote before passenger confirmation', () => {
     expect(rides(db)).toHaveLength(0);
   });
 
+  it('closes the legacy passenger callable after the server quote requirement is enabled', async () => {
+    const db = seed();
+    await db.collection(C.CITY_PUBLIC_CONFIG).doc(C.DEFAULT_SERVICE_AREA_ID)
+      .set({ requirePassengerQuote: true }, { merge: true });
+    await expect(createRideRequestSecure({
+      db, request: req('p1', {
+        vehicleType: 'car', pickup, destination, idempotencyKey: 'legacy-passenger-key-001',
+      }), context, clock, routingAdapter: route,
+    })).rejects.toMatchObject({ code: 'PASSENGER_UPDATE_REQUIRED' });
+    expect(rides(db)).toHaveLength(0);
+    expect(route.computeRoute).not.toHaveBeenCalled();
+
+    const q = await quote(db);
+    const ride = await confirm(db, q);
+    expect(ride.rideId).toBeTruthy();
+    expect(rides(db)).toHaveLength(1);
+  });
+
   it('keeps the exact peak supplement inside the confirmed fare', async () => {
     nowMs = Date.parse('2026-09-23T22:00:00Z'); // 19h in Horizonte.
     const db = seed();
@@ -104,5 +127,21 @@ describe('server quote before passenger confirmation', () => {
     expect(db._store.get(`${C.RIDE_REQUESTS}/${ride.rideId}`).peakSurchargeCentavos)
       .toBe(q.peakSurchargeCentavos);
     expect(ride.estimatedFareCentavos).toBe(q.estimatedFareCentavos);
+  });
+
+  it('recovers the same ride after dispatch fails following the atomic quote consumption', async () => {
+    const db = seed();
+    const q = await quote(db);
+    runDispatchWave.mockRejectedValueOnce(new Error('temporary dispatch outage'));
+    await expect(confirm(db, q)).rejects.toMatchObject({ code: 'INTERNAL_ERROR' });
+    expect(rides(db)).toHaveLength(1);
+
+    nowMs += QUOTE_TTL_MS + 1000;
+    const replay = await confirm(db, q);
+    expect(replay.rideId).toBe(rides(db)[0].split('/')[1]);
+    expect(rides(db)).toHaveLength(1);
+    expect(runDispatchWave).toHaveBeenCalledTimes(1);
+    const savedQuote = db._store.get(`${C.RIDE_QUOTES}/${q.quoteId}`);
+    expect(savedQuote.expiresAt.toMillis()).toBeGreaterThan(nowMs);
   });
 });
