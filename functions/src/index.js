@@ -96,6 +96,7 @@ exports.syncNotificationTokenSecure = notificationCallables.syncNotificationToke
 // Admin-only fleet message. The one server-side channel to drivers who never
 // update the app and cannot be reached any other way.
 exports.sendDriverBroadcastSecure = notificationCallables.sendDriverBroadcastSecure;
+exports.sendPassengerBroadcastSecure = notificationCallables.sendPassengerBroadcastSecure;
 // Persistent fleet message: stays in the app until each driver acknowledges it,
 // unlike a push which is a single shot nobody can confirm was read.
 exports.publishDriverAnnouncementSecure = notificationCallables.publishDriverAnnouncementSecure;

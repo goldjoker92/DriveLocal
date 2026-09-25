@@ -164,3 +164,8 @@ export const clearDriverAnnouncement = () => call('clearDriverAnnouncementSecure
 
 export const sendDriverBroadcast = ({ campaignId, title, body }) =>
   call('sendDriverBroadcastSecure', { campaignId, title, body });
+
+// Separate passenger-only push campaign; no driver announcement or driver
+// broadcast is created by this call.
+export const sendPassengerBroadcast = ({ campaignId, title, body }) =>
+  call('sendPassengerBroadcastSecure', { campaignId, title, body });

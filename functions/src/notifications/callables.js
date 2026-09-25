@@ -12,7 +12,7 @@ const { systemClock } = require('../time/clock');
 const { createLoggerContext, logError } = require('../logging/logger');
 const { syncNotificationToken } = require('./tokens');
 const { processRideNotificationEvent } = require('./processEvent');
-const { sendDriverBroadcast } = require('./broadcast');
+const { sendDriverBroadcast, sendPassengerBroadcast } = require('./broadcast');
 const {
   publishDriverAnnouncement,
   clearDriverAnnouncement,
@@ -32,6 +32,13 @@ const sendDriverBroadcastSecureFn = onCall(
   { region: REGION },
   withCallableBoundary('sendDriverBroadcastSecure', (request, context) =>
     sendDriverBroadcast({ db: admin.firestore(), request, context, clock: systemClock })
+  )
+);
+
+const sendPassengerBroadcastSecureFn = onCall(
+  { region: REGION },
+  withCallableBoundary('sendPassengerBroadcastSecure', (request, context) =>
+    sendPassengerBroadcast({ db: admin.firestore(), request, context, clock: systemClock })
   )
 );
 
@@ -86,6 +93,7 @@ const processRideNotificationEventFn = onDocumentCreated(
 module.exports = {
   syncNotificationTokenSecure: syncNotificationTokenSecureFn,
   sendDriverBroadcastSecure: sendDriverBroadcastSecureFn,
+  sendPassengerBroadcastSecure: sendPassengerBroadcastSecureFn,
   publishDriverAnnouncementSecure: publishDriverAnnouncementSecureFn,
   clearDriverAnnouncementSecure: clearDriverAnnouncementSecureFn,
   processRideNotificationEvent: processRideNotificationEventFn,

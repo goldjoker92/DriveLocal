@@ -92,6 +92,7 @@ module.exports = Object.freeze({
     // Admin message to the whole driver fleet. Carries its own copy instead of
     // a static presentation, and rides on the STATUS channel, never the offer one.
     DRIVER_BROADCAST: 'driver_broadcast',
+    PASSENGER_BROADCAST: 'passenger_broadcast',
   }),
 
   NOTIFICATION_STATUS: Object.freeze({

@@ -926,12 +926,11 @@ export default function Dashboard() {
           ) : null}
         </DisclosureSection>
 
-        {/* The only direct channel to the fleet: drivers rarely update the app
-            and there is no reliable way to reach them outside it. */}
+        {/* Driver announcements and passenger pushes have separate destinations. */}
         <DisclosureSection
           icon="📣"
           title="Comunicação"
-          subtitle="Avisos que ficam no app do motorista até ele confirmar."
+          subtitle="Avisos para motoristas e notificações para passageiros."
           expanded={expanded.communication}
           onToggle={() => toggleSection('communication')}
         >
@@ -942,6 +941,14 @@ export default function Dashboard() {
             detail="Mensagem fixa no app até o motorista confirmar"
             tone="primary"
             onPress={() => openRoute('/driver-message', 'communication_driver_message')}
+          />
+          <ActionRow
+            icon="📱"
+            title="Avisar passageiros"
+            count="›"
+            detail="Notificação push só para contas de passageiros"
+            tone="primary"
+            onPress={() => openRoute('/passenger-message', 'communication_passenger_message')}
           />
         </DisclosureSection>
 
