@@ -132,8 +132,8 @@ The admin entry route is kept discreet at `/admin-login` and must not collide wi
 | Ride commission | 0% for 60 days from approval, then 12% Moto or 15% Carro for paid rides |
 | Passenger payment | Passenger pays Driver directly by Pix |
 | Driver payment to DriveLocal | Driver recharges Saldo DriveLocal by Pix |
-| Minimum ride price Moto | R$6 |
-| Minimum ride price Carro | R$8,50 |
+| Minimum ride price Moto | R$5,00 |
+| Minimum ride price Carro | R$7,50 |
 | Card payment | Not in V1 |
 | Cash payment | Not in V1 |
 | Pix split | Not in V1 |

@@ -92,7 +92,7 @@ describe('pricing — immutable, versioned snapshot', () => {
   it('carries the pricing config version and is a fresh object each call', () => {
     const a = priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15, driver: {}, now: NOW });
     const b = priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15, driver: {}, now: NOW });
-    expect(a.pricingConfigVersion).toBe('horizonte-1.3.0');
+    expect(a.pricingConfigVersion).toBe('horizonte-1.6.0');
     expect(a).toEqual(b);
     expect(a).not.toBe(b);
     a.passengerFareCentavos = 1;

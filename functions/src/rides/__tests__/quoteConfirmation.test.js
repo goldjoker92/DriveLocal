@@ -117,12 +117,13 @@ describe('server quote before passenger confirmation', () => {
     expect(rides(db)).toHaveLength(1);
   });
 
-  it('keeps the exact peak supplement inside the confirmed fare', async () => {
+  it('keeps the restored fare without a peak supplement at 19h', async () => {
     nowMs = Date.parse('2026-09-23T22:00:00Z'); // 19h in Horizonte.
     const db = seed();
     const q = await quote(db, 'moto');
-    expect(q.peakApplied).toBe(true);
-    expect(q.peakSurchargeCentavos).toBeGreaterThan(0);
+    expect(q.estimatedFareCentavos).toBe(775);
+    expect(q.peakApplied).toBe(false);
+    expect(q.peakSurchargeCentavos).toBe(0);
     const ride = await confirm(db, q);
     expect(db._store.get(`${C.RIDE_REQUESTS}/${ride.rideId}`).peakSurchargeCentavos)
       .toBe(q.peakSurchargeCentavos);

@@ -1,5 +1,5 @@
 // @ts-check
-// DriveLocal V1.3 pricing configuration (governance D3).
+// DriveLocal restored V1.3 fare grid, recorded as V1.6 (governance D3).
 //
 // SINGLE SOURCE OF TRUTH for fares, commission, the wallet threshold,
 // promotions, dynamic pricing and operating mode.
@@ -19,7 +19,7 @@ import { VEHICLE_MOTO, VEHICLE_CAR } from './vehicleTypes';
 
 // Bump on ANY change to fares/commission so historical rides keep the pricing
 // they were created with, even after these tables change.
-export const PRICING_CONFIG_VERSION = 'horizonte-1.3.0';
+export const PRICING_CONFIG_VERSION = 'horizonte-1.6.0';
 
 // Backward-compatible alias — confirm-price.jsx (Step 1) imports PRICING_VERSION.
 export const PRICING_VERSION = PRICING_CONFIG_VERSION;
