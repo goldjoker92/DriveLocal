@@ -62,7 +62,8 @@ const PRESENTATION = Object.freeze({
 });
 
 function presentationForEvent(event) {
-  if (event?.eventType === C.NOTIFICATION_EVENT.DRIVER_BROADCAST) {
+  if ([C.NOTIFICATION_EVENT.DRIVER_BROADCAST, C.NOTIFICATION_EVENT.PASSENGER_BROADCAST]
+    .includes(event?.eventType)) {
     // Admin-authored copy, validated and bounded at send time. Falls back to a
     // neutral line so a malformed event can never render an empty notification.
     return {
@@ -229,8 +230,16 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
     .where('active', '==', true)
     .get();
   const targets = [];
+  const broadcastRole = event.eventType === C.NOTIFICATION_EVENT.DRIVER_BROADCAST
+    ? 'driver'
+    : event.eventType === C.NOTIFICATION_EVENT.PASSENGER_BROADCAST
+      ? 'passenger'
+      : null;
   snap.forEach((d) => {
     const t = d.data() || {};
+    // Old clients registered without a role. Honor explicit roles where present,
+    // while keeping notifications deliverable to those already installed apps.
+    if (broadcastRole && t.role && t.role !== broadcastRole) return;
     if (t.platform === 'android' && t.token) {
       targets.push({
         ref: d.ref,

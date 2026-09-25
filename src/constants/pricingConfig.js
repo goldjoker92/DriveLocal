@@ -1,5 +1,5 @@
 // @ts-check
-// DriveLocal restored V1.3 fare grid, recorded as V1.6 (governance D3).
+// DriveLocal Horizonte fare grid, recorded as V1.7 (governance D3).
 //
 // SINGLE SOURCE OF TRUTH for fares, commission, the wallet threshold,
 // promotions, dynamic pricing and operating mode.
@@ -19,7 +19,7 @@ import { VEHICLE_MOTO, VEHICLE_CAR } from './vehicleTypes';
 
 // Bump on ANY change to fares/commission so historical rides keep the pricing
 // they were created with, even after these tables change.
-export const PRICING_CONFIG_VERSION = 'horizonte-1.6.0';
+export const PRICING_CONFIG_VERSION = 'horizonte-1.7.0';
 
 // Backward-compatible alias — confirm-price.jsx (Step 1) imports PRICING_VERSION.
 export const PRICING_VERSION = PRICING_CONFIG_VERSION;
@@ -30,7 +30,7 @@ export const BPS_DENOMINATOR = 10000;
 // ---------------------------------------------------------------------------
 // Per-vehicle fare + commission model — Horizonte-CE (D3)
 // ---------------------------------------------------------------------------
-// Competitive pilot grid for Horizonte. After the commission-free benefit,
+// Balanced pilot grid for Horizonte. After the commission-free benefit,
 // every ride charges the advertised percentage: 12% moto and 15% car. The
 // minimum commission values below are the rounded percentages of each vehicle's
 // minimum fare, and the driver-net floors make the configuration fail closed if
@@ -39,7 +39,7 @@ export const HORIZONTE_VEHICLE_PRICING = {
   [VEHICLE_MOTO]: {
     baseFareCentavos: 200,
     perKmCentavos: 85,
-    perMinuteCentavos: 10,
+    perMinuteCentavos: 15,
     minimumPassengerFareCentavos: 500,
     normalCommissionBps: 1200, // 12%
     minimumPlatformCommissionCentavos: 60,
@@ -48,11 +48,11 @@ export const HORIZONTE_VEHICLE_PRICING = {
   [VEHICLE_CAR]: {
     baseFareCentavos: 300,
     perKmCentavos: 120,
-    perMinuteCentavos: 15,
-    minimumPassengerFareCentavos: 750,
+    perMinuteCentavos: 20,
+    minimumPassengerFareCentavos: 850,
     normalCommissionBps: 1500, // 15%
-    minimumPlatformCommissionCentavos: 113,
-    minimumDriverNetCentavos: 637,
+    minimumPlatformCommissionCentavos: 128,
+    minimumDriverNetCentavos: 722,
   },
 };
 

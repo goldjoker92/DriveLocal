@@ -11,12 +11,11 @@
 const BPS_DENOMINATOR = 10000;
 
 // Bump when fares/commission change so historical rides keep their snapshot.
-// Return to the V1.3 fare grid under a new snapshot version: V1.5 rides keep
-// their original price/version for payment, support and reconciliation.
-const PRICING_CONFIG_VERSION = 'horizonte-1.6.0';
+// A new snapshot version preserves V1.6 and earlier fares on existing rides.
+const PRICING_CONFIG_VERSION = 'horizonte-1.7.0';
 
-// Restored competitive pilot grid: a single kilometre rate at any distance
-// and no evening surcharge. Historical V1.5 ride snapshots are never repriced.
+// Balanced pilot grid: a single kilometre rate at any distance and no evening
+// surcharge. Historical ride snapshots are never repriced.
 //
 // After the commission-free benefit, every ride charges the advertised
 // percentage: 12% moto and 15% car. minimumPlatformCommissionCentavos and
@@ -27,7 +26,7 @@ const CITY_PRICING = Object.freeze({
     moto: {
       baseFareCentavos: 200,
       perKmCentavos: 85,
-      perMinuteCentavos: 10,
+      perMinuteCentavos: 15,
       minimumPassengerFareCentavos: 500,
       normalCommissionBps: 1200,
       minimumPlatformCommissionCentavos: 60, // 12% of 500
@@ -36,11 +35,11 @@ const CITY_PRICING = Object.freeze({
     car: {
       baseFareCentavos: 300,
       perKmCentavos: 120,
-      perMinuteCentavos: 15,
-      minimumPassengerFareCentavos: 750,
+      perMinuteCentavos: 20,
+      minimumPassengerFareCentavos: 850,
       normalCommissionBps: 1500,
-      minimumPlatformCommissionCentavos: 113, // rounded 15% of 750
-      minimumDriverNetCentavos: 637, // 750 - 113
+      minimumPlatformCommissionCentavos: 128, // rounded 15% of 850
+      minimumDriverNetCentavos: 722, // 850 - 128
     },
   },
 });
@@ -119,7 +118,7 @@ function priceRide(input = {}) {
   const timeFareCentavos = vp.perMinuteCentavos * durationMin;
   const rawFare = vp.baseFareCentavos + distanceFareCentavos + timeFareCentavos;
 
-  // Peak is disabled for the restored grid. Keeping the quote fields stable
+  // Peak is disabled for this grid. Keeping the quote fields stable
   // avoids changing the passenger contract while guaranteeing a zero surcharge.
   const peakApplied = isPeak(input.atMs);
   const peakMultiplierBps = peakApplied ? PEAK.multiplierBps : BPS_DENOMINATOR;

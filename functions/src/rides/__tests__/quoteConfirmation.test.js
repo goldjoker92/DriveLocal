@@ -103,11 +103,15 @@ describe('server quote before passenger confirmation', () => {
     const db = seed();
     await db.collection(C.CITY_PUBLIC_CONFIG).doc(C.DEFAULT_SERVICE_AREA_ID)
       .set({ requirePassengerQuote: true }, { merge: true });
-    await expect(createRideRequestSecure({
+    const legacyRequest = createRideRequestSecure({
       db, request: req('p1', {
         vehicleType: 'car', pickup, destination, idempotencyKey: 'legacy-passenger-key-001',
       }), context, clock, routingAdapter: route,
-    })).rejects.toMatchObject({ code: 'PASSENGER_UPDATE_REQUIRED' });
+    });
+    await expect(legacyRequest).rejects.toMatchObject({
+      code: 'PASSENGER_UPDATE_REQUIRED',
+      clientMessage: expect.stringContaining('Google Play'),
+    });
     expect(rides(db)).toHaveLength(0);
     expect(route.computeRoute).not.toHaveBeenCalled();
 
@@ -117,11 +121,11 @@ describe('server quote before passenger confirmation', () => {
     expect(rides(db)).toHaveLength(1);
   });
 
-  it('keeps the restored fare without a peak supplement at 19h', async () => {
+  it('keeps the new fare without a peak supplement at 19h', async () => {
     nowMs = Date.parse('2026-09-23T22:00:00Z'); // 19h in Horizonte.
     const db = seed();
     const q = await quote(db, 'moto');
-    expect(q.estimatedFareCentavos).toBe(775);
+    expect(q.estimatedFareCentavos).toBe(850);
     expect(q.peakApplied).toBe(false);
     expect(q.peakSurchargeCentavos).toBe(0);
     const ride = await confirm(db, q);
