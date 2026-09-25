@@ -1,8 +1,10 @@
 # Horizonte competitive pilot pricing — V1.3
 
-The V1.3 fare grid is active again for new quotes. It is recorded as
-`horizonte-1.6.0` so V1.5 rides retain their original price snapshot. The
-current driver commission rule is in `commercial-policy.md`.
+Historical reference: superseded by `pricing-horizonte-v1.7.md` for new quotes.
+
+The V1.3 fare grid was restored for new quotes under `horizonte-1.6.0`, so
+V1.5 rides retained their original price snapshot. The current driver
+commission rule is in `commercial-policy.md`.
 
 ## Passenger fares
 
@@ -23,5 +25,6 @@ and R$4.40 driver net for moto, or R$1.13 commission and R$6.37 driver net for
 car. The minimum platform commission is exactly the rounded percentage of the
 minimum fare; it is not an additional fixed fee.
 
-Every new ride persists `pricingConfigVersion = horizonte-1.6.0`; historical
-ride snapshots, including V1.5 fares, remain unchanged.
+Rides created while this grid was active persisted
+`pricingConfigVersion = horizonte-1.6.0`; historical ride snapshots remain
+unchanged.

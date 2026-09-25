@@ -5,12 +5,30 @@ const { priceRide, isPeak, getVehiclePricing, PEAK } = require('../pricing');
 // Fixed local time in Horizonte (UTC-3).
 const atLocalHour = (hour) => Date.UTC(2026, 8, 25, hour + 3, 0, 0);
 
-describe('restored Horizonte pilot fare grid', () => {
-  it('prices short and long routes with the same V1.3 kilometre and minute rates', () => {
+describe('balanced Horizonte pilot fare grid', () => {
+  it.each([
+    ['moto', 2, 6, 500, 60, 440],
+    ['moto', 5, 15, 850, 102, 748],
+    ['moto', 10, 25, 1425, 171, 1254],
+    ['car', 2, 6, 850, 128, 722],
+    ['car', 5, 15, 1200, 180, 1020],
+    ['car', 10, 25, 2000, 300, 1700],
+  ])('keeps the quoted passenger, driver and platform amounts for %s %s km / %s min',
+    (vehicleType, distanceKm, durationMin, passengerFareCentavos, commissionCentavos, driverNetCentavos) => {
+      expect(priceRide({ vehicleType, distanceKm, durationMin })).toMatchObject({
+        pricingConfigVersion: 'horizonte-1.7.0',
+        passengerFareCentavos,
+        commissionCentavos,
+        driverNetCentavos,
+        peakApplied: false,
+      });
+    });
+
+  it('prices short and long routes with the same kilometre and minute rates', () => {
     expect(priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15 }))
-      .toMatchObject({ passengerFareCentavos: 775, commissionCentavos: 93 });
+      .toMatchObject({ passengerFareCentavos: 850, commissionCentavos: 102 });
     expect(priceRide({ vehicleType: 'car', distanceKm: 5, durationMin: 15 }))
-      .toMatchObject({ passengerFareCentavos: 1125, commissionCentavos: 169 });
+      .toMatchObject({ passengerFareCentavos: 1200, commissionCentavos: 180 });
 
     const moto5 = priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15 });
     const moto15 = priceRide({ vehicleType: 'moto', distanceKm: 15, durationMin: 15 });
@@ -35,7 +53,7 @@ describe('restored Horizonte pilot fare grid', () => {
 
   it('keeps the approved minimum fares and rejects impossible route inputs', () => {
     expect(priceRide({ vehicleType: 'moto', distanceKm: 0.5, durationMin: 3 }).passengerFareCentavos).toBe(500);
-    expect(priceRide({ vehicleType: 'car', distanceKm: 0.5, durationMin: 3 }).passengerFareCentavos).toBe(750);
+    expect(priceRide({ vehicleType: 'car', distanceKm: 0.5, durationMin: 3 }).passengerFareCentavos).toBe(850);
     expect(priceRide({ vehicleType: 'moto', distanceKm: -1, durationMin: 5 }).ok).toBe(false);
     expect(priceRide({ vehicleType: 'bike', distanceKm: 2, durationMin: 5 }).ok).toBe(false);
   });

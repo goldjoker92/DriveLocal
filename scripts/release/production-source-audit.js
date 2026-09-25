@@ -90,7 +90,7 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     "'lng'",
   ]), 'Logger Functions: couverture de redaction PII/localisation/Pix incomplète.');
 
-  // Commercial invariant: Horizonte uses the versioned competitive pilot grid.
+  // Commercial invariant: Horizonte uses the versioned balanced pilot grid.
   // After the commission-free benefit, every ride charges the advertised
   // percentage, including rides at the minimum passenger fare.
   const pricingConfig = read(root, 'src/constants/pricingConfig.js');
@@ -99,37 +99,37 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
   const rideCreation = read(root, 'functions/src/rides/createRideRequest.js');
 
   check(containsEvery(pricingConfig, [
-    "'horizonte-1.6.0'",
+    "'horizonte-1.7.0'",
     'baseFareCentavos: 200',
     'perKmCentavos: 85',
-    'perMinuteCentavos: 10',
+    'perMinuteCentavos: 15',
     'minimumPassengerFareCentavos: 500',
     'minimumPlatformCommissionCentavos: 60',
     'minimumDriverNetCentavos: 440',
     'baseFareCentavos: 300',
     'perKmCentavos: 120',
-    'perMinuteCentavos: 15',
-    'minimumPassengerFareCentavos: 750',
-    'minimumPlatformCommissionCentavos: 113',
-    'minimumDriverNetCentavos: 637',
-  ]), 'Pricing mobile: grille compétitive Horizonte V1.3 absente ou modifiée.');
+    'perMinuteCentavos: 20',
+    'minimumPassengerFareCentavos: 850',
+    'minimumPlatformCommissionCentavos: 128',
+    'minimumDriverNetCentavos: 722',
+  ]), 'Pricing mobile: grille Horizonte V1.7 absente ou modifiée.');
 
-  // Functions owns the restored V1.3 numbers under snapshot V1.6. Pin the
+  // Functions owns the balanced pilot numbers under snapshot V1.7. Pin the
   // authoritative fare, absence of long-route/peak surcharges and driver net.
   check(containsEvery(backendPricing, [
-    "'horizonte-1.6.0'",
+    "'horizonte-1.7.0'",
     'baseFareCentavos: 200',
     'perKmCentavos: 85',
-    'perMinuteCentavos: 10',
+    'perMinuteCentavos: 15',
     'minimumPassengerFareCentavos: 500',
     'minimumPlatformCommissionCentavos: 60',
     'minimumDriverNetCentavos: 440',
     'baseFareCentavos: 300',
     'perKmCentavos: 120',
-    'perMinuteCentavos: 15',
-    'minimumPassengerFareCentavos: 750',
-    'minimumPlatformCommissionCentavos: 113',
-    'minimumDriverNetCentavos: 637',
+    'perMinuteCentavos: 20',
+    'minimumPassengerFareCentavos: 850',
+    'minimumPlatformCommissionCentavos: 128',
+    'minimumDriverNetCentavos: 722',
     'const distanceFareCentavos = vp.perKmCentavos * distanceKm',
     'enabled: false',
     'fromHour: 18',
@@ -137,7 +137,7 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     'multiplierBps: 12000',
     'INVALID_COMMISSION_CONFIGURATION',
   ]) && !backendPricing.includes('longRidePerKmCentavos:'),
-  'Pricing Functions: grille Horizonte V1.6 restaurée ou garde-fou fail-closed incomplets.');
+  'Pricing Functions: grille Horizonte V1.7 ou garde-fou fail-closed incomplets.');
 
   check(containsEvery(clientPricing, [
     'calculateConfiguredCommissionCentavos',

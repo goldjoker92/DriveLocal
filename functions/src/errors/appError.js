@@ -48,7 +48,14 @@ const PT_BR_MESSAGES = Object.freeze({
   QUOTE_EXPIRED: 'O preço expirou. Calcule novamente antes de confirmar.',
   QUOTE_MISMATCH: 'O trajeto mudou. Calcule o preço novamente.',
   QUOTE_USED: 'Este preço já foi confirmado. Confira sua corrida em andamento.',
-  PASSENGER_UPDATE_REQUIRED: 'Atualização necessária. Atualize o DriveLocal na Google Play para ver o preço antes de pedir a corrida. Sua conta será mantida.',
+  // Older passenger builds display this server text directly in their request
+  // screen; they cannot receive a new Play Store button retroactively.
+  PASSENGER_UPDATE_REQUIRED: [
+    'Atualização necessária',
+    'Uma nova versão do DriveLocal mostra o preço da corrida antes de você confirmar.',
+    'Abra a Google Play, procure DriveLocal e toque em "Atualizar" para continuar.',
+    'Não desinstale o aplicativo. Sua conta será mantida.',
+  ].join('\n'),
   RIDE_ALREADY_ACCEPTED: 'Esta corrida já foi aceita por outro motorista.',
   OFFER_EXPIRED: 'Esta oferta expirou.',
   DRIVER_NOT_ELIGIBLE: 'Você não está elegível para aceitar corridas no momento.',

@@ -1,5 +1,5 @@
 // @ts-check
-// DriveLocal V1.3 ride-pricing domain.
+// DriveLocal versioned ride-pricing domain.
 // Pure deterministic functions; all money is integer centavos.
 
 import {

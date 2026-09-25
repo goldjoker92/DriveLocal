@@ -32,8 +32,8 @@ const DESTINATION = {
 };
 const ROUTE_DISTANCE_METERS = 6200;
 const ROUTE_DURATION_SECONDS = 16 * 60;
-const EXPECTED_FARE_CENTAVOS = 1284;
-const EXPECTED_COMMISSION_CENTAVOS = 193;
+const EXPECTED_FARE_CENTAVOS = 1364;
+const EXPECTED_COMMISSION_CENTAVOS = 205;
 
 function req(uid, data) {
   return { auth: { uid }, data };
@@ -160,7 +160,7 @@ async function completeRide(db, clock, rideId, suffix) {
   const awaiting = db._store.get(`${RIDE_C.RIDE_REQUESTS}/${rideId}`);
   expect(awaiting.status).toBe(RIDE_C.RIDE_STATUS.AWAITING_PAYMENT);
   expect(awaiting.paymentAmountCentavos).toBe(EXPECTED_FARE_CENTAVOS);
-  expect(awaiting.paymentPixPayload).toContain('540512.84');
+  expect(awaiting.paymentPixPayload).toContain('540513.64');
 
   await lifecycle.markPassengerPixSent({
     db,
@@ -286,8 +286,8 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
     const secondCompleted = await completeRide(db, clock, second.rideId, 'post-promo-0002');
     expect(secondCompleted.commissionCapturedCentavos).toBe(EXPECTED_COMMISSION_CENTAVOS);
     const driver = db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`);
-    expect(driver.walletBalanceCentavos).toBe(1807);
-    expect(driver.walletAvailableCentavos).toBe(1807);
+    expect(driver.walletBalanceCentavos).toBe(1795);
+    expect(driver.walletAvailableCentavos).toBe(1795);
     expect(driver.walletHeldCentavos).toBe(0);
 
     const capture = db._store.get(`${RIDE_C.WALLET_TRANSACTIONS}/${second.rideId}_capture`);
@@ -311,7 +311,7 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
       clock,
     });
     expect(replayCompletion.commissionCapturedCentavos).toBe(EXPECTED_COMMISSION_CENTAVOS);
-    expect(db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`).walletBalanceCentavos).toBe(1807);
+    expect(db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`).walletBalanceCentavos).toBe(1795);
 
     // Notification documents stay free of exact addresses, Pix key, CPF and coords.
     const notifications = allDocs(db, RIDE_C.NOTIFICATION_EVENTS);

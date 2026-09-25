@@ -6,7 +6,7 @@ const {
   PRICING_CONFIG_VERSION,
 } = require('../pricing');
 
-describe('Horizonte competitive pilot pricing', () => {
+describe('Horizonte balanced pilot pricing', () => {
   it('charges the advertised 12% on a minimum moto ride', () => {
     const result = priceRide({
       serviceAreaId: 'HORIZONTE_CE_BR',
@@ -17,7 +17,7 @@ describe('Horizonte competitive pilot pricing', () => {
 
     expect(result).toMatchObject({
       ok: true,
-      pricingConfigVersion: 'horizonte-1.6.0',
+      pricingConfigVersion: 'horizonte-1.7.0',
       passengerFareCentavos: 500,
       commissionCentavos: 60,
       minimumPlatformCommissionCentavos: 60,
@@ -36,11 +36,11 @@ describe('Horizonte competitive pilot pricing', () => {
 
     expect(result).toMatchObject({
       ok: true,
-      pricingConfigVersion: 'horizonte-1.6.0',
-      passengerFareCentavos: 750,
-      commissionCentavos: 113,
-      minimumPlatformCommissionCentavos: 113,
-      driverNetCentavos: 637,
+      pricingConfigVersion: 'horizonte-1.7.0',
+      passengerFareCentavos: 850,
+      commissionCentavos: 128,
+      minimumPlatformCommissionCentavos: 128,
+      driverNetCentavos: 722,
       commissionBps: 1500,
     });
   });
@@ -51,9 +51,9 @@ describe('Horizonte competitive pilot pricing', () => {
       distanceKm: 5,
       durationMin: 15,
     })).toMatchObject({
-      passengerFareCentavos: 775,
-      commissionCentavos: 93,
-      driverNetCentavos: 682,
+      passengerFareCentavos: 850,
+      commissionCentavos: 102,
+      driverNetCentavos: 748,
     });
 
     expect(priceRide({
@@ -61,9 +61,9 @@ describe('Horizonte competitive pilot pricing', () => {
       distanceKm: 5,
       durationMin: 15,
     })).toMatchObject({
-      passengerFareCentavos: 1125,
-      commissionCentavos: 169,
-      driverNetCentavos: 956,
+      passengerFareCentavos: 1200,
+      commissionCentavos: 180,
+      driverNetCentavos: 1020,
     });
   });
 
@@ -78,17 +78,17 @@ describe('Horizonte competitive pilot pricing', () => {
       expect(moto.driverNetCentavos).toBeGreaterThanOrEqual(440);
 
       expect(car.ok).toBe(true);
-      expect(car.commissionCentavos).toBeGreaterThanOrEqual(113);
-      expect(car.driverNetCentavos).toBeGreaterThanOrEqual(637);
+      expect(car.commissionCentavos).toBeGreaterThanOrEqual(128);
+      expect(car.driverNetCentavos).toBeGreaterThanOrEqual(722);
     }
   });
 
   it('publishes the versioned configuration values used by both quote and acceptance', () => {
-    expect(PRICING_CONFIG_VERSION).toBe('horizonte-1.6.0');
+    expect(PRICING_CONFIG_VERSION).toBe('horizonte-1.7.0');
     expect(getVehiclePricing('HORIZONTE_CE_BR', 'moto')).toMatchObject({
       baseFareCentavos: 200,
       perKmCentavos: 85,
-      perMinuteCentavos: 10,
+      perMinuteCentavos: 15,
       minimumPassengerFareCentavos: 500,
       minimumPlatformCommissionCentavos: 60,
       minimumDriverNetCentavos: 440,
@@ -96,10 +96,10 @@ describe('Horizonte competitive pilot pricing', () => {
     expect(getVehiclePricing('HORIZONTE_CE_BR', 'car')).toMatchObject({
       baseFareCentavos: 300,
       perKmCentavos: 120,
-      perMinuteCentavos: 15,
-      minimumPassengerFareCentavos: 750,
-      minimumPlatformCommissionCentavos: 113,
-      minimumDriverNetCentavos: 637,
+      perMinuteCentavos: 20,
+      minimumPassengerFareCentavos: 850,
+      minimumPlatformCommissionCentavos: 128,
+      minimumDriverNetCentavos: 722,
     });
   });
 });

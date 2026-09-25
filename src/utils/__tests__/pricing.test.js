@@ -38,11 +38,11 @@ describe('deterministic rounding (half-up)', () => {
 });
 
 describe('pricing — base fare (moto and car)', () => {
-  it('moto 5 km / 15 min = 200 + 425 + 150 = 775', () => {
-    expect(calculateBaseRideFare(MOTO, 5, 15)).toBe(775);
+  it('moto 5 km / 15 min = 200 + 425 + 225 = 850', () => {
+    expect(calculateBaseRideFare(MOTO, 5, 15)).toBe(850);
   });
-  it('car 5 km / 15 min = 300 + 600 + 225 = 1125', () => {
-    expect(calculateBaseRideFare(CAR, 5, 15)).toBe(1125);
+  it('car 5 km / 15 min = 300 + 600 + 300 = 1200', () => {
+    expect(calculateBaseRideFare(CAR, 5, 15)).toBe(1200);
   });
   it('zero distance and zero duration = base fare only', () => {
     expect(calculateBaseRideFare(MOTO, 0, 0)).toBe(200);
@@ -59,10 +59,10 @@ describe('pricing — base fare (moto and car)', () => {
 describe('pricing — minimum fare', () => {
   it('lifts a below-minimum fare to the profitable passenger minimum', () => {
     expect(applyFareMinimum(393, MOTO.minimumPassengerFareCentavos)).toBe(500);
-    expect(applyFareMinimum(350, CAR.minimumPassengerFareCentavos)).toBe(750);
+    expect(applyFareMinimum(350, CAR.minimumPassengerFareCentavos)).toBe(850);
   });
   it('keeps a fare above the minimum unchanged', () => {
-    expect(applyFareMinimum(775, MOTO.minimumPassengerFareCentavos)).toBe(775);
+    expect(applyFareMinimum(850, MOTO.minimumPassengerFareCentavos)).toBe(850);
   });
 });
 
@@ -70,16 +70,16 @@ describe('pricing — full priceRide breakdown', () => {
   it('moto 5 km / 15 min (non-founder, commissionable)', () => {
     const r = priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15, driver: {}, now: NOW });
     expect(r.ok).toBe(true);
-    expect(r.passengerFareCentavos).toBe(775);
+    expect(r.passengerFareCentavos).toBe(850);
     expect(r.commissionBps).toBe(1200);
-    expect(r.commissionCentavos).toBe(93); // 775 * 12% = 93
-    expect(r.driverNetCentavos).toBe(682);
+    expect(r.commissionCentavos).toBe(102); // 850 * 12% = 102
+    expect(r.driverNetCentavos).toBe(748);
   });
   it('car 5 km / 15 min (non-founder, commissionable)', () => {
     const r = priceRide({ vehicleType: 'car', distanceKm: 5, durationMin: 15, driver: {}, now: NOW });
-    expect(r.passengerFareCentavos).toBe(1125);
-    expect(r.commissionCentavos).toBe(169); // round(168.75)
-    expect(r.driverNetCentavos).toBe(956);
+    expect(r.passengerFareCentavos).toBe(1200);
+    expect(r.commissionCentavos).toBe(180);
+    expect(r.driverNetCentavos).toBe(1020);
   });
   it('rejects unknown vehicle and invalid distance/duration', () => {
     expect(priceRide({ vehicleType: 'boat', distanceKm: 1 }).ok).toBe(false);
@@ -92,12 +92,12 @@ describe('pricing — immutable, versioned snapshot', () => {
   it('carries the pricing config version and is a fresh object each call', () => {
     const a = priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15, driver: {}, now: NOW });
     const b = priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15, driver: {}, now: NOW });
-    expect(a.pricingConfigVersion).toBe('horizonte-1.6.0');
+    expect(a.pricingConfigVersion).toBe('horizonte-1.7.0');
     expect(a).toEqual(b);
     expect(a).not.toBe(b);
     a.passengerFareCentavos = 1;
     const c = priceRide({ vehicleType: 'moto', distanceKm: 5, durationMin: 15, driver: {}, now: NOW });
-    expect(c.passengerFareCentavos).toBe(775);
+    expect(c.passengerFareCentavos).toBe(850);
   });
 });
 
@@ -114,7 +114,7 @@ describe('commission — rate, minimum, driver net, and no-negative', () => {
   });
   it('commission cap = max(0, fare - minimumDriverNet)', () => {
     expect(calculateCommissionCap(500, 440)).toBe(60);
-    expect(calculateCommissionCap(750, 637)).toBe(113);
+    expect(calculateCommissionCap(850, 722)).toBe(128);
     expect(calculateCommissionCap(400, 500)).toBe(0);
   });
   it('minimum moto ride charges the advertised 12%', () => {
@@ -128,21 +128,21 @@ describe('commission — rate, minimum, driver net, and no-negative', () => {
   });
   it('minimum car ride charges the advertised 15%', () => {
     const r = priceRide({ vehicleType: 'car', distanceKm: 0, durationMin: 0, driver: {}, now: NOW });
-    expect(r.passengerFareCentavos).toBe(750);
-    expect(r.percentageCommissionCentavos).toBe(113);
-    expect(r.minimumPlatformCommissionCentavos).toBe(113);
-    expect(r.commissionCapCentavos).toBe(113);
-    expect(r.commissionCentavos).toBe(113);
-    expect(r.driverNetCentavos).toBe(637);
+    expect(r.passengerFareCentavos).toBe(850);
+    expect(r.percentageCommissionCentavos).toBe(128);
+    expect(r.minimumPlatformCommissionCentavos).toBe(128);
+    expect(r.commissionCapCentavos).toBe(128);
+    expect(r.commissionCentavos).toBe(128);
+    expect(r.driverNetCentavos).toBe(722);
   });
   it('every sampled standard ride charges commission and preserves driver net', () => {
     for (const distanceKm of [0, 1, 3, 5, 10, 15]) {
       const moto = priceRide({ vehicleType: 'moto', distanceKm, durationMin: distanceKm * 2, driver: {}, now: NOW });
       const car = priceRide({ vehicleType: 'car', distanceKm, durationMin: distanceKm * 2, driver: {}, now: NOW });
       expect(moto.commissionCentavos).toBeGreaterThanOrEqual(60);
-      expect(car.commissionCentavos).toBeGreaterThanOrEqual(113);
+      expect(car.commissionCentavos).toBeGreaterThanOrEqual(128);
       expect(moto.driverNetCentavos).toBeGreaterThanOrEqual(440);
-      expect(car.driverNetCentavos).toBeGreaterThanOrEqual(637);
+      expect(car.driverNetCentavos).toBeGreaterThanOrEqual(722);
     }
   });
   it('platform fee and driver net are never negative', () => {
@@ -282,10 +282,10 @@ describe('dynamic pricing — disabled by default, clamp 1.20, surcharge to driv
       dynamic: { enabled: true, multiplier: 1.5 },
     });
     expect(r.dynamicMultiplier).toBe(1.2);
-    expect(r.passengerFareCentavos).toBe(930);
-    expect(r.dynamicSurchargeCentavos).toBe(155);
-    expect(r.commissionCentavos).toBe(93);
-    expect(r.driverNetCentavos).toBe(837);
+    expect(r.passengerFareCentavos).toBe(1020);
+    expect(r.dynamicSurchargeCentavos).toBe(170);
+    expect(r.commissionCentavos).toBe(102);
+    expect(r.driverNetCentavos).toBe(918);
   });
 });
 
