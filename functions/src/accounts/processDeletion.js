@@ -96,7 +96,7 @@ async function pseudonymizeFinancialRecords(db, uid, anonymousSubjectId) {
   const counts = {};
   for (const collectionName of [
     paymentC.PAYMENT_REQUESTS,
-    paymentC.SUBSCRIPTION_PAYMENTS,
+    'subscriptionPayments', // Historical financial records still require privacy processing.
     paymentC.WALLET_TRANSACTIONS,
   ]) {
     counts[collectionName] = await pseudonymizeMatches(

@@ -121,7 +121,7 @@ Block 15 does not change:
 - dispatch;
 - pricing;
 - commission or wallet policy;
-- subscription policy;
+- commission policy;
 - Firestore or Storage rules;
 - GPS publication frequency;
 - Pix settlement.

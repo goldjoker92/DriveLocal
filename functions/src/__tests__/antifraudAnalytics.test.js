@@ -55,28 +55,29 @@ describe('launch antifraud business analytics', () => {
     expect(result.peakRevenueHours[0]).toMatchObject({ hour: 19, commissionCapturedCentavos: 300 });
   });
 
-  it('counts paid/free subscriptions and calculates exact moto/car MRR', () => {
+  it('counts each approved driver inside the approval-based commission window despite old fields', () => {
     const drivers = [
       {
         vehicleType: 'moto',
         verificationStatus: 'approved',
-        subscriptionActive: true,
-        subscriptionExpiresAt: NOW + 20 * 864e5,
+        approvedAtMs: NOW - 20 * 864e5,
+        subscriptionActive: false,
         walletAvailableCentavos: 200,
         walletHeldCentavos: 100,
       },
       {
         vehicleType: 'car',
         verificationStatus: 'approved',
-        subscriptionActive: true,
-        subscriptionExpiresAt: NOW + 5 * 864e5,
+        approvedAtMs: NOW - 55 * 864e5,
+        subscriptionActive: false,
         walletAvailableCentavos: 500,
         walletHeldCentavos: 0,
       },
       {
         vehicleType: 'moto',
         verificationStatus: 'approved',
-        subscriptionActive: false,
+        approvedAtMs: NOW - 61 * 864e5,
+        subscriptionActive: true,
         subscriptionFreeUntil: NOW + 10 * 864e5,
         walletAvailableCentavos: 1000,
         walletHeldCentavos: 0,
@@ -84,14 +85,12 @@ describe('launch antifraud business analytics', () => {
     ];
 
     const result = aggregateDrivers(drivers, NOW);
-    expect(result.activeSubscriptions).toEqual({ moto: 1, car: 1, total: 2 });
-    expect(result.freeSubscriptions).toEqual({ moto: 1, car: 0, total: 1 });
-    expect(result.expiringWithin7Days).toEqual({ moto: 0, car: 1, total: 1 });
+    expect(result.commissionFree).toEqual({ moto: 1, car: 1, total: 2 });
+    expect(result.commissionFreeEndingWithin7Days).toEqual({ moto: 0, car: 1, total: 1 });
     expect(result.lowWallet).toEqual({ moto: 1, car: 0, total: 1 });
-    expect(result.theoreticalMrrCentavos).toEqual({ moto: 990, car: 1990, total: 2980 });
   });
 
-  it('keeps subscription revenue separate from wallet top-ups', () => {
+  it('counts only captured commissions as current revenue and tracks wallet top-ups separately', () => {
     const result = buildAdminAnalytics({
       rides: [{
         rideId: 'r1',
@@ -112,8 +111,7 @@ describe('launch antifraud business analytics', () => {
     });
 
     expect(result.revenue.commissionRevenueCentavos).toBe(300);
-    expect(result.revenue.subscriptionRevenueCentavos).toBe(1990);
-    expect(result.revenue.confirmedRevenueCentavos).toBe(2290);
+    expect(result.revenue.confirmedRevenueCentavos).toBe(300);
     expect(result.payments.walletTopupsCentavos).toBe(5000);
   });
 });

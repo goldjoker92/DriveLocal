@@ -68,7 +68,8 @@ describe('ride offer lifecycle contract', () => {
     expect(acceptance).toContain('buildCommercialPolicySnapshot(driver, nowMs)');
     expect(acceptance).toContain('commercialPolicySnapshot');
     expect(commercialPolicy).toContain('function toMillis(value)');
-    expect(commercialPolicy).toContain('toMillis(driver.commissionFreeUntil || driver.founderExpiresAt)');
+    expect(commercialPolicy).toContain('toMillis(driver.commissionFreeUntil)');
+    expect(commercialPolicy).toContain('approvalTimeMs(driver)');
     expect(lifecycle).toContain('setDriverOfferStatusTx');
     expect(lifecycle).toContain('C.RIDE_STATUS.COMPLETED');
     expect(lifecycle).toContain('C.RIDE_STATUS.CANCELLED');

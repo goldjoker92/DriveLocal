@@ -11,18 +11,12 @@
 const BPS_DENOMINATOR = 10000;
 
 // Bump when fares/commission change so historical rides keep their snapshot.
-const PRICING_CONFIG_VERSION = 'horizonte-1.5.0';
+// Return to the V1.3 fare grid under a new snapshot version: V1.5 rides keep
+// their original price/version for payment, support and reconciliation.
+const PRICING_CONFIG_VERSION = 'horizonte-1.6.0';
 
-// Competitive pilot grid for Horizonte (v1.5). Three fixes over the launch
-// grid, all measured on real September rides:
-//   1. per-minute was R$0,10 — a 25-minute ride paid the driver R$2,50 for his
-//      time, about R$6/hour. Now R$0,20 moto / R$0,30 car.
-//   2. a single flat per-km made long rides a loss, because the driver rides
-//      back empty. Kilometres past LONG_RIDE_FROM_KM now cost more.
-//   3. nothing rewarded the 18h-22h window, where demand peaks and almost
-//      nobody is online: that window now carries a +20% surcharge (see PEAK).
-// Short neighbourhood rides stay on the minimum fare on purpose: they are the
-// most frequent ones and must remain cheaper than a local mototaxi.
+// Restored competitive pilot grid: a single kilometre rate at any distance
+// and no evening surcharge. Historical V1.5 ride snapshots are never repriced.
 //
 // After the commission-free benefit, every ride charges the advertised
 // percentage: 12% moto and 15% car. minimumPlatformCommissionCentavos and
@@ -31,42 +25,32 @@ const PRICING_CONFIG_VERSION = 'horizonte-1.5.0';
 const CITY_PRICING = Object.freeze({
   HORIZONTE_CE_BR: {
     moto: {
-      baseFareCentavos: 250,
-      perKmCentavos: 100,
-      // Charged only on the kilometres past LONG_RIDE_FROM_KM.
-      longRidePerKmCentavos: 130,
-      perMinuteCentavos: 20,
-      minimumPassengerFareCentavos: 600,
+      baseFareCentavos: 200,
+      perKmCentavos: 85,
+      perMinuteCentavos: 10,
+      minimumPassengerFareCentavos: 500,
       normalCommissionBps: 1200,
-      minimumPlatformCommissionCentavos: 72, // 12% of 600
-      minimumDriverNetCentavos: 528, // 600 - 72
+      minimumPlatformCommissionCentavos: 60, // 12% of 500
+      minimumDriverNetCentavos: 440, // 500 - 60
     },
     car: {
-      baseFareCentavos: 350,
-      perKmCentavos: 140,
-      longRidePerKmCentavos: 175,
-      perMinuteCentavos: 30,
-      minimumPassengerFareCentavos: 850,
+      baseFareCentavos: 300,
+      perKmCentavos: 120,
+      perMinuteCentavos: 15,
+      minimumPassengerFareCentavos: 750,
       normalCommissionBps: 1500,
-      minimumPlatformCommissionCentavos: 128, // 15% of 850
-      minimumDriverNetCentavos: 722, // 850 - 128
+      minimumPlatformCommissionCentavos: 113, // rounded 15% of 750
+      minimumDriverNetCentavos: 637, // 750 - 113
     },
   },
 });
 
 const DEFAULT_SERVICE_AREA_ID = 'HORIZONTE_CE_BR';
 
-// The first kilometres stay on the cheap rate; only the surplus above this
-// threshold is billed at longRidePerKmCentavos.
-const LONG_RIDE_FROM_KM = 3;
-
-// Horizonte evening peak (local time, UTC-3 all year). `enabled` is the only
-// switch: quotes, ride snapshots and commission all follow, server side, with
-// no app build. Turned ON on 2026-09-22 to pull drivers into the 18h-22h
-// window, where demand peaks and almost nobody is online. Set it back to false
-// if passenger demand drops in that window — the change is one deploy.
+// The earlier pilot had no time-of-day surcharge. Keep its switch disabled so
+// a quote at 19h costs exactly the same as one at 14h for the same route.
 const PEAK = Object.freeze({
-  enabled: true,
+  enabled: false,
   fromHour: 18,
   toHour: 22, // 18:00 -> 21:59 local
   multiplierBps: 12000, // 1.20x
@@ -96,17 +80,6 @@ function isPeak(atMs) {
   if (!Number.isFinite(Number(atMs)) || Number(atMs) <= 0) return false;
   const hour = localHour(Number(atMs));
   return hour >= PEAK.fromHour && hour < PEAK.toHour;
-}
-
-/**
- * Splits a distance into the cheap first kilometres and the long-ride surplus.
- * Exported so a surprising fare can be checked part by part.
- * @param {number} distanceKm
- * @returns {{shortKm:number, longKm:number}}
- */
-function splitDistance(distanceKm) {
-  const shortKm = Math.min(distanceKm, LONG_RIDE_FROM_KM);
-  return { shortKm, longKm: Math.max(0, distanceKm - LONG_RIDE_FROM_KM) };
 }
 
 function roundCentavos(value) {
@@ -140,19 +113,14 @@ function priceRide(input = {}) {
   if (!(distanceKm >= 0)) return { ok: false, reason: 'INVALID_DISTANCE' };
   if (!(durationMin >= 0)) return { ok: false, reason: 'INVALID_DURATION' };
 
-  const { shortKm, longKm } = splitDistance(distanceKm);
-  const longPerKmCentavos = Number.isFinite(Number(vp.longRidePerKmCentavos))
-    ? vp.longRidePerKmCentavos
-    : vp.perKmCentavos;
-
   // Named parts, so a surprising quote can be read line by line in a log or a
   // debugger instead of being one opaque multiplication.
-  const distanceFareCentavos = vp.perKmCentavos * shortKm + longPerKmCentavos * longKm;
+  const distanceFareCentavos = vp.perKmCentavos * distanceKm;
   const timeFareCentavos = vp.perMinuteCentavos * durationMin;
   const rawFare = vp.baseFareCentavos + distanceFareCentavos + timeFareCentavos;
 
-  // The peak multiplier applies BEFORE the minimum: a minimum-fare ride stays
-  // exactly at the minimum, only real rides carry the surcharge.
+  // Peak is disabled for the restored grid. Keeping the quote fields stable
+  // avoids changing the passenger contract while guaranteeing a zero surcharge.
   const peakApplied = isPeak(input.atMs);
   const peakMultiplierBps = peakApplied ? PEAK.multiplierBps : BPS_DENOMINATOR;
   const computedFare = roundCentavos((rawFare * peakMultiplierBps) / BPS_DENOMINATOR);
@@ -160,6 +128,8 @@ function priceRide(input = {}) {
   const passengerFareCentavos = minimumApplied
     ? vp.minimumPassengerFareCentavos
     : computedFare;
+  const regularFareCentavos = Math.max(vp.minimumPassengerFareCentavos, roundCentavos(rawFare));
+  const peakSurchargeCentavos = Math.max(0, passengerFareCentavos - regularFareCentavos);
 
   const minimumPlatformCommissionCentavos = Math.max(
     0,
@@ -197,13 +167,12 @@ function priceRide(input = {}) {
     driverNetCentavos: passengerFareCentavos - commissionCentavos,
     commissionBps: vp.normalCommissionBps,
     peakApplied,
+    peakSurchargeCentavos,
     peakMultiplierBps,
     fareBreakdown: {
       baseFareCentavos: vp.baseFareCentavos,
       distanceFareCentavos: roundCentavos(distanceFareCentavos),
       timeFareCentavos: roundCentavos(timeFareCentavos),
-      shortKm,
-      longKm,
       minimumApplied,
     },
   };
@@ -212,8 +181,6 @@ function priceRide(input = {}) {
 module.exports = {
   priceRide,
   isPeak,
-  splitDistance,
-  LONG_RIDE_FROM_KM,
   PEAK,
   getVehiclePricing,
   PRICING_CONFIG_VERSION,

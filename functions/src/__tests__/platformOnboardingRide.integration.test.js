@@ -1,7 +1,7 @@
 // @ts-check
 // Deterministic launch platform flow using fixed Horizonte coordinates:
 // application -> approved public photo -> admin approval #101 -> explicit work
-// session -> 0% launch ride -> exact promotion expiry -> paid plan -> wallet gate
+// session -> 0% launch ride -> exact promotion expiry -> wallet gate
 // -> normal commission hold and capture.
 
 const { approveDriver } = require('../drivers/approveDriver');
@@ -32,8 +32,8 @@ const DESTINATION = {
 };
 const ROUTE_DISTANCE_METERS = 6200;
 const ROUTE_DURATION_SECONDS = 16 * 60;
-const EXPECTED_FARE_CENTAVOS = 1810;
-const EXPECTED_COMMISSION_CENTAVOS = 272;
+const EXPECTED_FARE_CENTAVOS = 1284;
+const EXPECTED_COMMISSION_CENTAVOS = 193;
 
 function req(uid, data) {
   return { auth: { uid }, data };
@@ -160,7 +160,7 @@ async function completeRide(db, clock, rideId, suffix) {
   const awaiting = db._store.get(`${RIDE_C.RIDE_REQUESTS}/${rideId}`);
   expect(awaiting.status).toBe(RIDE_C.RIDE_STATUS.AWAITING_PAYMENT);
   expect(awaiting.paymentAmountCentavos).toBe(EXPECTED_FARE_CENTAVOS);
-  expect(awaiting.paymentPixPayload).toContain('540518.10');
+  expect(awaiting.paymentPixPayload).toContain('540512.84');
 
   await lifecycle.markPassengerPixSent({
     db,
@@ -195,7 +195,6 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
       approvalNumber: 101,
       founderEligible: false,
       founderNumber: null,
-      subscriptionFreeUntil: null,
     });
     expect(approved.commissionFreeUntil).toBe(AT_18H + 60 * DRIVER_C.DAY_MS);
     expect(db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`)).toMatchObject({
@@ -243,15 +242,14 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
     const firstCompleted = await completeRide(db, clock, first.rideId, 'launch-0001');
     expect(firstCompleted.commissionCapturedCentavos).toBe(0);
 
-    // Exact expiry is exclusive: an active paid plan becomes mandatory and the
-    // normal 15% commission applies immediately. Wallet remains a separate gate.
+    // At day 60 the normal 15% commission applies. An old plan field has no
+    // effect; the wallet remains the separate, legitimate acceptance gate.
     clock.advance(60 * DRIVER_C.DAY_MS);
     await db.collection(DRIVER_C.DRIVERS).doc(DRIVER_ID).set({
       availabilityUpdatedAtMs: clock.now(),
       locationUpdatedAtMs: clock.now(),
-      subscriptionActive: true,
-      subscriptionStatus: 'active',
-      subscriptionExpiresAt: clock.now() + 30 * DRIVER_C.DAY_MS,
+      subscriptionActive: false,
+      subscriptionStatus: 'required',
       walletBalanceCentavos: 0,
       walletAvailableCentavos: 0,
       walletHeldCentavos: 0,
@@ -288,8 +286,8 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
     const secondCompleted = await completeRide(db, clock, second.rideId, 'post-promo-0002');
     expect(secondCompleted.commissionCapturedCentavos).toBe(EXPECTED_COMMISSION_CENTAVOS);
     const driver = db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`);
-    expect(driver.walletBalanceCentavos).toBe(1728);
-    expect(driver.walletAvailableCentavos).toBe(1728);
+    expect(driver.walletBalanceCentavos).toBe(1807);
+    expect(driver.walletAvailableCentavos).toBe(1807);
     expect(driver.walletHeldCentavos).toBe(0);
 
     const capture = db._store.get(`${RIDE_C.WALLET_TRANSACTIONS}/${second.rideId}_capture`);
@@ -313,7 +311,7 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
       clock,
     });
     expect(replayCompletion.commissionCapturedCentavos).toBe(EXPECTED_COMMISSION_CENTAVOS);
-    expect(db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`).walletBalanceCentavos).toBe(1728);
+    expect(db._store.get(`${DRIVER_C.DRIVERS}/${DRIVER_ID}`).walletBalanceCentavos).toBe(1807);
 
     // Notification documents stay free of exact addresses, Pix key, CPF and coords.
     const notifications = allDocs(db, RIDE_C.NOTIFICATION_EVENTS);

@@ -1,14 +1,13 @@
 // Pure presentation helpers for the targeted driver offer.
 // The backend remains authoritative for eligibility, fare and final settlement.
 // This module only presents the versioned commercial policy and never persists or
-// authorizes a commission, subscription or wallet mutation.
+// authorizes a commission or wallet mutation.
 
 import {
   MIN_WALLET_BALANCE_CENTAVOS,
   getVehiclePricing,
 } from '../constants/pricingConfig';
 import { formatDateBR } from './driverCockpit';
-import { getSubscriptionMonthlyCentavos } from './driverSubscription';
 import { resolveCommercialPolicy } from './commercialPolicy';
 
 const PICKUP_AVERAGE_SPEED_KPH = Object.freeze({ moto: 25, car: 22 });
@@ -123,7 +122,6 @@ export function deriveRideOfferPresentation(driver, offer, nowMs = Date.now()) {
 
   return {
     commercialPolicyVersion: commercial.policyVersion,
-    subscriptionCoverageSource: commercial.subscriptionCoverageSource,
     vehicleType,
     vehicleName: vehicleLabel(vehicleType),
     fareCentavos,
@@ -136,14 +134,6 @@ export function deriveRideOfferPresentation(driver, offer, nowMs = Date.now()) {
     driverReceivesCentavos: commission.driverReceivesCentavos,
     driverNetCentavos: commission.driverNetCentavos,
     founder: commercial.founder,
-    founderBenefitActive: commercial.founderFreeActive,
-    founderBenefitUntilLabel: formatDateBR(commercial.founderSubscriptionUntilMs),
-    planCentavos: getSubscriptionMonthlyCentavos(vehicleType),
-    paidPlanActive: commercial.paidSubscriptionActive,
-    subscriptionExpiresAtLabel: formatDateBR(commercial.subscriptionExpiresAtMs),
-    freeRideCountUsed: commercial.freeRideCountUsed,
-    freeRidesRemaining: commercial.freeRidesRemaining,
-    subscriptionRequired: commercial.subscriptionRequired,
     walletBalanceCentavos,
     walletLow: commercial.walletTopupRequired
       && walletBalanceCentavos <= MIN_WALLET_BALANCE_CENTAVOS,

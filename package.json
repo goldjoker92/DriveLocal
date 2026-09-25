@@ -1,7 +1,7 @@
 {
   "name": "drivelocal",
   "main": "./index.js",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "dependencies": {
     "@expo/ui": "~56.0.22",
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -16,6 +16,7 @@
     "expo-dev-client": "~56.0.23",
     "expo-device": "~56.0.4",
     "expo-document-picker": "~56.0.4",
+    "expo-file-system": "~56.0.8",
     "expo-font": "~56.0.7",
     "expo-glass-effect": "~56.0.4",
     "expo-haptics": "~56.0.3",

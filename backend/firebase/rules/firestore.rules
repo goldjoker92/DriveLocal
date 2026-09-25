@@ -378,13 +378,8 @@ service cloud.firestore {
     }
 
     match /rideRequests/{rideId} {
-      allow create: if isSignedIn() &&
-        request.resource.data.passengerId == request.auth.uid &&
-        request.resource.data.status == 'pending' &&
-        request.resource.data.driverId == null &&
-        request.resource.data.acceptedDriverId == null &&
-        request.resource.data.assignedDriverId == null &&
-        request.resource.data.commissionSettled == false;
+      // Only the callable can turn a passenger-confirmed server quote into a ride.
+      allow create: if false;
       allow read: if isSignedIn() &&
         (resource.data.passengerId == request.auth.uid || isAdmin());
       allow update: if false;
@@ -446,6 +441,7 @@ service cloud.firestore {
     }
 
     match /idempotencyOperations/{docId}  { allow read, write: if false; }
+    match /rideQuotes/{docId}             { allow read, write: if false; }
     match /auditLogs/{docId}              { allow read, write: if false; }
     match /walletTransactions/{docId}     { allow read, write: if false; }
     match /paymentRequests/{docId}        { allow read, write: if false; }

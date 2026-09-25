@@ -92,7 +92,7 @@ function countDocs(db, prefix) {
 }
 
 describe('full passenger ride -> driver Pix -> platform commission', () => {
-  it('completes one car ride at 18h and captures exactly R$2.36 once', async () => {
+  it('completes one car ride at 18h and captures exactly R$1.69 once', async () => {
     const db = makeFakeFirestore();
     const clock = fixedClock(AT_18H);
     seedBase(db);
@@ -111,14 +111,14 @@ describe('full passenger ride -> driver Pix -> platform commission', () => {
     });
 
     // Car: R$3.00 base + R$1.20/km * 5 + R$0.15/min * 15 = R$11.25.
-    // Commission: 15% of R$11.25 = R$1.6875 -> R$2.36.
-    expect(created.estimatedFareCentavos).toBe(1570);
+    // Commission: 15% of R$11.25 = R$1.6875 -> R$1.69.
+    expect(created.estimatedFareCentavos).toBe(1125);
     expect(created.routeDistanceMeters).toBe(5000);
     expect(created.routeDurationSeconds).toBe(900);
 
     const rideId = created.rideId;
     const storedCreatedRide = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
-    expect(storedCreatedRide.estimatedCommissionCentavos).toBe(236);
+    expect(storedCreatedRide.estimatedCommissionCentavos).toBe(169);
     expect(storedCreatedRide.createdAtMs).toBe(AT_18H);
 
     const accepted = await acceptDriverOfferSecure({
@@ -131,11 +131,11 @@ describe('full passenger ride -> driver Pix -> platform commission', () => {
       clock,
     });
 
-    expect(accepted.commissionHoldCentavos).toBe(236);
+    expect(accepted.commissionHoldCentavos).toBe(169);
     let driver = db._store.get(`${C.DRIVERS}/${DRIVER_ID}`);
     expect(driver.walletBalanceCentavos).toBe(5000); // not charged yet
-    expect(driver.walletAvailableCentavos).toBe(4764);
-    expect(driver.walletHeldCentavos).toBe(236);
+    expect(driver.walletAvailableCentavos).toBe(4831);
+    expect(driver.walletHeldCentavos).toBe(169);
 
     await lifecycle.markDriverArrived({
       db,
@@ -158,11 +158,11 @@ describe('full passenger ride -> driver Pix -> platform commission', () => {
 
     let ride = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
     expect(ride.status).toBe(C.RIDE_STATUS.AWAITING_PAYMENT);
-    expect(ride.finalFareCentavos).toBe(1570);
-    expect(ride.paymentAmountCentavos).toBe(1570);
-    expect(ride.finalCommissionCentavos).toBe(236);
-    // EMV TLV: field 54 (amount), length 05, value 15.70.
-    expect(ride.paymentPixPayload).toContain('540515.70');
+    expect(ride.finalFareCentavos).toBe(1125);
+    expect(ride.paymentAmountCentavos).toBe(1125);
+    expect(ride.finalCommissionCentavos).toBe(169);
+    // EMV TLV: field 54 (amount), length 05, value 11.25.
+    expect(ride.paymentPixPayload).toContain('540511.25');
 
     await lifecycle.markPassengerPixSent({
       db,
@@ -179,7 +179,7 @@ describe('full passenger ride -> driver Pix -> platform commission', () => {
     });
 
     expect(completed.status).toBe(C.RIDE_STATUS.COMPLETED);
-    expect(completed.commissionCapturedCentavos).toBe(236);
+    expect(completed.commissionCapturedCentavos).toBe(169);
 
     ride = db._store.get(`${C.RIDE_REQUESTS}/${rideId}`);
     driver = db._store.get(`${C.DRIVERS}/${DRIVER_ID}`);
@@ -187,22 +187,22 @@ describe('full passenger ride -> driver Pix -> platform commission', () => {
 
     // Financial result:
     // passenger -> driver Pix: R$11.25
-    // driver wallet -> DriveLocal commission ledger: R$2.36
+    // driver wallet -> DriveLocal commission ledger: R$1.69
     // driver's ride revenue after commission: R$9.56
     // wallet: R$50.00 -> R$48.31; no duplicate capture.
-    expect(ride.commissionCapturedCentavos).toBe(236);
-    expect(driver.walletBalanceCentavos).toBe(4764);
-    expect(driver.walletAvailableCentavos).toBe(4764);
+    expect(ride.commissionCapturedCentavos).toBe(169);
+    expect(driver.walletBalanceCentavos).toBe(4831);
+    expect(driver.walletAvailableCentavos).toBe(4831);
     expect(driver.walletHeldCentavos).toBe(0);
     expect(capture).toMatchObject({
       driverId: DRIVER_ID,
       rideId,
       type: 'commission_capture',
-      amountCentavos: 236,
+      amountCentavos: 169,
       releasedCentavos: 0,
       status: 'captured',
     });
-    expect(1570 - 236).toBe(1334);
+    expect(1125 - 169).toBe(956);
 
     // Replay is idempotent: no second debit and one capture document.
     await lifecycle.confirmDriverPixReceived({
@@ -211,7 +211,7 @@ describe('full passenger ride -> driver Pix -> platform commission', () => {
       context: CTX,
       clock,
     });
-    expect(db._store.get(`${C.DRIVERS}/${DRIVER_ID}`).walletBalanceCentavos).toBe(4764);
+    expect(db._store.get(`${C.DRIVERS}/${DRIVER_ID}`).walletBalanceCentavos).toBe(4831);
     expect(countDocs(db, `${C.WALLET_TRANSACTIONS}/${rideId}_capture`)).toBe(1);
   });
 });

@@ -3,8 +3,7 @@
 // outputs contain aggregate numbers only — never passenger/driver PII or precise
 // coordinates. All money remains integer centavos.
 
-const driverC = require('../drivers/constants');
-const { toMillis } = require('../drivers/eligibility');
+const { resolveCommercialPolicy } = require('../drivers/commercialPolicy');
 const { hasFreshAvailabilitySession } = require('../rides/candidates');
 
 const TIME_ZONE = 'America/Fortaleza';
@@ -198,14 +197,11 @@ function aggregateDrivers(drivers = [], nowMs = Date.now()) {
     pendingReview: 0,
     suspended: 0,
     online: 0,
-    activeSubscriptions: { moto: 0, car: 0, total: 0 },
-    freeSubscriptions: { moto: 0, car: 0, total: 0 },
-    expiringWithin7Days: { moto: 0, car: 0, total: 0 },
-    expiredSubscriptions: { moto: 0, car: 0, total: 0 },
+    commissionFree: { moto: 0, car: 0, total: 0 },
+    commissionFreeEndingWithin7Days: { moto: 0, car: 0, total: 0 },
     lowWallet: { moto: 0, car: 0, total: 0 },
     walletAvailableCentavos: 0,
     walletHeldCentavos: 0,
-    theoreticalMrrCentavos: { moto: 0, car: 0, total: 0 },
   };
   const sevenDays = 7 * 86400000;
 
@@ -217,26 +213,14 @@ function aggregateDrivers(drivers = [], nowMs = Date.now()) {
     if (driver?.verificationStatus === 'suspended' || driver?.isBlocked === true) result.suspended += 1;
     if (hasFreshAvailabilitySession(driver, nowMs)) result.online += 1;
 
-    const expiry = toMillis(driver?.subscriptionExpiresAt);
-    const freeUntil = toMillis(driver?.subscriptionFreeUntil || driver?.founderFreeUntil);
-    const activePaid = driver?.subscriptionActive === true && expiry > nowMs;
-    const activeFree = freeUntil > nowMs;
-
-    if (activePaid) {
-      result.activeSubscriptions[type] += 1;
-      result.activeSubscriptions.total += 1;
-    }
-    if (activeFree) {
-      result.freeSubscriptions[type] += 1;
-      result.freeSubscriptions.total += 1;
-    }
-    if (activePaid && expiry <= nowMs + sevenDays) {
-      result.expiringWithin7Days[type] += 1;
-      result.expiringWithin7Days.total += 1;
-    }
-    if (driver?.subscriptionActive === true && expiry > 0 && expiry <= nowMs) {
-      result.expiredSubscriptions[type] += 1;
-      result.expiredSubscriptions.total += 1;
+    const policy = resolveCommercialPolicy(driver, nowMs);
+    if (policy.freePeriodActive) {
+      result.commissionFree[type] += 1;
+      result.commissionFree.total += 1;
+      if (policy.freePeriodUntilMs <= nowMs + sevenDays) {
+        result.commissionFreeEndingWithin7Days[type] += 1;
+        result.commissionFreeEndingWithin7Days.total += 1;
+      }
     }
 
     const available = num(driver?.walletAvailableCentavos);
@@ -249,20 +233,12 @@ function aggregateDrivers(drivers = [], nowMs = Date.now()) {
     }
   });
 
-  result.theoreticalMrrCentavos.moto = result.activeSubscriptions.moto
-    * driverC.MOTO_SUBSCRIPTION_CENTAVOS;
-  result.theoreticalMrrCentavos.car = result.activeSubscriptions.car
-    * driverC.CAR_SUBSCRIPTION_CENTAVOS;
-  result.theoreticalMrrCentavos.total = result.theoreticalMrrCentavos.moto
-    + result.theoreticalMrrCentavos.car;
   return result;
 }
 
 function aggregatePayments(payments = []) {
   const result = {
-    subscriptionRevenueCentavos: 0,
     walletTopupsCentavos: 0,
-    paidSubscriptions: 0,
     paidTopups: 0,
     pendingPayments: 0,
     failedPayments: 0,
@@ -270,10 +246,7 @@ function aggregatePayments(payments = []) {
   payments.forEach((payment) => {
     const status = payment?.status;
     const amount = num(payment?.amountCentavos);
-    if (status === 'paid' && payment?.purpose === 'driver_subscription') {
-      result.subscriptionRevenueCentavos += amount;
-      result.paidSubscriptions += 1;
-    } else if (status === 'paid' && payment?.purpose === 'wallet_topup') {
+    if (status === 'paid' && payment?.purpose === 'wallet_topup') {
       result.walletTopupsCentavos += amount;
       result.paidTopups += 1;
     } else if (status === 'pending') result.pendingPayments += 1;
@@ -368,8 +341,7 @@ function buildAdminAnalytics({
   const alertAnalytics = aggregateAlerts(alerts);
   const supply = aggregateSupplySnapshots(supplySnapshots);
   const commissionRevenueCentavos = rideAnalytics.total.commissionCapturedCentavos;
-  const confirmedRevenueCentavos = commissionRevenueCentavos
-    + paymentAnalytics.subscriptionRevenueCentavos;
+  const confirmedRevenueCentavos = commissionRevenueCentavos;
   const expectedCommissionCentavos = rideAnalytics.total.commissionExpectedCentavos;
   const captureRate = expectedCommissionCentavos > 0
     ? commissionRevenueCentavos / expectedCommissionCentavos
@@ -382,7 +354,6 @@ function buildAdminAnalytics({
     revenue: {
       confirmedRevenueCentavos,
       commissionRevenueCentavos,
-      subscriptionRevenueCentavos: paymentAnalytics.subscriptionRevenueCentavos,
       commissionExpectedCentavos: expectedCommissionCentavos,
       commissionHeldCentavos: rideAnalytics.total.commissionHeldCentavos,
       commissionDisputedCentavos: rideAnalytics.total.commissionDisputedCentavos,

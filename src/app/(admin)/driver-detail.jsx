@@ -24,8 +24,6 @@ import { auth, db } from '../../config/firebase';
 import {
   getDriver,
   requestDriverCorrection,
-  activateDriverSubscription,
-  resetDriverSubscription,
 } from '../../services/driverService';
 import { getPrivateDriverDocumentUrl } from '../../services/storageService';
 // Sensitive driver mutations go through secure admin callables (BLOCK 11+12):
@@ -52,6 +50,7 @@ import {
   requiresDuplicateApprovalReview,
 } from '../../utils/adminDriverApproval';
 import { requiresCriminalCertificate } from '../../utils/driverDocumentPolicy';
+import { isFounderDriver } from '../../utils/commercialPolicy';
 
 // Documents affichables avec leur champ URL sur le document driver.
 const DOC_LINKS = [
@@ -410,56 +409,6 @@ export default function DriverDetail() {
     });
   }
 
-  // Iteration 2B — admin/dev TEST action. Marks an approved non-founder driver's
-  // subscription active (30 days) with 0% commission for 60 days, so #101+
-  // ride-eligibility can be tested before real Pix payments exist. No money moves.
-  function handleActivateSubscription() {
-    showConfirmAlert({
-      title: 'Marcar assinatura ativa',
-      message: 'Ação de teste do admin: ativa a assinatura por 30 dias e 0% de comissão por 60 dias. Nenhum pagamento real é processado.',
-      confirmText: 'Marcar ativa',
-      onConfirm: async () => {
-        setError('');
-        setSubmitting(true);
-        try {
-          console.log('[ADMIN_DRIVER_DETAIL] activate subscription driverId=', driverId);
-          await activateDriverSubscription(driverId);
-          await loadDriver();
-        } catch (e) {
-          console.log('[ADMIN_DRIVER_DETAIL] activate subscription error', e.message);
-          setError('Não foi possível marcar a assinatura como ativa.');
-        } finally {
-          setSubmitting(false);
-        }
-      },
-    });
-  }
-
-  // Iteration 2B — admin/dev TEST action. Resets the subscription back to
-  // "required" and forces availability offline, to re-test the blocked #101+ state.
-  function handleResetSubscription() {
-    showConfirmAlert({
-      title: 'Resetar assinatura para teste',
-      message: 'Ação de teste do admin: volta a assinatura para "obrigatória" e deixa o motorista indisponível.',
-      confirmText: 'Resetar',
-      destructive: true,
-      onConfirm: async () => {
-        setError('');
-        setSubmitting(true);
-        try {
-          console.log('[ADMIN_DRIVER_DETAIL] reset subscription driverId=', driverId);
-          await resetDriverSubscription(driverId);
-          await loadDriver();
-        } catch (e) {
-          console.log('[ADMIN_DRIVER_DETAIL] reset subscription error', e.message);
-          setError('Não foi possível resetar a assinatura.');
-        } finally {
-          setSubmitting(false);
-        }
-      },
-    });
-  }
-
   // Ouvre l'URL d'un document dans le navigateur (MVP).
   async function openDoc(value, privatePath = false) {
     if (!value) return;
@@ -480,10 +429,7 @@ export default function DriverDetail() {
   const criminalCertificateRequired = requiresCriminalCertificate(driver);
   const criminalCertificateReady = hasCriminalCertificateForDriverApproval(driver, driverId);
   const duplicateReviewRequired = requiresDuplicateApprovalReview(driver);
-  // Founder protection (Iteration 2B): founder drivers must show benefit info
-  // only — never the subscription test buttons, and their fields stay untouched.
-  const isFounder =
-    driver && (driver.founderEligible === true || driver.subscriptionStatus === 'free_founder');
+  const isFounder = isFounderDriver(driver);
   const history = (driver && Array.isArray(driver.statusHistory) ? [...driver.statusHistory] : []).sort(
     (a, b) => toMillis(a.changedAt) - toMillis(b.changedAt)
   );
@@ -575,29 +521,12 @@ export default function DriverDetail() {
             body={driver.approvalNumber ? `Número de aprovação #${driver.approvalNumber}.` : null}
           />
           {isFounder ? (
-            // Founder: benefit info only. No subscription activation button here,
-            // and the subscription/founder fields are never overwritten.
             <InfoBanner
               tone="neutral"
               title="Motorista Fundador"
-              body="Assinatura e comissão gratuitas durante o período fundador. Não é necessário ativar a assinatura."
+              body="Reconhecimento permanente para os 100 primeiros aprovados. A comissão segue as mesmas regras de todos os motoristas."
             />
-          ) : (
-            // Approved non-founder (#101+): admin/dev test controls for subscription.
-            <>
-              <AppButton
-                title={submitting ? 'Processando…' : 'Marcar assinatura ativa'}
-                onPress={handleActivateSubscription}
-                disabled={submitting}
-              />
-              <AppButton
-                title={submitting ? 'Processando…' : 'Resetar assinatura para teste'}
-                variant="ghost"
-                onPress={handleResetSubscription}
-                disabled={submitting}
-              />
-            </>
-          )}
+          ) : null}
           <AppInput
             label="Motivo da suspensão"
             value={reason}
@@ -732,11 +661,10 @@ export default function DriverDetail() {
               ) : null}
             </AppCard>
 
-            {/* ASSINATURA / OPERAÇÃO — bloc compact (Iteration 2B). */}
+            {/* Commission window is anchored to the server approval timestamp. */}
             <AppCard>
-              <SectionTitle>ASSINATURA / OPERAÇÃO</SectionTitle>
-              <AdminTableRow label="Assinatura" value={driver.subscriptionStatus || '—'} />
-              <AdminTableRow label="Expira em" value={formatDateTime(driver.subscriptionExpiresAt) || '—'} />
+              <SectionTitle>COMISSÃO / OPERAÇÃO</SectionTitle>
+              <AdminTableRow label="Aprovado em" value={formatDateTime(driver.approvedAt) || '—'} />
               <AdminTableRow label="Comissão 0% até" value={formatDateTime(driver.commissionFreeUntil) || '—'} />
               <AdminTableRow
                 label="Pode receber corridas"

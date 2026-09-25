@@ -9,16 +9,14 @@ import { useRouter } from 'expo-router';
 import Header from '../../components/Header';
 import AppCard from '../../components/AppCard';
 import AppButton from '../../components/AppButton';
-import FounderOfferBadge from '../../components/FounderOfferBadge';
 import AdminTableRow from '../../components/AdminTableRow';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import {
   FOUNDER_OFFER_HEADLINE_PT_BR,
-  FOUNDER_DEFAULT_COMMISSION_FREE_DAYS,
   FOUNDER_DEFAULT_MAX_DRIVERS,
 } from '../../constants/founderOfferRules';
-import { SERVICE_AREA_HORIZONTE_CE_BR } from '../../constants/serviceAreaIds';
+import { COMMISSION_FREE_DAYS } from '../../constants/pricingConfig';
 import { getApprovedCount } from '../../services/founderService';
 
 export default function Onboarding() {
@@ -27,7 +25,7 @@ export default function Onboarding() {
 
   useEffect(() => {
     let active = true;
-    getApprovedCount(SERVICE_AREA_HORIZONTE_CE_BR)
+    getApprovedCount()
       .then((count) => {
         if (active) {
           setRemaining(Math.max(FOUNDER_DEFAULT_MAX_DRIVERS - count, 0));
@@ -49,11 +47,12 @@ export default function Onboarding() {
       <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, flexGrow: 1 }}>
         <Header title="Seja motorista" subtitle="DriveLocal em Horizonte/CE" />
         <AppCard>
-          <FounderOfferBadge />
           <AdminTableRow label="Oferta" value={FOUNDER_OFFER_HEADLINE_PT_BR} />
-          <AdminTableRow label="Taxa da plataforma zerada" value={`${FOUNDER_DEFAULT_COMMISSION_FREE_DAYS} dias`} />
+          <AdminTableRow label="Comissão 0% para todos os aprovados" value={`${COMMISSION_FREE_DAYS} dias após a aprovação`} />
+          <AdminTableRow label="Depois dos 60 dias" value="12% Moto · 15% Carro, só em corridas pagas" />
           <AdminTableRow label="Vagas fundador restantes" value={remainingLabel} />
-          <AdminTableRow label="Pix" value="100% do valor da corrida" />
+          <AdminTableRow label="Motorista Fundador" value="Badge permanente apenas para os 100 primeiros aprovados" />
+          <AdminTableRow label="Pix" value="Pagamento direto ao motorista" />
         </AppCard>
         <AppButton title="Começar cadastro" onPress={() => router.push('/(driver)/profile')} />
       </ScrollView>

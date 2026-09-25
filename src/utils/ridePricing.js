@@ -8,6 +8,7 @@ import {
   DYNAMIC_PRICING_MAX_MULTIPLIER,
   PRICING_CONFIG_VERSION,
   DEFAULT_SERVICE_AREA_ID,
+  COMMISSION_FREE_DAYS,
 } from '../constants/pricingConfig';
 
 export function roundCentavos(value) {
@@ -47,8 +48,11 @@ export function applyFareMinimum(fareCentavos, minimumPassengerFareCentavos) {
 export function isCommissionFree(driver, now = Date.now()) {
   const profile = driver || {};
   const nowMs = toMillis(now) || now;
-  const untilMs = toMillis(profile.commissionFreeUntil || profile.founderExpiresAt);
-  return untilMs > 0 && nowMs < untilMs;
+  const approvedAtMs = toMillis(profile.approvedAtMs || profile.approvedAt);
+  const untilMs = approvedAtMs > 0
+    ? approvedAtMs + COMMISSION_FREE_DAYS * 24 * 60 * 60 * 1000
+    : toMillis(profile.commissionFreeUntil);
+  return profile.verificationStatus === 'approved' && untilMs > 0 && nowMs < untilMs;
 }
 
 export function calculateCommissionBps(

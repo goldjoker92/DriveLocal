@@ -108,14 +108,13 @@ are always checked again by the server when the driver accepts.
 The offer screen no longer presents separate cards for:
 
 - founder promotion explanations;
-- subscription status and dates;
-- free rides remaining;
+- historical payment status and dates;
 - wallet balance and top-up warnings;
 - acceptance rate;
 - destination explanations;
 - long commission descriptions.
 
-Those concepts remain available in their dedicated cockpit, wallet and subscription
+Those concepts remain available in their dedicated cockpit and wallet
 screens. They no longer compete with the timed decision.
 
 ## Missing-data policy
@@ -150,7 +149,7 @@ Block 17 does not change:
 - fare calculation;
 - commercial policy;
 - wallet mutation;
-- subscription mutation;
+- historical payment mutation;
 - Pix settlement;
 - Firestore or Storage rules;
 - block 15/16 active-ride restoration.

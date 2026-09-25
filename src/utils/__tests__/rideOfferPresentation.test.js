@@ -14,16 +14,14 @@ function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-function withoutLineComments(text) {
-  return text.replace(/\/\/.*$/gm, '');
-}
-
 describe('driver ride-offer presentation', () => {
-  it('keeps #101+ commission-free while counting down the five rides before the plan', () => {
+  it('keeps #101+ commission-free for 60 days despite historical ride counters', () => {
     const view = deriveRideOfferPresentation({
+      verificationStatus: 'approved',
+      approvalNumber: 101,
       founderEligible: false,
       vehicleType: 'moto',
-      commissionFreeUntil: NOW + 30 * DAY_MS,
+      approvedAtMs: NOW - 30 * DAY_MS,
       freeRideCountUsed: 2,
       walletAvailableCentavos: 0,
     }, {
@@ -38,8 +36,8 @@ describe('driver ride-offer presentation', () => {
     expect(view.commissionPercentLabel).toBe('0%');
     expect(view.driverReceivesCentavos).toBe(823);
     expect(view.driverNetCentavos).toBe(823);
-    expect(view.freeRidesRemaining).toBe(3);
-    expect(view.planCentavos).toBe(990);
+    expect(view).not.toHaveProperty('freeRidesRemaining');
+    expect(view).not.toHaveProperty('planCentavos');
     expect(view.walletLow).toBe(false);
     expect(view.pickupEtaMinutes).toBe(3);
     expect(view).not.toHaveProperty('commissionCentavos');
@@ -119,11 +117,10 @@ describe('driver ride-offer presentation', () => {
     expect(compact).not.toContain("commissionLabel: '0%'");
   });
 
-  it('keeps plan activation and reset independent from the approval-based commission window', () => {
+  it('does not expose client-side administrative commercial mutations', () => {
     const driverService = source('src/services/driverService.js');
-    const executable = withoutLineComments(driverService);
-
-    expect(executable).not.toMatch(/activateDriverSubscription[\s\S]*commissionFreeUntil\s*:/);
-    expect(executable).not.toMatch(/resetDriverSubscription[\s\S]*commissionFreeUntil\s*:/);
+    expect(driverService).not.toContain('activateDriverSubscription');
+    expect(driverService).not.toContain('resetDriverSubscription');
+    expect(driverService).not.toContain('export async function approveDriver(');
   });
 });

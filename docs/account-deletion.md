@@ -59,7 +59,7 @@ política de privacidade.
 - `driverId` substituído pelo identificador aleatório;
 - QR Code e chave/fingerprint de idempotência removidos;
 - pagamento ainda `pending` passa a `cancelled/account_deleted`;
-- callback Mercado Pago tardio nunca recria wallet ou assinatura;
+- callback Mercado Pago tardio nunca recria saldo ou altera benefícios;
 - callback pago tardio vira `manual_review` para tratamento administrativo.
 
 ### Antifraude e auditoria

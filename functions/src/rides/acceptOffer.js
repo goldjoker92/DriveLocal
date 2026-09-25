@@ -5,7 +5,7 @@
 // single-current-point live-location document consumed by the passenger map.
 //
 // Financial invariant: commission and commercial eligibility are frozen at
-// acceptance. A later date boundary, subscription payment or profile update can
+// acceptance. A later date boundary or profile update can
 // never rewrite the conditions under which this ride was accepted.
 
 const admin = require('firebase-admin');
@@ -193,9 +193,7 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
         internalMessage: `driver ${driverId} not ride-eligible`,
         safeMetadata: {
-          reason: evalResult.requiresSubscription
-            ? 'SUBSCRIPTION_REQUIRED'
-            : evalResult.riskRestricted
+          reason: evalResult.riskRestricted
               ? 'RISK_RESTRICTED'
               : 'DRIVER_NOT_ELIGIBLE',
           commercialPolicyVersion: evalResult.commercialPolicyVersion,
@@ -364,8 +362,6 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
       commissionFreeAtAcceptance: result.commissionFree,
       commissionPolicyVersion: COMMISSION_POLICY_VERSION,
       commercialPolicyVersion: result.commercialPolicySnapshot.policyVersion,
-      subscriptionCoverageSource: result.commercialPolicySnapshot.subscriptionCoverageSource,
-      freeRideCountUsedAtAcceptance: result.commercialPolicySnapshot.freeRideCountUsedAtAcceptance,
       hasApprovedDriverPhoto: Boolean(result.ride.acceptedDriverPublic?.photoStoragePath),
     },
   }, clock);
@@ -377,8 +373,6 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     policyVersion: result.commercialPolicySnapshot.policyVersion,
     founder: result.commercialPolicySnapshot.founder,
     commissionBpsAtAcceptance: result.commercialPolicySnapshot.commissionBpsAtAcceptance,
-    subscriptionCoverageSource: result.commercialPolicySnapshot.subscriptionCoverageSource,
-    freeRideCountUsedAtAcceptance: result.commercialPolicySnapshot.freeRideCountUsedAtAcceptance,
   });
 
   if (result.holdAmount > 0) {

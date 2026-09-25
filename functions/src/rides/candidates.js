@@ -75,7 +75,6 @@ function emptyDiagnostics(radius) {
     rejectedOutsideRadius: 0,
     rejectedNotApproved: 0,
     rejectedBlocked: 0,
-    rejectedSubscriptionRequired: 0,
     rejectedUnknownEligibility: 0,
     searchRadiusMeters: radius,
     locationMaxAgeMs: C.LOCATION_MAX_AGE_MS,
@@ -196,7 +195,6 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
     if (!evalResult.canReceiveRides) {
       if (d.verificationStatus !== 'approved') diagnostics.rejectedNotApproved += 1;
       else if (d.isBlocked === true) diagnostics.rejectedBlocked += 1;
-      else if (evalResult.requiresSubscription) diagnostics.rejectedSubscriptionRequired += 1;
       else diagnostics.rejectedUnknownEligibility += 1;
       continue;
     }

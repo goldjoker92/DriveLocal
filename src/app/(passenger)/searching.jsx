@@ -125,7 +125,9 @@ export default function Searching() {
       await cancelRide(rideId, 'passageiro_cancelou_busca');
       router.replace('/passenger-home');
     } catch (cancelError) {
-      setError(networkErrorMessage(cancelError, 'Não foi possível cancelar a corrida.'));
+      if (cancelError?.code !== 'CANCELLATION_SELECTION_DISMISSED') {
+        setError(networkErrorMessage(cancelError, 'Não foi possível cancelar a corrida.'));
+      }
     } finally {
       setBusy(false);
     }
@@ -174,7 +176,7 @@ export default function Searching() {
           <AppCard>
             <Text style={[{ fontFamily, color: colors.text }, typography.h3]}>Resumo da corrida</Text>
             <AdminTableRow
-              label="Preço estimado"
+              label="Preço da corrida"
               value={fareAvailable ? formatBRL(ride.estimatedFareCentavos) : 'Calculando…'}
             />
             <AdminTableRow label="Veículo" value={vehicleLabel} />

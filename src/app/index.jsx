@@ -213,14 +213,14 @@ export default function Landing() {
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
               <Text style={{ fontSize: 15, lineHeight: 19 }}>🏆</Text>
               <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
-                100 primeiros aprovados: 0% de taxa da plataforma durante 60 dias e sem assinatura por 60 dias.
+                Os 100 primeiros motoristas aprovados recebem o badge permanente Motorista Fundador.
               </Text>
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
               <Text style={{ fontSize: 15, lineHeight: 19 }}>🚗</Text>
               <Text style={{ flex: 1, fontSize: 13.5, fontWeight: '600', color: C.text, lineHeight: 19 }}>
-                A partir do 101º: 0% de taxa da plataforma durante 60 dias e até 5 corridas sem assinatura.
+                Todo motorista aprovado paga 0% de comissão por 60 dias. Depois, 12% na Moto ou 15% no Carro, somente em corridas pagas.
               </Text>
             </View>
 

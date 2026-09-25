@@ -24,7 +24,8 @@ const CATEGORIES = Object.freeze({
   driver_or_vehicle_mismatch: Object.freeze({ roles: ['passenger'], requiresRide: true }),
   passenger_no_show_review: Object.freeze({ roles: ['driver'], requiresRide: true }),
   wallet_topup_issue: Object.freeze({ roles: ['driver'], paymentPurpose: 'wallet_topup' }),
-  subscription_issue: Object.freeze({ roles: ['driver'], paymentPurpose: 'driver_subscription' }),
+  // A prior charge can still need review; this reads historical records only.
+  previous_payment_issue: Object.freeze({ roles: ['driver'], paymentPurpose: 'driver_subscription' }),
   document_review_issue: Object.freeze({ roles: ['driver'] }),
   account_access_issue: Object.freeze({ roles: ['driver', 'passenger'] }),
   technical_error: Object.freeze({ roles: ['driver', 'passenger'] }),

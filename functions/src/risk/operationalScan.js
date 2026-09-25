@@ -1,7 +1,7 @@
 // @ts-check
 // Bounded operational antifraud scan for launch. It detects explainable patterns
-// (repeated cancellations/disputes, implausibly short rides, repeated pairs and
-// promotion abuse) and opens review cases. It never blocks or bans automatically.
+// (repeated cancellations/disputes, implausibly short rides and repeated pairs)
+// and opens review cases. It never blocks or bans automatically.
 
 const admin = require('firebase-admin');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -17,7 +17,6 @@ const RIDE_SCAN_LIMIT = 5000;
 const CANCELLATION_THRESHOLD = 3;
 const DISPUTE_THRESHOLD = 2;
 const PAIR_THRESHOLD = 8;
-const FREE_RIDE_THRESHOLD = 10;
 
 function increment(map, key, amount = 1) {
   if (!key) return;
@@ -54,8 +53,6 @@ function detectOperationalPatterns(rides = [], nowMs = Date.now()) {
   const disputesAgainstPassenger = new Map();
   const disputesAgainstDriver = new Map();
   const pairRides = new Map();
-  const freeRidesByDriver = new Map();
-  const freeRidesByPassenger = new Map();
   const signals = [];
   const bucket = dailyBucket(nowMs);
 
@@ -88,11 +85,6 @@ function detectOperationalPatterns(rides = [], nowMs = Date.now()) {
     if (status === rideC.RIDE_STATUS.COMPLETED && passengerId && driverId) {
       const pairKey = `${driverId}|${passengerId}`;
       pushMap(pairRides, pairKey, rideId);
-
-      if (ride.commissionPolicySnapshot?.commissionFreeAtAcceptance === true) {
-        increment(freeRidesByDriver, driverId);
-        increment(freeRidesByPassenger, passengerId);
-      }
 
       const startedAtMs = Number(ride.startedAtMs || 0);
       const completedAtMs = Number(ride.completedAtMs || 0);
@@ -207,34 +199,6 @@ function detectOperationalPatterns(rides = [], nowMs = Date.now()) {
     }));
   });
 
-  freeRidesByDriver.forEach((count, driverId) => {
-    if (count < FREE_RIDE_THRESHOLD) return;
-    signals.push(signal({
-      actorType: riskC.ACTOR_TYPE.DRIVER,
-      actorId: driverId,
-      reasonCode: riskC.REASON.PROMOTION_ABUSE_PATTERN,
-      severity: riskC.SEVERITY.MEDIUM,
-      sourceType: 'risk_window',
-      sourceId: `driver_promotion_${bucket}`,
-      eventKey: `driver_promotion_${bucket}`,
-      metadata: { count, windowDays: WINDOW_DAYS },
-    }));
-  });
-
-  freeRidesByPassenger.forEach((count, passengerId) => {
-    if (count < FREE_RIDE_THRESHOLD) return;
-    signals.push(signal({
-      actorType: riskC.ACTOR_TYPE.PASSENGER,
-      actorId: passengerId,
-      reasonCode: riskC.REASON.PROMOTION_ABUSE_PATTERN,
-      severity: riskC.SEVERITY.MEDIUM,
-      sourceType: 'risk_window',
-      sourceId: `passenger_promotion_${bucket}`,
-      eventKey: `passenger_promotion_${bucket}`,
-      metadata: { count, windowDays: WINDOW_DAYS },
-    }));
-  });
-
   return signals;
 }
 
@@ -298,7 +262,6 @@ module.exports = {
   CANCELLATION_THRESHOLD,
   DISPUTE_THRESHOLD,
   PAIR_THRESHOLD,
-  FREE_RIDE_THRESHOLD,
   dailyBucket,
   detectOperationalPatterns,
   runOperationalRiskScan,

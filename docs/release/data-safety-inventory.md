@@ -12,7 +12,7 @@ Built from actual code/schema. Legal classification is **LEGAL/PRIVACY REVIEW RE
 | Vehicle data | Yes | Matching, trust card | Req (driver) | Driver | Firestore | Owner + admin | Account life | On deletion | Shown to matched passenger | App activity |
 | Precise location | Yes | Geofence, dispatch, live ride | Req during ride | Both | Firestore (ride/driver) | Backend + ride parties | Ride record retention | Anonymized on deletion | Between ride parties | Location (precise) |
 | Ride history | Yes | Operations, disputes, audit | Req | Both | Firestore `rideRequests` | Backend + parties + admin | Financial/audit retention | Anonymized (financial exception) | None | App activity |
-| Payment metadata (subscription/topup) | Yes | Wallet, subscription | Req (driver) | Driver | Firestore + Mercado Pago | Backend + admin | Financial retention | Retained (financial/legal) | Mercado Pago (processor) | Financial info |
+| Payment metadata (wallet top-up and retained past payments) | Yes | Wallet and financial retention | Req (driver) | Driver | Firestore + Mercado Pago | Backend + admin | Financial retention | Retained (financial/legal) | Mercado Pago (processor) | Financial info |
 | Pix key/owner | Yes | Direct ride payment | Req (driver) | Driver | `privateDriverData` (server-only) | Backend/admin | Account life | Restricted | Shown as QR to passenger at pay time | Financial info |
 | Wallet / commission ledger | Yes | Platform fees | Req (driver) | Driver | `walletTransactions` (server-only, immutable) | Backend/admin | Financial/audit retention | Retained (immutable ledger) | None | Financial info |
 | Notification (FCM) token | Yes | Push notifications | Req | Both | `notificationTokens` (server-only) | Backend | Until logout/invalid | Deleted/disabled on logout/deletion | Google FCM | Device id |
@@ -22,5 +22,5 @@ Built from actual code/schema. Legal classification is **LEGAL/PRIVACY REVIEW RE
 ## Notes
 - Server-only collections (`privateDriverData`, `walletTransactions`, `auditLogs`, `notificationTokens`) are never client-readable (Firestore Rules).
 - Logs never contain coordinates, addresses, route polylines, CPF, Pix, tokens, or secrets.
-- Mercado Pago is a payment processor for subscription/recharge only. Ride payment is direct passenger→driver Pix (no processor holds ride money).
+- Mercado Pago processes wallet recharges only. Ride payment is direct passenger→driver Pix (no processor holds ride money).
 - Financial and audit records have retention exceptions to account deletion — LEGAL REVIEW REQUIRED.

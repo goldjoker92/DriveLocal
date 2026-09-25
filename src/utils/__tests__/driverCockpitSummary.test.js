@@ -105,6 +105,7 @@ describe('compact driver cockpit summary', () => {
     const now = utc('2026-07-21T15:00:00.000Z');
 
     const commissionFree = deriveDriverCockpitSummary({
+      verificationStatus: 'approved',
       walletStatus: 'blocked',
       walletAvailableCentavos: 0,
       commissionFreeUntil: now + 10 * 24 * 60 * 60 * 1000,
@@ -117,6 +118,7 @@ describe('compact driver cockpit summary', () => {
     });
 
     const thresholdBlocked = deriveDriverCockpitSummary({
+      verificationStatus: 'approved',
       walletStatus: 'ready',
       walletAvailableCentavos: 300,
       commissionFreeUntil: now - 1,
@@ -129,6 +131,7 @@ describe('compact driver cockpit summary', () => {
     });
 
     const aboveThreshold = deriveDriverCockpitSummary({
+      verificationStatus: 'approved',
       walletStatus: 'blocked',
       walletAvailableCentavos: 301,
       commissionFreeUntil: now - 1,

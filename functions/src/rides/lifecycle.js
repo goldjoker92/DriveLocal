@@ -6,7 +6,7 @@
 // only while the ride is moving.
 //
 // Commission settlement is based exclusively on the amount frozen/held when the
-// offer was accepted. A later promotion or subscription change cannot erase an
+// offer was accepted. A later promotion change cannot erase an
 // already-earned DriveLocal commission.
 
 const admin = require('firebase-admin');
@@ -24,7 +24,6 @@ const { buildPixPayload } = require('../pix/pixBrCode');
 const { normalizePixKey } = require('../pix/pixKey');
 const { bestEffortRiskSignal } = require('../risk/riskEngine');
 const riskC = require('../risk/constants');
-const driverC = require('../drivers/constants');
 const C = require('./constants');
 
 function ts() {
@@ -449,12 +448,6 @@ async function confirmDriverPixReceived({ db, request, context, clock }) {
       completedRideCount: Number(driver.completedRideCount || 0) + 1,
       updatedAt: ts(),
     };
-    if (
-      driver.founderEligible !== true
-      && Number(driver.freeRideCountUsed || 0) < driverC.FREE_RIDE_LIMIT
-    ) {
-      driverUpdate.freeRideCountUsed = Number(driver.freeRideCountUsed || 0) + 1;
-    }
     tx.set(driverRef, driverUpdate, { merge: true });
     tx.set(rideRef, {
       status: C.RIDE_STATUS.COMPLETED,

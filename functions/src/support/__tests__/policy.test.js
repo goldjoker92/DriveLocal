@@ -18,7 +18,7 @@ describe('support ticket policy', () => {
       'driver_or_vehicle_mismatch',
       'passenger_no_show_review',
       'wallet_topup_issue',
-      'subscription_issue',
+      'previous_payment_issue',
       'document_review_issue',
       'account_access_issue',
       'technical_error',
@@ -34,7 +34,8 @@ describe('support ticket policy', () => {
     expect(categoryDefinition('ride_status_issue')).toMatchObject({ requiresRide: true });
     expect(categoryDefinition('fare_payment_issue')).toMatchObject({ requiresRide: true });
     expect(categoryDefinition('wallet_topup_issue')).toMatchObject({ paymentPurpose: 'wallet_topup' });
-    expect(categoryDefinition('subscription_issue')).toMatchObject({ paymentPurpose: 'driver_subscription' });
+    expect(categoryDefinition('previous_payment_issue')).toMatchObject({ paymentPurpose: 'driver_subscription' });
+    expect(categoryAllowedForRole('subscription_issue', 'driver')).toBe(false);
     expect(categoryDefinition('technical_error')).toEqual({ roles: ['driver', 'passenger'] });
   });
 

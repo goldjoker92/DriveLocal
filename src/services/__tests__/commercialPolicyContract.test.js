@@ -21,14 +21,18 @@ describe('commercial policy integration contract', () => {
     expect(versionFrom(mobile)).toBe(versionFrom(backend));
   });
 
-  it('keeps the final #100/#101, five-ride and day-60 rules explicit', () => {
+  it('keeps the founder badge and approval-based 60-day commission explicit', () => {
     const backend = source('functions/src/drivers/commercialPolicy.js');
+    const entry = source('src/app/(auth)/driver-auth.jsx');
+    const onboarding = source('src/app/(driver)/onboarding.jsx');
 
     expect(backend).toContain('FOUNDER_LIMIT');
-    expect(backend).toContain('FREE_RIDE_LIMIT');
-    expect(backend).toContain('freePeriodActive && freeRidesRemaining > 0');
+    expect(backend).toContain('approvedAtMs + C.FREE_PERIOD_DAYS * C.DAY_MS');
     expect(backend).toContain('commissionBps = freePeriodActive ? 0 : standardBps');
-    expect(backend).toContain('subscriptionRequired: !subscriptionCovered');
+    expect(backend).not.toContain('freeRideCountUsed');
+    expect(entry).toContain('Todos os motoristas aprovados têm 0% de comissão por 60 dias a partir da aprovação.');
+    expect(entry).not.toMatch(/60 dias para os 100 primeiros/);
+    expect(onboarding).not.toContain('100% do valor da corrida');
   });
 
   it('routes dispatch and acceptance through the authoritative backend policy', () => {
@@ -43,16 +47,12 @@ describe('commercial policy integration contract', () => {
     expect(acceptance).toContain('ride.accept.duplicate_ignored');
   });
 
-  it('routes subscription and wallet Pix decisions through the same policy', () => {
+  it('rejects the historical purchase before creating any new charge', () => {
     const payment = source('functions/src/payments/createPixPayment.js');
 
-    expect(payment).toContain("require('../drivers/commercialPolicy')");
-    expect(payment).toContain('resolveCommercialPolicy(driver, nowMs)');
-    expect(payment).toContain('subscriptionPaymentBlockedByGrace');
-    expect(payment).toContain('commercial.freePeriodActive');
-    expect(payment).toContain('payment.create.commercial_policy_resolved');
-    expect(payment).toContain('payment.create.not_required');
-    expect(payment).toContain('payment.create.duplicate_ignored');
+    expect(payment).toContain("payload.purpose === 'driver_subscription'");
+    expect(payment).toContain('ERROR_CODES.APP_UPDATE_REQUIRED');
+    expect(payment.indexOf('ERROR_CODES.APP_UPDATE_REQUIRED')).toBeLessThan(payment.indexOf('adapter.createPixOrder('));
   });
 
   it('keeps offer commission copy restricted to safe server-projected percentages', () => {

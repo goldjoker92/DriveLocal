@@ -48,7 +48,7 @@ fare_payment_issue
 driver_or_vehicle_mismatch
 passenger_no_show_review
 wallet_topup_issue
-subscription_issue
+previous_payment_issue (paiement antérieur, y compris les paiements historiques)
 document_review_issue
 account_access_issue
 technical_error
@@ -88,7 +88,7 @@ Le support ne copie jamais :
 
 ## Contexte de paiement chauffeur
 
-Pour `wallet_topup_issue` et `subscription_issue`, le serveur recherche :
+Pour `wallet_topup_issue` et `previous_payment_issue` (paiement déjà enregistré), le serveur recherche :
 
 ```text
 driverId == utilisateur authentifié
@@ -96,6 +96,10 @@ purpose == catégorie demandée
 orderBy createdAtMs desc
 limit 1
 ```
+
+Les tickets historiques sous le code `subscription_issue` restent consultables et
+continuent de déclencher une alerte administrative si leur résolution est en attente.
+Le nouveau client ne propose plus ce code et le serveur refuse sa création.
 
 L'index composite requis est versionné dans :
 

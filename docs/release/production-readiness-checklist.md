@@ -39,4 +39,4 @@ Statuses: READY / VERIFIED IN DEV / MANUAL VALUE REQUIRED / POLICY REVIEW REQUIR
 - Production Secret Manager checklist / admin bootstrap / least-privilege IAM review / budget + quota alerts / error+log monitoring / Firestore backup+export plan / rollback (see rollback-plan) / post-deploy verification / incident contacts: MANUAL VALUE REQUIRED.
 
 ## Payments
-- Mercado Pago = subscription + wallet recharge only. Ride payment = direct passenger→driver Pix. **Never** move ride payment to Mercado Pago. Google Play Billing NOT implemented. Classification: PLAY PAYMENTS POLICY REVIEW REQUIRED BEFORE PRODUCTION.
+- Mercado Pago = wallet recharge only. Ride payment = direct passenger→driver Pix. **Never** move ride payment to Mercado Pago. Review any historical paid driver plan before release.

@@ -1,8 +1,8 @@
 // @ts-check
-// DriveLocal V1.3 pricing configuration (governance D3).
+// DriveLocal restored V1.3 fare grid, recorded as V1.6 (governance D3).
 //
 // SINGLE SOURCE OF TRUTH for fares, commission, the wallet threshold,
-// subscription prices, promotions, dynamic pricing and operating mode.
+// promotions, dynamic pricing and operating mode.
 // All money is INTEGER CENTAVOS (BRL cents) — never floats.
 //
 // Deterministic rounding rule: every monetary result is rounded to the nearest
@@ -19,7 +19,7 @@ import { VEHICLE_MOTO, VEHICLE_CAR } from './vehicleTypes';
 
 // Bump on ANY change to fares/commission so historical rides keep the pricing
 // they were created with, even after these tables change.
-export const PRICING_CONFIG_VERSION = 'horizonte-1.3.0';
+export const PRICING_CONFIG_VERSION = 'horizonte-1.6.0';
 
 // Backward-compatible alias — confirm-price.jsx (Step 1) imports PRICING_VERSION.
 export const PRICING_VERSION = PRICING_CONFIG_VERSION;
@@ -85,23 +85,7 @@ export function getVehiclePricing(serviceAreaId, vehicleType) {
 export const MIN_WALLET_BALANCE_CENTAVOS = 300;
 
 // ---------------------------------------------------------------------------
-// Subscription (centavos / month)
-// ---------------------------------------------------------------------------
-export const SUBSCRIPTION_MONTHLY_CENTAVOS = {
-  [VEHICLE_MOTO]: 990, //  R$ 9,90 / month
-  [VEHICLE_CAR]: 1990, //  R$ 19,90 / month
-};
-
-// A paid subscription period lasts 30 rolling days.
-export const SUBSCRIPTION_PERIOD_DAYS = 30;
-
-// Drivers #101+ may complete at most five rides without subscription, only while
-// the same 60-day launch window is active. From the 6th ride OR at day 60
-// (whichever happens first), an active subscription is required.
-export const NON_FOUNDER_FREE_RIDES = 5;
-
-// Free launch windows measured from the immutable ADMIN APPROVAL date.
-export const FOUNDER_FREE_DAYS = 60; // subscription-free for founders #1..#100
+// Free launch window measured from the immutable ADMIN APPROVAL date.
 export const COMMISSION_FREE_DAYS = 60; // 0% commission for every approved driver
 
 // ---------------------------------------------------------------------------

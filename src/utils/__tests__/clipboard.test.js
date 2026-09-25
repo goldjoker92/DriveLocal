@@ -3,7 +3,7 @@ import { copyToClipboard } from '../clipboard';
 
 jest.mock('expo-clipboard', () => ({
   setStringAsync: jest.fn(),
-}));
+}), { virtual: true });
 
 describe('copyToClipboard', () => {
   beforeEach(() => jest.clearAllMocks());

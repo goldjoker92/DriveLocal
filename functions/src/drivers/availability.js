@@ -147,9 +147,7 @@ async function setDriverAvailability({ db, request, context, clock }) {
                 ? 'blocked'
                 : eligibility.riskRestricted
                   ? 'risk_restricted'
-                  : eligibility.requiresSubscription
-                    ? 'subscription_required'
-                    : 'not_eligible',
+                  : 'not_eligible',
           },
         });
       }

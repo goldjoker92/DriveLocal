@@ -85,7 +85,31 @@ async function syncDriverRideHint(offer, explicitRideId, fromCache) {
   }
 }
 
-export async function requestRide({ vehicleType, pickup, destination, idempotencyKeyRef }) {
+export async function getRideQuote({ vehicleType, pickup, destination }) {
+  const startedAt = Date.now();
+  logRideClientEvent('ride.quote.started', { vehicleType });
+  try {
+    const call = httpsCallable(functions, 'getRideQuoteSecure');
+    const response = await runNetworkAwareAction('getRideQuoteSecure', () => call({
+      vehicleType,
+      pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label },
+      destination: { lat: destination.lat, lng: destination.lng, label: destination.label },
+    }));
+    logRideClientEvent('ride.quote.succeeded', {
+      vehicleType, durationMs: Date.now() - startedAt,
+      pricingConfigVersion: response.data?.pricingConfigVersion,
+    });
+    return response.data;
+  } catch (error) {
+    logRideClientEvent('ride.quote.failed', {
+      vehicleType, durationMs: Date.now() - startedAt, error,
+    }, 'error');
+    throw error;
+  }
+}
+
+export async function requestRide({ vehicleType, pickup, destination, quoteId, idempotencyKeyRef }) {
+  if (!quoteId) throw new Error('Calcule o preço antes de confirmar a corrida.');
   let idempotencyKey;
   if (idempotencyKeyRef) {
     if (!idempotencyKeyRef.current) idempotencyKeyRef.current = makeIdempotencyKey('ride');
@@ -96,27 +120,28 @@ export async function requestRide({ vehicleType, pickup, destination, idempotenc
 
   const startedAt = Date.now();
   logRideClientEvent('ride.request.callable_started', {
-    action: 'createRideRequestSecure', vehicleType,
+    action: 'createRideFromQuoteSecure', vehicleType,
     hasPickupCoordinates: hasCoordinatePair(pickup),
     hasDestinationCoordinates: hasCoordinatePair(destination),
   });
   try {
-    const call = httpsCallable(functions, 'createRideRequestSecure');
-    const res = await runNetworkAwareAction('createRideRequestSecure', () => call({
+    const call = httpsCallable(functions, 'createRideFromQuoteSecure');
+    const res = await runNetworkAwareAction('createRideFromQuoteSecure', () => call({
       vehicleType,
+      quoteId,
       pickup: { lat: pickup.lat, lng: pickup.lng, label: pickup.label },
       destination: { lat: destination.lat, lng: destination.lng, label: destination.label },
       idempotencyKey,
     }));
     logRideClientEvent('ride.request.callable_succeeded', {
-      action: 'createRideRequestSecure', rideId: res.data?.rideId,
+      action: 'createRideFromQuoteSecure', rideId: res.data?.rideId,
       resultStatus: res.data?.status, vehicleType,
       durationMs: Date.now() - startedAt, ride: res.data,
     });
     return res.data;
   } catch (error) {
     logRideClientEvent('ride.request.callable_failed', {
-      action: 'createRideRequestSecure', vehicleType,
+      action: 'createRideFromQuoteSecure', vehicleType,
       durationMs: Date.now() - startedAt, error,
     }, 'error');
     throw error;

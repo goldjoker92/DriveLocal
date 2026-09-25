@@ -99,7 +99,7 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
   const rideCreation = read(root, 'functions/src/rides/createRideRequest.js');
 
   check(containsEvery(pricingConfig, [
-    "'horizonte-1.3.0'",
+    "'horizonte-1.6.0'",
     'baseFareCentavos: 200',
     'perKmCentavos: 85',
     'perMinuteCentavos: 10',
@@ -114,32 +114,30 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     'minimumDriverNetCentavos: 637',
   ]), 'Pricing mobile: grille compétitive Horizonte V1.3 absente ou modifiée.');
 
-  // The installed client keeps its V1.3 fallback estimate, while Functions is
-  // authoritative for the persisted V1.5 quote. Pin every V1.5 field that
-  // materially affects the passenger fare or the driver's protected net.
+  // Functions owns the restored V1.3 numbers under snapshot V1.6. Pin the
+  // authoritative fare, absence of long-route/peak surcharges and driver net.
   check(containsEvery(backendPricing, [
-    "'horizonte-1.5.0'",
-    'baseFareCentavos: 250',
-    'perKmCentavos: 100',
-    'longRidePerKmCentavos: 130',
-    'perMinuteCentavos: 20',
-    'minimumPassengerFareCentavos: 600',
-    'minimumPlatformCommissionCentavos: 72',
-    'minimumDriverNetCentavos: 528',
-    'baseFareCentavos: 350',
-    'perKmCentavos: 140',
-    'longRidePerKmCentavos: 175',
-    'perMinuteCentavos: 30',
-    'minimumPassengerFareCentavos: 850',
-    'minimumPlatformCommissionCentavos: 128',
-    'minimumDriverNetCentavos: 722',
-    'const LONG_RIDE_FROM_KM = 3',
-    'enabled: true',
+    "'horizonte-1.6.0'",
+    'baseFareCentavos: 200',
+    'perKmCentavos: 85',
+    'perMinuteCentavos: 10',
+    'minimumPassengerFareCentavos: 500',
+    'minimumPlatformCommissionCentavos: 60',
+    'minimumDriverNetCentavos: 440',
+    'baseFareCentavos: 300',
+    'perKmCentavos: 120',
+    'perMinuteCentavos: 15',
+    'minimumPassengerFareCentavos: 750',
+    'minimumPlatformCommissionCentavos: 113',
+    'minimumDriverNetCentavos: 637',
+    'const distanceFareCentavos = vp.perKmCentavos * distanceKm',
+    'enabled: false',
     'fromHour: 18',
     'toHour: 22',
     'multiplierBps: 12000',
     'INVALID_COMMISSION_CONFIGURATION',
-  ]), 'Pricing Functions: grille Horizonte V1.5, longue distance, pointe ou garde-fou fail-closed incomplets.');
+  ]) && !backendPricing.includes('longRidePerKmCentavos:'),
+  'Pricing Functions: grille Horizonte V1.6 restaurée ou garde-fou fail-closed incomplets.');
 
   check(containsEvery(clientPricing, [
     'calculateConfiguredCommissionCentavos',
@@ -238,7 +236,8 @@ function validateProductionSourceAudit({ root = ROOT } = {}) {
     ['fin de course', ['ride.awaiting_payment', 'finishRideSecure']],
     ['Pix', ['payment_marked_sent', 'pix_charge_created']],
     ['wallet', ['wallet.', 'wallet_']],
-    ['abonnement', ['subscription', 'assinatura']],
+    ['devis', ['ride.quote.started', 'ride.quote.succeeded']],
+    ['commission chauffeur', ['commercialPolicySnapshot', 'commissionCapturedCentavos']],
     ['notification', ['notification.sent', 'notification.failed']],
     ['restauration', ['restored', 'recovered', 'replayed']],
   ];

@@ -99,21 +99,15 @@ export default function UpdateRequired() {
           <Text style={styles.iconText}>↻</Text>
         </View>
         <Text style={styles.title}>
-          {updateInstalled ? 'Atualização concluída' : 'Atualização obrigatória'}
+          {updateInstalled ? 'Atualização concluída' : 'Atualização necessária'}
         </Text>
         <Text style={styles.body}>
           {updateInstalled
             ? 'Abrindo seu cockpit…'
-            : 'Para continuar disponível e receber novas corridas, instale a versão mais recente do DriveLocal.'}
+            : 'Esta versão não é mais compatível. Atualize o DriveLocal na Google Play para continuar.'}
         </Text>
         {!updateInstalled ? (
           <>
-            <View style={styles.notice}>
-              <Text style={styles.noticeText}>
-                Esta atualização corrige a presença dos motoristas e evita corridas
-                perdidas.
-              </Text>
-            </View>
             <AppButton
               title={opening ? 'Abrindo Google Play…' : 'Atualizar agora'}
               onPress={openPlayStore}

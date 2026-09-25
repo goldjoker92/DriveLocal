@@ -1,7 +1,8 @@
 # Horizonte competitive pilot pricing — V1.3
 
-This release changes ride pricing only. It does not change subscriptions,
-founder benefits, dispatch, wallet rules, driver approval, or payment flows.
+The V1.3 fare grid is active again for new quotes. It is recorded as
+`horizonte-1.6.0` so V1.5 rides retain their original price snapshot. The
+current driver commission rule is in `commercial-policy.md`.
 
 ## Passenger fares
 
@@ -11,7 +12,8 @@ rounding.
 - Moto: `max(R$5.00, R$2.00 + R$0.85/km + R$0.10/min)`
 - Car: `max(R$7.50, R$3.00 + R$1.20/km + R$0.15/min)`
 
-Dynamic pricing remains disabled by default.
+The evening surcharge is disabled: the same route has the same price at 14h
+and 19h. Long routes use the same per-km rate throughout.
 
 ## Commission interaction
 
@@ -21,5 +23,5 @@ and R$4.40 driver net for moto, or R$1.13 commission and R$6.37 driver net for
 car. The minimum platform commission is exactly the rounded percentage of the
 minimum fare; it is not an additional fixed fee.
 
-Every new ride persists `pricingConfigVersion = horizonte-1.3.0`; historical
-ride snapshots remain unchanged.
+Every new ride persists `pricingConfigVersion = horizonte-1.6.0`; historical
+ride snapshots, including V1.5 fares, remain unchanged.

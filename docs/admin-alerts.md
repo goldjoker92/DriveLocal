@@ -11,7 +11,7 @@ executada automaticamente por um alerta.
 | Fonte | Condição que abre alerta | Severidade | Fila relacionada |
 |---|---|---:|---|
 | `supportTickets` | `safety_concern` aberto/em análise | crítica | `/support-tickets` |
-| `supportTickets` | pagamento, recarga ou assinatura aberto/em análise | alta | `/support-tickets` |
+| `supportTickets` | pagamento de corrida, recarga ou pagamento anterior aberto/em análise | alta | `/support-tickets` |
 | `rideRequests` | corrida `disputed` | alta | `/ride-disputes` |
 | `paymentRequests` | pagamento `manual_review` | alta | `/dashboard` |
 | `fraudCases` | caso `high` ou `critical` aberto/em análise | alta/crítica | `/antifraud` |

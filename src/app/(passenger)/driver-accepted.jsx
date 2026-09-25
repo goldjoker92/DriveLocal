@@ -296,8 +296,10 @@ export default function DriverAccepted() {
       await cancelRide(rideId, 'passageiro_cancelou');
       router.replace('/passenger-home');
     } catch (cancelError) {
-      setError(cancelError?.message || 'Não foi possível cancelar a corrida.');
-      logRideClientEvent('ride.passenger.cancel_failed', { rideId, error: cancelError }, 'error');
+      if (cancelError?.code !== 'CANCELLATION_SELECTION_DISMISSED') {
+        setError(cancelError?.message || 'Não foi possível cancelar a corrida.');
+        logRideClientEvent('ride.passenger.cancel_failed', { rideId, error: cancelError }, 'error');
+      }
     } finally {
       setBusy(false);
     }
@@ -374,7 +376,7 @@ export default function DriverAccepted() {
               <AdminTableRow label="Origem" value={ride.pickup?.label || '—'} />
               <AdminTableRow label="Destino" value={ride.destination?.label || '—'} />
               <AdminTableRow
-                label="Preço estimado"
+                label="Preço da corrida"
                 value={formatBRL(ride.finalFareCentavos ?? ride.estimatedFareCentavos)}
               />
             </AppCard>

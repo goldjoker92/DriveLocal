@@ -102,67 +102,52 @@ describe('payments — creation', () => {
     ).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
   });
 
-  it('T2: subscription amount is derived server-side from vehicle type', async () => {
+  it('T2: old APK requests never create a plan charge for either vehicle', async () => {
     const db = makeFakeFirestore();
     const clock = fixedClock(T0);
-    // Non-founder, free rides exhausted -> subscription payment is required.
     seedDriver(db, 'moto1', { vehicleType: 'moto', founderEligible: false, freeRideCountUsed: 5 });
     seedDriver(db, 'car1', { vehicleType: 'car', founderEligible: false, freeRideCountUsed: 5 });
     const adapter = makeAdapter();
 
-    await createDriverPixPayment({
+    await expect(createDriverPixPayment({
       db,
       request: { auth: { uid: 'moto1' }, data: { purpose: 'driver_subscription', idempotencyKey: 'idem-moto-0001' } },
       context: ctx,
       clock,
       adapter,
-    });
-    await createDriverPixPayment({
+    })).rejects.toMatchObject({ code: 'APP_UPDATE_REQUIRED' });
+    await expect(createDriverPixPayment({
       db,
       request: { auth: { uid: 'car1' }, data: { purpose: 'driver_subscription', idempotencyKey: 'idem-car-00001' } },
       context: ctx,
       clock,
       adapter,
-    });
-
-    expect(adapter.createCalls[0].amountCentavos).toBe(990); // moto
-    expect(adapter.createCalls[1].amountCentavos).toBe(1990); // car
-    // Same idempotency key is forwarded to the provider.
-    expect(adapter.createCalls[0].idempotencyKey).toBe('idem-moto-0001');
+    })).rejects.toMatchObject({ code: 'APP_UPDATE_REQUIRED' });
+    expect(adapter.createCalls).toHaveLength(0);
+    expect(countCollection(db, C.PAYMENT_REQUESTS)).toBe(0);
   });
 
-  it('T3: promotions block unnecessary subscription and wallet payments', async () => {
+  it('T3: the commission-free window does not require a wallet payment', async () => {
     const db = makeFakeFirestore();
     const clock = fixedClock(T0);
     const future = T0 + 30 * DAY_MS;
-    // Founder covered by subscriptionFreeUntil + commissionFreeUntil.
+    // Every approved driver receives the same fixed commission window.
     seedDriver(db, 'founder', {
       verificationStatus: 'approved',
       approvalNumber: 1,
       founderEligible: true,
-      subscriptionFreeUntil: future,
       commissionFreeUntil: future,
     });
-    // Non-founder #101+ still inside the 60-day window with grace rides remaining.
+    // Non-founder #101+ remains in the 60-day window, regardless of ride count.
     seedDriver(db, 'newbie', {
       verificationStatus: 'approved',
       approvalNumber: 101,
       approvedAtMs: T0 - 30 * DAY_MS,
       founderEligible: false,
       commissionFreeUntil: future,
-      freeRideCountUsed: 2,
+      freeRideCountUsed: 5,
     });
     const adapter = makeAdapter();
-
-    await expect(
-      createDriverPixPayment({
-        db,
-        request: { auth: { uid: 'founder' }, data: { purpose: 'driver_subscription', idempotencyKey: 'idem-f-0000001' } },
-        context: ctx,
-        clock,
-        adapter,
-      })
-    ).rejects.toMatchObject({ code: 'PAYMENT_NOT_REQUIRED' });
 
     await expect(
       createDriverPixPayment({
@@ -177,7 +162,7 @@ describe('payments — creation', () => {
     await expect(
       createDriverPixPayment({
         db,
-        request: { auth: { uid: 'newbie' }, data: { purpose: 'driver_subscription', idempotencyKey: 'idem-n-0000001' } },
+        request: { auth: { uid: 'newbie' }, data: { purpose: 'wallet_topup', idempotencyKey: 'idem-n-0000001', amountCentavos: 1000 } },
         context: ctx,
         clock,
         adapter,
@@ -288,7 +273,7 @@ describe('payments — webhook verification & application', () => {
     expect(countCollection(db, C.WALLET_TRANSACTIONS)).toBe(1); // credited once
   });
 
-  it('T8: paid subscription activates once and preserves commissionFreeUntil', async () => {
+  it('T8: a historical paid plan triggers review without changing commission dates', async () => {
     const db = makeFakeFirestore();
     const clock = fixedClock(T0);
     const commissionFreeUntil = T0 + 999;
@@ -310,13 +295,16 @@ describe('payments — webhook verification & application', () => {
         headers: signedHeaders('MP-p8', SECRET), query: {}, body: { data: { id: 'MP-p8' } },
       });
     await call();
-    const expiryAfterFirst = db._store.get('drivers/d1').subscriptionExpiresAt;
     await call();
 
-    expect(db._store.get('drivers/d1').subscriptionActive).toBe(true);
-    expect(db._store.get('drivers/d1').subscriptionExpiresAt).toBe(expiryAfterFirst); // no double-extend
+    expect(db._store.get('drivers/d1').subscriptionActive).toBe(false);
+    expect(db._store.get('drivers/d1').subscriptionExpiresAt).toBeUndefined();
     expect(db._store.get('drivers/d1').commissionFreeUntil).toBe(commissionFreeUntil); // preserved
-    expect(countCollection(db, C.SUBSCRIPTION_PAYMENTS)).toBe(1);
+    expect(db._store.get('paymentRequests/p8')).toMatchObject({
+      status: 'manual_review',
+      manualReviewReason: 'legacy_paid_plan_requires_resolution',
+    });
+    expect(countCollection(db, 'auditLogs')).toBe(1);
   });
 
   it('T9: a refund after application becomes manual_review (no money removed)', async () => {

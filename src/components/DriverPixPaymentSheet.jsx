@@ -1,5 +1,5 @@
 // DriverPixPaymentSheet
-// Minimal real-payment UI for a Mercado Pago Pix charge (subscription or wallet
+// Minimal real-payment UI for a Mercado Pago Pix wallet top-up.
 // top-up). Shows the amount, the QR image when available, the Pix
 // copia-e-cola value (selectable, with a copy action), the expiration, and the
 // PT-BR status. Polls the backend for status and stops on a final status.

@@ -4,7 +4,6 @@
 
 const { approveDriver } = require('../drivers/approveDriver');
 const { rejectDriver, blockDriver, unblockDriver } = require('../drivers/moderateDriver');
-const { activateSubscription } = require('../drivers/activateSubscription');
 const { fixedClock } = require('../time/clock');
 const { makeFakeFirestore } = require('./helpers/fakeFirestore');
 const C = require('../drivers/constants');
@@ -171,13 +170,11 @@ describe('secure driver domain — approval / founder', () => {
     expect(first).toMatchObject({ approvalNumber: 1, founderEligible: true, founderNumber: 1 });
     expect(hundredth).toMatchObject({ approvalNumber: 100, founderEligible: true, founderNumber: 100 });
     expect(hundredFirst).toMatchObject({ approvalNumber: 101, founderEligible: false, founderNumber: null });
-    // #101+ are not founders and get no free subscription, but still receive the
-    // global 60-day launch window at 0% commission from approval.
+    // #101+ keep the same 60-day commission window without a plan.
     expect(hundredFirst.commissionFreeUntil).toBe(T0 + C.FREE_PERIOD_DAYS * C.DAY_MS);
-    expect(hundredFirst.subscriptionFreeUntil).toBeNull();
   });
 
-  it('T2: moto and car share one city counter; different cities are independent', async () => {
+  it('T2: moto, car and future cities share the first 100 founder slots', async () => {
     const db = makeFakeFirestore();
     seedAdmin(db);
     const clock = fixedClock(T0);
@@ -191,7 +188,8 @@ describe('secure driver domain — approval / founder', () => {
 
     expect(aMoto.approvalNumber).toBe(1);
     expect(aCar.approvalNumber).toBe(2); // shared A counter across vehicle types
-    expect(bMoto.approvalNumber).toBe(1); // independent B counter
+    expect(bMoto.approvalNumber).toBe(3); // one global counter
+    expect(db._store.get('counters/HORIZONTE_CE_BR').approvedCount).toBe(3);
   });
 
   it('T3: repeated approval does not increment the counter twice', async () => {
@@ -209,6 +207,23 @@ describe('secure driver domain — approval / founder', () => {
     expect(countAudits(db)).toBe(1);
   });
 
+  it('does not restart the clock for a previously approved driver without a sequence number', async () => {
+    const db = makeFakeFirestore();
+    seedAdmin(db);
+    seedDriver(db, 'legacy-approved', {
+      verificationStatus: 'approved', approvedAtMs: T0 - C.DAY_MS,
+      commissionFreeUntil: T0 + 59 * C.DAY_MS,
+    });
+    const view = await approveDriver({
+      db, request: adminReq({ driverId: 'legacy-approved' }),
+      context: ctx, clock: fixedClock(T0 + 20 * C.DAY_MS),
+    });
+    expect(view.approvedAtMs).toBe(T0 - C.DAY_MS);
+    expect(db._store.get('drivers/legacy-approved').commissionFreeUntil)
+      .toBe(T0 + 59 * C.DAY_MS);
+    expect(db._store.get('counters/HORIZONTE_CE_BR')).toBeUndefined();
+  });
+
   it('T4: reapproval preserves approvedAt, founderNumber and benefit dates', async () => {
     const db = makeFakeFirestore();
     seedAdmin(db);
@@ -221,7 +236,6 @@ describe('secure driver domain — approval / founder', () => {
     expect(second.approvedAtMs).toBe(first.approvedAtMs);
     expect(second.founderNumber).toBe(first.founderNumber);
     expect(second.commissionFreeUntil).toBe(first.commissionFreeUntil);
-    expect(second.subscriptionFreeUntil).toBe(first.subscriptionFreeUntil);
     expect(first.commissionFreeUntil).toBe(T0 + C.FREE_PERIOD_DAYS * C.DAY_MS);
   });
 });
@@ -266,73 +280,5 @@ describe('secure driver domain — authorization & moderation', () => {
     expect(rejected.verificationStatus).toBe('rejected');
     expect(rejected.approvedAtMs).toBe(approved.approvedAtMs);
     expect(rejected.founderNumber).toBe(approved.founderNumber);
-  });
-});
-
-describe('secure driver domain — manual subscription', () => {
-  it('T7: renewal extends from expiry, expired starts from now, price is fixed by vehicle', async () => {
-    const db = makeFakeFirestore();
-    seedAdmin(db);
-    const clock = fixedClock(T0);
-    // Active moto subscription -> extend from current expiry.
-    seedDriver(db, 'act', {
-      vehicleType: 'moto',
-      subscriptionActive: true,
-      subscriptionExpiresAt: T0 + 10 * C.DAY_MS,
-    });
-    const renew = await activateSubscription({
-      db,
-      request: adminReq({ driverId: 'act', idempotencyKey: 'sub-renew-000001' }),
-      context: ctx,
-      clock,
-    });
-    expect(renew.priceCentavos).toBe(C.MOTO_SUBSCRIPTION_CENTAVOS);
-    expect(renew.subscriptionExpiresAt).toBe(T0 + 10 * C.DAY_MS + C.SUBSCRIPTION_DURATION_DAYS * C.DAY_MS);
-    expect(renew.extendedFromActive).toBe(true);
-
-    // Expired car subscription -> start from now, car price.
-    seedDriver(db, 'exp', {
-      vehicleType: 'car',
-      subscriptionActive: true,
-      subscriptionExpiresAt: T0 - C.DAY_MS,
-    });
-    const fresh = await activateSubscription({
-      db,
-      request: adminReq({ driverId: 'exp', idempotencyKey: 'sub-fresh-000001' }),
-      context: ctx,
-      clock,
-    });
-    expect(fresh.priceCentavos).toBe(C.CAR_SUBSCRIPTION_CENTAVOS);
-    expect(fresh.subscriptionExpiresAt).toBe(T0 + C.SUBSCRIPTION_DURATION_DAYS * C.DAY_MS);
-    expect(fresh.extendedFromActive).toBe(false);
-  });
-
-  it('T8: subscription idempotency — single audit, no double-extend, commissionFreeUntil unchanged', async () => {
-    const db = makeFakeFirestore();
-    seedAdmin(db);
-    const clock = fixedClock(T0);
-    seedDriver(db, 'd1');
-    await approveDriver({ db, request: adminReq({ driverId: 'd1' }), context: ctx, clock });
-    const commissionBefore = db._store.get('drivers/d1').commissionFreeUntil;
-    const auditsAfterApproval = countAudits(db);
-
-    const key = 'sub-idem-000001';
-    const first = await activateSubscription({
-      db,
-      request: adminReq({ driverId: 'd1', idempotencyKey: key }),
-      context: ctx,
-      clock,
-    });
-    const replay = await activateSubscription({
-      db,
-      request: adminReq({ driverId: 'd1', idempotencyKey: key }),
-      context: ctx,
-      clock,
-    });
-
-    expect(replay.subscriptionExpiresAt).toBe(first.subscriptionExpiresAt); // no double extend
-    expect(countAudits(db)).toBe(auditsAfterApproval + 1); // exactly one activation audit
-    expect(db._store.get('drivers/d1').commissionFreeUntil).toBe(commissionBefore); // untouched
-    expect(db._store.get('drivers/d1').subscriptionPaymentMode).toBe('manual_admin');
   });
 });
