@@ -20,8 +20,9 @@ La politique figée à l'acceptation de la course conserve `policyVersion`, `app
 
 1. Exécuter les tests et l'audit en lecture seule des anciens paiements encaissés, y compris les profils ayant une activation manuelle. Rapprocher les reçus Pix manuels et les relevés bancaires ; traiter chaque cas avec une décision humaine vérifiable.
    Vérifier aussi que le compteur des approbations correspond aux chauffeurs déjà approuvés avant toute ouverture d'une nouvelle zone.
-2. Publier la nouvelle AAB et confirmer sa disponibilité sur Google Play.
-3. Augmenter ensuite la version minimale obligatoire dans la configuration serveur. Les anciens chauffeurs voient un message de mise à jour et ouvrent Google Play. Leur session Firebase est conservée.
-4. Vérifier sur Android le devis passager, le premier et le 101e chauffeur, les frontières du jour 60, l'annulation et le paiement.
+2. Après autorisation et recette, déployer les nouvelles Functions et règles Firestore avant la nouvelle AAB : l'ancienne version passager reste compatible pendant la transition, et un ancien chauffeur ne peut plus être facturé pour l'offre supprimée. Le devis sécurisé doit déjà répondre avant l'arrivée de la nouvelle application.
+3. Publier la nouvelle AAB et confirmer sa disponibilité sur Google Play. Vérifier la connexion aux comptes existants et le devis côté passager.
+4. Ensuite seulement, activer l'obligation de devis côté serveur avec `set-required-passenger-quote.js`, puis relever le build chauffeur minimum. Les anciens clients reçoivent une invitation à mettre à jour ; une ancienne version passager ne peut plus créer de course sans prix affiché.
+5. Vérifier sur Android le devis passager, le premier et le 101e chauffeur, les frontières du jour 60, l'annulation et le paiement.
 
 Aucun changement de build minimal ni déploiement ne fait partie de cette modification de code.

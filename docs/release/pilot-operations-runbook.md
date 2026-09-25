@@ -17,13 +17,15 @@ Verify: `npm run verify:firebase:dev`.
 
 ## Release order for the new commercial rule
 
-1. Review the changed Firestore rules and enable Firestore TTL on `rideQuotes.expiresAt` so unused three-minute quotes are removed automatically. Verify the shared founder counter against approved drivers.
+1. Review the changed Firestore rules and enable Firestore TTL on `rideQuotes.expiresAt`: unused quotes expire after three minutes; consumed quotes remain for 24 hours to recover a lost confirmation response. Verify the shared founder counter against approved drivers.
 2. After access to the selected environment is authorized, run the read-only audit:
    `node scripts/release/audit-legacy-paid-plans.js --project-id=PROJECT_ID`.
    Exit code 2 lists opaque payment and driver IDs requiring provider verification or a documented human decision. Check manual Pix receipts and bank statements too: old admin activations may have no payment record. Refund or record `legacyResolutionReviewedAtMs` on the relevant payment/driver document with an audit trail before clearing the gate. Do not reset the driver's commission clock.
-3. Publish the prepared `1.0.14` AAB (Android versionCode `19`) and confirm it is available on Google Play. Verify that an updated driver opens their existing account.
-4. Only then raise the mandatory minimum driver build to `19` with the existing build-policy script. The current code intentionally leaves the enforced build minimum unchanged.
-5. Test an older build: it cannot create a plan Pix charge; it sees the update message and reaches Google Play. Confirm the 60-day date remains unchanged after updating.
+3. After validation and deployment authorization, deploy the new Functions and Firestore rules first. The backend exposes the quote callables, rejects old plan charges and still accepts legacy passenger requests while `requirePassengerQuote` is absent or false. Verify these behaviors before publishing the mobile build.
+4. Publish the prepared `1.0.14` AAB (Android versionCode `19`) and confirm it is available on Google Play. Verify that updated passengers can quote and confirm a ride, and updated drivers open their existing accounts.
+5. Once passengers can obtain the updated app, require a server quote for **every** newly created ride: run `node functions/scripts/set-required-passenger-quote.js --project PROJECT_ID --enforce true` in the authorized environment (production also requires `CONFIRM_PRODUCTION_DEPLOY=DRIVELOCAL_PRODUCTION`). Old passenger builds then receive a Play update message. Use `--enforce false` to roll back this switch if needed.
+6. Only after Google Play offers build `19`, raise the mandatory minimum driver build to `19` with the existing build-policy script. This branch leaves both production switches unchanged.
+7. Test older builds: no new plan Pix charge is created; the driver sees the Play update message. An old passenger build cannot create a ride once the quote requirement is enabled. Confirm the driver's original 60-day date survives the update.
 
 ## Safe log searches (Cloud Logging)
 - By `traceId` (one per operation chain).
