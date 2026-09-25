@@ -19,7 +19,7 @@ describe('support client catalog', () => {
       'driver_or_vehicle_mismatch',
       'passenger_no_show_review',
       'wallet_topup_issue',
-      'subscription_issue',
+      'previous_payment_issue',
       'document_review_issue',
       'account_access_issue',
       'technical_error',
@@ -33,7 +33,7 @@ describe('support client catalog', () => {
     ]);
     expect(supportCategoryOptions('driver', false).map((item) => item.code)).toEqual([
       'wallet_topup_issue',
-      'subscription_issue',
+      'previous_payment_issue',
       'document_review_issue',
       'account_access_issue',
       'technical_error',
@@ -48,6 +48,7 @@ describe('support client catalog', () => {
 
   it('provides stable labels and short references', () => {
     expect(supportCategoryLabel('fare_payment_issue')).toBe('Problema com o pagamento da corrida');
+    expect(supportCategoryLabel('subscription_issue')).toBe('Pagamento anterior');
     expect(supportStatusLabel('in_review')).toBe('Em análise');
     expect(supportResolutionLabel('safety_escalated')).toBe('Caso de segurança encaminhado');
     expect(shortSupportReference('short-id')).toBe('short-id');

@@ -28,6 +28,17 @@ describe('admin alert policy', () => {
       status: 'resolved',
       categoryCode: 'safety_concern',
     })).toBeNull();
+
+    // New requests and unresolved tickets from old builds both need review.
+    for (const categoryCode of ['previous_payment_issue', 'subscription_issue']) {
+      expect(alertDescriptor(SOURCE_TYPE.SUPPORT_TICKET, {
+        status: 'open', categoryCode, ticketId: 'ticket-payment',
+      })).toMatchObject({
+        alertType: 'support_financial_issue',
+        targetId: 'ticket-payment',
+        reasonCode: categoryCode,
+      });
+    }
   });
 
   it('maps disputes, manual review and critical risk without identity fields', () => {

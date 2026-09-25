@@ -46,6 +46,8 @@ const STATUS_TRANSITIONS = Object.freeze({
 const SUPPORT_FINANCIAL_CATEGORIES = new Set([
   'fare_payment_issue',
   'wallet_topup_issue',
+  'previous_payment_issue',
+  // Existing tickets retain their old code until each historical case is resolved.
   'subscription_issue',
 ]);
 

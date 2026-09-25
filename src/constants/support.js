@@ -62,7 +62,7 @@ export const SUPPORT_CATEGORIES = Object.freeze([
     requiresRide: false,
   }),
   Object.freeze({
-    code: 'subscription_issue',
+    code: 'previous_payment_issue',
     label: 'Pagamento anterior',
     roles: ['driver'],
     requiresRide: false,
@@ -95,6 +95,8 @@ export function supportCategoryOptions(role, hasRide) {
 }
 
 export function supportCategoryLabel(categoryCode) {
+  // Tickets created by older builds remain readable after the category retires.
+  if (categoryCode === 'subscription_issue') return 'Pagamento anterior';
   return SUPPORT_CATEGORIES.find((category) => category.code === categoryCode)?.label
     || 'Solicitação de suporte';
 }
