@@ -22,35 +22,43 @@ function positiveInteger(value) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
 }
 
-export function isFounderDriver(driver = {}) {
-  const number = positiveInteger(driver.approvalNumber);
+function driverProfile(value) {
+  return value && typeof value === 'object' ? value : {};
+}
+
+export function isFounderDriver(driver) {
+  const profile = driverProfile(driver);
+  const number = positiveInteger(profile.approvalNumber);
   if (number > 0) return number <= 100;
-  const legacyNumber = positiveInteger(driver.founderNumber);
-  return driver.founderEligible === true && legacyNumber > 0 && legacyNumber <= 100;
+  const legacyNumber = positiveInteger(profile.founderNumber);
+  return profile.founderEligible === true && legacyNumber > 0 && legacyNumber <= 100;
 }
 
-export function approvalTimeMs(driver = {}) {
-  return toMillis(driver.approvedAtMs) || toMillis(driver.approvedAt);
+export function approvalTimeMs(driver) {
+  const profile = driverProfile(driver);
+  return toMillis(profile.approvedAtMs) || toMillis(profile.approvedAt);
 }
 
-export function freePeriodUntilMs(driver = {}) {
-  const approvedAtMs = approvalTimeMs(driver);
+export function freePeriodUntilMs(driver) {
+  const profile = driverProfile(driver);
+  const approvedAtMs = approvalTimeMs(profile);
   if (approvedAtMs > 0) return approvedAtMs + COMMISSION_FREE_DAYS * DAY_MS;
-  return toMillis(driver.commissionFreeUntil);
+  return toMillis(profile.commissionFreeUntil);
 }
 
-export function resolveCommercialPolicy(driver = {}, nowValue = Date.now()) {
+export function resolveCommercialPolicy(driver, nowValue = Date.now()) {
+  const profile = driverProfile(driver);
   const nowMs = toMillis(nowValue) || Number(nowValue) || Date.now();
-  const freeUntilMs = freePeriodUntilMs(driver);
-  const freePeriodActive = driver.verificationStatus === 'approved' && freeUntilMs > nowMs;
-  const vehicleType = ['moto', 'car'].includes(driver.vehicleType) ? driver.vehicleType : null;
+  const freeUntilMs = freePeriodUntilMs(profile);
+  const freePeriodActive = profile.verificationStatus === 'approved' && freeUntilMs > nowMs;
+  const vehicleType = ['moto', 'car'].includes(profile.vehicleType) ? profile.vehicleType : null;
   const standardCommissionBps = Number(
-    getVehiclePricing(driver.serviceAreaId, vehicleType)?.normalCommissionBps || 0
+    getVehiclePricing(profile.serviceAreaId, vehicleType)?.normalCommissionBps || 0
   );
   const commissionBps = freePeriodActive ? 0 : standardCommissionBps;
   return Object.freeze({
     policyVersion: COMMERCIAL_POLICY_VERSION,
-    founder: isFounderDriver(driver),
+    founder: isFounderDriver(profile),
     vehicleType,
     freePeriodUntilMs: freeUntilMs,
     freePeriodActive,
