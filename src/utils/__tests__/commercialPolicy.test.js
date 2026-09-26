@@ -2,7 +2,10 @@ const {
   COMMERCIAL_POLICY_VERSION,
   resolveCommercialPolicy,
 } = require('../commercialPolicy');
-const { commissionDisplay } = require('../driverCockpit');
+const {
+  commissionDisplay,
+  commissionFreeUntilMs,
+} = require('../driverCockpit');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const APPROVED_AT = Date.UTC(2026, 6, 1, 12, 0, 0);
@@ -17,6 +20,19 @@ function driver(overrides = {}) {
 }
 
 describe('mobile commercial policy mirror', () => {
+  it('keeps the driver cockpit render-safe while the profile is still loading', () => {
+    const policy = resolveCommercialPolicy(null, APPROVED_AT);
+
+    expect(policy.freePeriodActive).toBe(false);
+    expect(policy.commissionBps).toBe(0);
+    expect(commissionDisplay(null, APPROVED_AT)).toMatchObject({
+      mode: 'standard',
+      label: '0%',
+      bps: 0,
+    });
+    expect(commissionFreeUntilMs(null)).toBe(0);
+  });
+
   it('grants #100 and #101 the same 60 days, regardless of historical fields', () => {
     for (const approvalNumber of [100, 101]) {
       const profile = driver({
