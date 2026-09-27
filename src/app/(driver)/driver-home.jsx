@@ -51,6 +51,7 @@ import {
 import { deriveDriverCockpitSummary } from '../../utils/driverCockpitSummary';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 import { remoteWorkSessionRecoverable } from '../../utils/driverWorkSession';
+import { useDriverAvailability } from '../../contexts/DriverAvailabilityContext';
 
 const REMOTE_RECONCILIATION_GRACE_MS = 12_000;
 
@@ -71,12 +72,11 @@ function Line({ children, tone = 'muted' }) {
   return <Text style={[styles.line, { color }]}>{children}</Text>;
 }
 
-function WorkStatusTitle({ online }) {
-  return (
-    <Text style={[styles.workTitle, { color: online ? colors.success : colors.danger }]}>
-      {online ? '🟢 Você está disponível' : '🔴 Você está indisponível'}
-    </Text>
-  );
+function WorkStatusTitle({ presentation }) {
+  const color = presentation.tone === 'success' ? colors.successText
+    : presentation.tone === 'warning' ? colors.warning
+      : presentation.tone === 'danger' ? colors.danger : colors.textMuted;
+  return <Text accessibilityLiveRegion="polite" style={[styles.workTitle, { color }]}>{presentation.title}</Text>;
 }
 
 function confirmTrackingDisclosure() {
@@ -131,6 +131,7 @@ function snapshotNeedsServerConfirmation(metadata = {}) {
 }
 
 export default function DriverHome() {
+  const dispatchState = useDriverAvailability();
   const router = useRouter();
   const activationInProgress = useRef(false);
   const lastCockpitTrace = useRef(null);
@@ -150,7 +151,7 @@ export default function DriverHome() {
       return undefined;
     }
 
-    getDriver(uid)
+    getDriver(uid, { serverOnly: true })
       .then(async (data) => {
         if (!active) return;
         setDriver(data);
@@ -634,7 +635,8 @@ export default function DriverHome() {
           <>
             <DriverCockpitProfileCard
               driver={driver}
-              online={isAvailable}
+              online={dispatchState.visibility.ready}
+              availabilityPresentation={dispatchState.presentation}
               onPhotoPress={openDriverPhoto}
             />
 
@@ -661,17 +663,8 @@ export default function DriverHome() {
             ) : null}
 
             <AppCard style={styles.availabilityCard}>
-              <WorkStatusTitle online={isAvailable} />
-              <Line tone="text">
-                {isAvailable ? 'Buscando corridas próximas.' : 'Comece quando estiver pronto para receber ofertas.'}
-              </Line>
-              <Line tone={isAvailable && trackingActive ? 'success' : 'muted'}>
-                {isAvailable
-                  ? trackingActive
-                    ? 'GPS de trabalho ativo.'
-                    : 'Verificando GPS de trabalho…'
-                  : 'Sua localização fica desligada enquanto você não trabalha.'}
-              </Line>
+              <WorkStatusTitle presentation={dispatchState.presentation} />
+              <Line tone="text">{dispatchState.presentation.body}</Line>
 
               <AppButton
                 title={isAvailable

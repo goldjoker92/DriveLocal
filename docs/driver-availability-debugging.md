@@ -12,8 +12,8 @@ A driver may receive a new offer only when all of these values agree:
 server driver.availabilityStatus = online
 server driver.availabilitySessionId = local availabilitySessionId
 server driver.locationAvailabilitySessionId = availabilitySessionId
-server availabilityUpdatedAt is less than 7 minutes old
-server locationUpdatedAt is usable for dispatch
+server availabilityUpdatedAt is at most 20 minutes old
+server locationUpdatedAt is at most 7 minutes old; GPS is bound to this session
 no activeRideId
 ride eligibility is valid
 ```
@@ -69,16 +69,17 @@ all local tracking was stopped.
 The Android foreground service asks for a time-driven sample every 60 seconds,
 even when the vehicle has not moved. Firestore does not receive every sample.
 The adaptive policy normally logs throttling, then publishes one heartbeat at
-approximately four minutes:
+approximately 2.5–3 minutes:
 
 ```text
 [DRIVER_LOCATION] publish.throttled        reason=unchanged
 [DRIVER_LOCATION] publish.succeeded        reason=heartbeat policyMode=online_idle
 ```
 
-The seven-minute server lease is a safety timeout, not a button timeout. A
-healthy idle driver stays available automatically because the four-minute
-heartbeat renews the lease.
+A seven-minute GPS deadline excludes new offers; the twenty-minute heartbeat
+lease and forty-five-minute abandonment window are separate. Heartbeats cannot
+refresh a GPS timestamp or bind an old position to a new session. A healthy idle
+driver publishes a position roughly every 2.5–3 minutes without touching a button.
 
 ## Normal stop-work sequence
 
@@ -184,7 +185,7 @@ atMs
 1. Log in as an approved driver. Confirm the initial red state.
 2. Press **Começar a trabalhar**. Confirm the exact normal sequence above.
 3. Leave the phone still, app backgrounded and screen off for at least 12 minutes.
-4. Confirm heartbeat publications around minutes 4 and 8 and confirm the driver
+4. Confirm heartbeat publications roughly every 2.5–3 minutes and confirm the driver
    still receives a new passenger request.
 5. Press **Parar de trabalhar** and confirm no later point is accepted.
 6. Go online again, create an offer, go offline and online again, then open the old
@@ -205,3 +206,55 @@ npm --prefix functions test
 
 Do not merge or deploy while either suite is red. Lint is intentionally outside
 this feature unless the repository CI explicitly makes it blocking.
+
+## Availability truth (build 22)
+
+The cockpit, profile badge and global banner use the same `driverDispatchVisibility`
+result. Its core eligibility is imported directly from the pure backend
+`functions/src/drivers/dispatchReadiness.js` policy. The mobile UI additionally
+requires acknowledged profile/config snapshots, its own matching local session,
+and a recent device diagnostic. Cached data is useful for display, never for a
+green availability claim.
+
+- 0–3 minutes: normal readiness, assuming all other gates pass.
+- After 3 minutes: warning and recovery action; no promise that rides are arriving.
+- GPS older than 7 minutes: excluded from new offers even with a fresh heartbeat.
+- Session heartbeat older than 20 minutes: excluded but still recoverable.
+- After 45 minutes without heartbeat: idle session can be closed transactionally.
+- An accepted ride bypasses this cleanup and keeps its own tracking.
+
+The monitor checks up to 100 online profiles per minute with a persistent cursor.
+It records one incident and one personal notification (60-second TTL, 15-minute
+cooldown), without waiting for passenger demand. It re-reads the exact session
+inside a transaction. FCM processing drops alerts for recovered/replaced/stopped
+sessions and active rides. A disconnected phone cannot be notified immediately.
+
+Never interpret the raw `online` string as the number of drivers who can receive
+a ride.
+
+### Trace one interruption
+
+| Event | Meaning / useful fields |
+| --- | --- |
+| `visibility.changed` | Mobile state/reason, `atMs`; emitted only when the visible state changes. |
+| `recovery.started` | Explicit verification began; keep its `traceId`. |
+| `recovery.succeeded` | Same trace: `ready` after fresh GPS + server read + device check, or `active_ride` when ride tracking takes priority. |
+| `recovery.failed` | Same trace, stable `reason` code and `durationMs`; no raw error message. |
+| `recovery.ui_timeout` | UI waited 20 seconds. The native/server attempt may still be pending; another tap joins that attempt. |
+| `driver.availability.interrupted` | Committed server interruption: `driverIdHash`, `sessionIdHash`, `reason`, `notified`, `traceId`. |
+| `driver.availability.recovered` | Server sees usable availability again. |
+| `driver.availability.closed` | Server closed the exact idle session after abandonment or mandatory-update enforcement. |
+| `driver.availability_monitor.completed` | Per-run scanned/interrupted/recovered/closed/notified/failed counts. |
+| `driver.availability_monitor.failed` / `ride.dispatch.session_cleanup_failed` | Failure code and hashed driver correlation. |
+
+Transition logs are written **after** the Firestore transaction commits, not
+inside its retried callback. Stable healthy profiles do not generate one event
+per minute. Server identifiers are one-way SHA-256 prefixes; client recovery logs
+contain no account/session ID, address, GPS coordinates, phone or Pix key.
+
+For a complaint, first identify the UI `state/reason`, then check the committed
+server transition and the monitor summary. If readiness is healthy, continue to
+the existing ride trace: proximity/wave selection, offer creation, FCM result,
+accept/refuse/expire. FCM acceptance is not proof that a human saw the notification.
+
+Detailed scenario and UX review: `docs/release/driver-availability-pr-87-review.md`.

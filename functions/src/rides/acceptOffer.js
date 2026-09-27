@@ -16,7 +16,7 @@ const { writeAuditLog } = require('../audit/auditLog');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const { evaluateRideEligibility } = require('../drivers/eligibility');
 const { buildCommercialPolicySnapshot } = require('../drivers/commercialPolicy');
-const { availabilityAgeMs, hasMatchingAvailabilitySession } = require('./candidates');
+const { availabilityAgeMs, locationAgeMs, driverLocation, hasMatchingAvailabilitySession } = require('./candidates');
 const { safeAcceptanceView } = require('./safeViews');
 const C = require('./constants');
 
@@ -180,6 +180,12 @@ async function acceptDriverOfferSecure({ db, request, context, clock }) {
     if (driver.activeRideId) {
       throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
         internalMessage: `driver ${driverId} already on ride ${driver.activeRideId}`,
+      });
+    }
+    if (!driverLocation(driver) || locationAgeMs(driver, nowMs) > C.LOCATION_DISPATCH_MAX_AGE_MS) {
+      throw new AppError(ERROR_CODES.DRIVER_NOT_ELIGIBLE, {
+        internalMessage: 'driver location is no longer usable for a new ride',
+        safeMetadata: { reason: 'STALE_DRIVER_LOCATION' },
       });
     }
     const evalResult = evaluateRideEligibility(driver, clock);

@@ -8,9 +8,9 @@ import { spacing, radius } from '../constants/spacing';
 import { typography, fontFamily } from '../constants/typography';
 
 const TONES = {
-  success: { bg: colors.successBg, fg: colors.success },
+  success: { bg: colors.successBg, fg: colors.successText },
   warning: { bg: colors.warningBg, fg: colors.warning },
-  danger: { bg: colors.dangerBg, fg: colors.danger },
+  danger: { bg: colors.dangerBg, fg: colors.dangerText },
   neutral: { bg: colors.primaryTint, fg: colors.primary },
 };
 

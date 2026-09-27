@@ -250,13 +250,15 @@ describe('platform onboarding -> real-address car rides -> commission lifecycle'
       locationUpdatedAtMs: clock.now(),
       subscriptionActive: false,
       subscriptionStatus: 'required',
-      walletBalanceCentavos: 0,
-      walletAvailableCentavos: 0,
+      walletBalanceCentavos: 2000,
+      walletAvailableCentavos: 2000,
       walletHeldCentavos: 0,
     }, { merge: true });
 
     const second = await requestRide(db, clock, routing, 'post-promo-0002');
     const secondOfferId = `${second.rideId}_${DRIVER_ID}`;
+    // The offer was valid; funds disappear before the acceptance transaction.
+    await db.collection(DRIVER_C.DRIVERS).doc(DRIVER_ID).set({ walletAvailableCentavos: 0 }, { merge: true });
     await expect(acceptDriverOfferSecure({
       db,
       request: req(DRIVER_ID, {

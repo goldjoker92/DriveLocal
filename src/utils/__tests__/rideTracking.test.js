@@ -1,6 +1,7 @@
 import {
   ACTIVE_TRACKING_RIDE_STATUSES,
   isTrackingLocationFresh,
+  isRecentNativeLocationSample,
   isValidTrackingPoint,
   normalizeTrackingPoint,
   safeTrackingPayload,
@@ -9,6 +10,13 @@ import {
 } from '../rideTracking';
 
 describe('ride live tracking helpers', () => {
+  it('does not publish delayed native callbacks as fresh locations', () => {
+    const now = 1_800_000_000_000;
+    expect(isRecentNativeLocationSample({ timestamp: now - 30_000 }, now)).toBe(true);
+    expect(isRecentNativeLocationSample({ timestamp: now - 10 * 60_000 }, now)).toBe(false);
+    expect(isRecentNativeLocationSample({ timestamp: now + 60_000 }, now)).toBe(false);
+    expect(isRecentNativeLocationSample({}, now)).toBe(false);
+  });
   it('accepts valid lat/lng and latitude/longitude shapes', () => {
     expect(isValidTrackingPoint({ lat: -4.1, lng: -38.5 })).toBe(true);
     expect(isValidTrackingPoint({ latitude: -4.1, longitude: -38.5 })).toBe(true);

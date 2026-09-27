@@ -168,6 +168,7 @@ async function setDriverAvailability({ db, request, context, clock }) {
           availabilityClientUpdatedAtMs: nowMs,
           availabilityClientUpdatedAt: ts(),
           availabilityClosedReason: null,
+          availabilityHealth: null,
           availabilityRequiredBuildNumber: null,
           updatedAt: ts(),
         };
@@ -192,6 +193,7 @@ async function setDriverAvailability({ db, request, context, clock }) {
         availabilityClientUpdatedAtMs: nowMs,
         availabilityClientUpdatedAt: ts(),
         availabilityClosedReason: null,
+        availabilityHealth: null,
         availabilityRequiredBuildNumber: null,
         // A new work session must publish a new point before dispatch can use it.
         locationAvailabilitySessionId: null,
@@ -231,6 +233,8 @@ async function setDriverAvailability({ db, request, context, clock }) {
 
     const update = {
       availabilityStatus: 'offline',
+      availabilityClosedReason: null,
+      availabilityHealth: null,
       availabilitySessionId: null,
       availabilitySessionEndedAtMs: nowMs,
       availabilitySessionEndedAt: ts(),

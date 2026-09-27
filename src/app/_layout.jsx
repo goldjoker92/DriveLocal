@@ -14,6 +14,7 @@ import AppErrorBoundary from '../components/AppErrorBoundary';
 import AuthSessionGate from '../components/AuthSessionGate';
 import NetworkRecoveryGuard from '../components/NetworkRecoveryGuard';
 import DriverDeviceHealthGuard from '../components/DriverDeviceHealthGuard';
+import OperationalAlertsViewport from '../components/OperationalAlertsViewport';
 import DriverPassengerWaitGuard from '../components/DriverPassengerWaitGuard';
 import RideQuickMessagesGuard from '../components/RideQuickMessagesGuard';
 import AccountPrivacyShortcut from '../components/AccountPrivacyShortcut';
@@ -78,7 +79,7 @@ export default function RootLayout() {
         // Validate the server lease globally, not only while a driver screen is open.
         let remoteDriver;
         try {
-          remoteDriver = await getDriver(authenticatedUid);
+          remoteDriver = await getDriver(authenticatedUid, { serverOnly: true });
         } catch (error) {
           console.warn('[AUTH_TRACKING_CLEANUP] remote_session_validation_failed', {
             scope: 'auth_tracking_cleanup',
@@ -166,10 +167,12 @@ export default function RootLayout() {
               style={{ flex: 1, backgroundColor: colors.background }}
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             >
-              {/* Never replays actions automatically; restores only an existing ride. */}
-              <NetworkRecoveryGuard route={pathname} />
-              {/* Silent when healthy; visible only on operational driver routes. */}
-              <DriverDeviceHealthGuard route={pathname} />
+              <OperationalAlertsViewport testID="device-alerts-viewport">
+                {/* Never replays actions automatically; restores only an existing ride. */}
+                <NetworkRecoveryGuard route={pathname} />
+                {/* Silent when healthy; visible only on operational driver routes. */}
+                <DriverDeviceHealthGuard route={pathname} />
+              </OperationalAlertsViewport>
               {/* Visible only after the driver has announced arrival at the pickup. */}
               <DriverPassengerWaitGuard route={pathname} />
               {/* Server-catalogued messages only; no free text or contact exposure. */}

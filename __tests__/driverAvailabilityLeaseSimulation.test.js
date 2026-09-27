@@ -23,6 +23,7 @@ function baseDriver() {
   return {
     verificationStatus: 'approved',
     isBlocked: false,
+    walletAvailableCentavos: 5000,
     serviceAreaId: 'HORIZONTE_CE_BR',
     vehicleType: 'moto',
     availabilityStatus: 'online',

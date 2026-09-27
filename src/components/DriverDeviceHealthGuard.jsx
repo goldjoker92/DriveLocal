@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSegments } from 'expo-router';
 import {
   AppState,
   Linking,
@@ -24,6 +25,7 @@ import {
 } from '../services/driverLocationTracking';
 import { getRobotDriverState } from '../services/robotDriverEngine';
 import AppButton from './AppButton';
+import { publishDriverDeviceHealth } from '../services/driverDeviceHealthStore';
 
 const CHECK_INTERVAL_MS = 30_000;
 const AUTO_SUSPEND_CODES = new Set([
@@ -33,9 +35,6 @@ const AUTO_SUSPEND_CODES = new Set([
   'background_required',
   'notifications_permission_required',
   'notifications_settings_required',
-  'native_task_missing',
-  'location_unconfirmed',
-  'location_stale',
 ]);
 
 function isDriverOperationalRoute(route) {
@@ -106,7 +105,9 @@ function applyRobotSimulationTrackingSource(snapshot, session) {
 }
 
 export default function DriverDeviceHealthGuard({ route }) {
-  const relevantRoute = isDriverOperationalRoute(route);
+  const segments = useSegments();
+  // Pathnames omit route groups: keep diagnostics alive on wallet/profile too.
+  const relevantRoute = segments.includes('(driver)') || isDriverOperationalRoute(route);
   const [authenticated, setAuthenticated] = useState(Boolean(auth.currentUser));
   const [diagnostic, setDiagnostic] = useState(null);
   const [checking, setChecking] = useState(false);
@@ -160,6 +161,7 @@ export default function DriverDeviceHealthGuard({ route }) {
       }
 
       if (mounted.current) setDiagnostic(snapshot);
+      publishDriverDeviceHealth(auth.currentUser?.uid, snapshot, session?.availabilitySessionId);
       traceGuard('diagnostic.completed', {
         healthy: snapshot.healthy,
         blocking: snapshot.blocking,
@@ -181,15 +183,17 @@ export default function DriverDeviceHealthGuard({ route }) {
         const sessionId = session.availabilitySessionId || null;
         traceGuard('availability_suspension.started', {
           issueCode,
-          result: 'stopping_local_first',
+          result: 'confirming_server_stop',
         }, 'warn');
 
-        // Local tracking stops first so queued points cannot extend a broken work
-        // session. The server stop is best-effort; its seven-minute lease remains a
-        // final safety net if the network is unavailable.
-        await stopDriverOnlineTracking().catch(() => undefined);
+        // A ride may have been accepted since the diagnostic. The server checks
+        // activeRideId transactionally before we stop the idle native task.
         try {
           await stopDriverWorkSession(sessionId);
+          const current = await getDriverTrackingSession();
+          if (current?.availabilitySessionId === sessionId && !current.rideId) {
+            await stopDriverOnlineTracking();
+          }
           traceGuard('availability_suspension.succeeded', {
             issueCode,
             result: 'offline',
@@ -198,7 +202,7 @@ export default function DriverDeviceHealthGuard({ route }) {
           traceGuard('availability_suspension.remote_pending', {
             issueCode,
             reason: error?.code || error?.name || 'unknown',
-            result: 'local_tracking_stopped',
+            result: 'session_preserved_until_confirmed',
           }, 'warn');
         } finally {
           suspensionInFlight.current = false;
@@ -214,6 +218,7 @@ export default function DriverDeviceHealthGuard({ route }) {
 
       return snapshot;
     } catch (error) {
+      publishDriverDeviceHealth(auth.currentUser?.uid, null);
       traceGuard('diagnostic.failed', {
         reason: error?.code || error?.name || 'unknown',
       }, 'warn');
@@ -372,7 +377,7 @@ const styles = StyleSheet.create({
     fontFamily,
   },
   blockingText: {
-    color: colors.danger,
+    color: colors.dangerText,
   },
   warningText: {
     color: colors.warning,

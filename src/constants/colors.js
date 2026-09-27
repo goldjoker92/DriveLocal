@@ -22,10 +22,12 @@ export const colors = {
 
   // Status
   success: '#059669',
+  successText: '#047857',  // Readable green for small text on light status surfaces
   successBg: '#E7F7F0',
   warning: '#B45309',
   warningBg: '#FEF3C7',
   danger: '#DC2626',
+  dangerText: '#B91C1C',   // Readable red on pale error surfaces
   dangerBg: '#FEE2E2',
 
   // Misc

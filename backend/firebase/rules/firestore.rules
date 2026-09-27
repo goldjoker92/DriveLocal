@@ -245,9 +245,12 @@ service cloud.firestore {
       return [
         'location', 'locationAccuracyMeters', 'locationHeadingDegrees',
         'locationSpeedMps', 'locationUpdatedAtMs', 'locationUpdatedAt',
-        'locationAvailabilitySessionId',
-        'availabilityUpdatedAtMs', 'availabilityUpdatedAt'
+        'locationAvailabilitySessionId'
       ];
+    }
+
+    function driverHeartbeatFields() {
+      return ['availabilityUpdatedAtMs', 'availabilityUpdatedAt'];
     }
 
     function driverBuildProofFields() {
@@ -258,18 +261,15 @@ service cloud.firestore {
       ];
     }
 
-    // A driver may renew his own lease while the session is not abandoned. This
-    // window is 30 min, NOT the 7 min dispatch lease: dispatch skipping a driver
-    // whose last point is late is temporary, but refusing his next point would
-    // make the situation permanent — the app could never repair itself after a
-    // tunnel or an Android doze. Resurrection of a long-dead session is still
-    // impossible: the status must already be 'online', the session id must match,
-    // the point must be current, and dispatch closes abandoned sessions past the
-    // same 30 min (functions/src/rides/constants.js), which flips the status.
+    // A heartbeat keeps a shift recoverable for 45 minutes but never changes
+    // the GPS timestamp or binds a previous position to a newly opened session.
+    // Dispatch independently requires a session-bound GPS point <= 7 min old.
     function driverOperationalUpdateValid() {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       let locationChanged = changed.hasAny(driverLocationFields());
+      let heartbeatChanged = changed.hasAny(driverHeartbeatFields());
       let buildProofChanged = changed.hasAny(driverBuildProofFields());
+      let sessionRenewed = locationChanged || heartbeatChanged;
 
       return (!buildProofChanged || (
           request.resource.data.keys().hasAll(driverBuildProofFields()) &&
@@ -282,18 +282,25 @@ service cloud.firestore {
           request.resource.data.availabilityClientUpdatedAtMs is int &&
           request.resource.data.availabilityClientUpdatedAt == request.time
         )) &&
-        (!locationChanged || (
+        (!sessionRenewed || (
           resource.data.availabilityStatus == 'online' &&
           resource.data.availabilitySessionId is string &&
           resource.data.availabilitySessionId.size() >= 16 &&
-          resource.data.availabilityUpdatedAt > request.time - duration.value(30, 'm') &&
+          resource.data.availabilityUpdatedAt >= request.time - duration.value(45, 'm') &&
+          request.resource.data.availabilityUpdatedAtMs is int &&
+          request.resource.data.availabilityUpdatedAt == request.time &&
+          // Every GPS-free renewal must identify the exact current session.
+          (locationChanged || (
+            request.resource.data.availabilityClientSessionId == resource.data.availabilitySessionId &&
+            request.resource.data.availabilityClientUpdatedAt == request.time
+          ))
+        )) &&
+        (!locationChanged || (
           request.resource.data.locationAvailabilitySessionId == resource.data.availabilitySessionId &&
           request.resource.data.keys().hasAll(driverLocationFields()) &&
           pointValid(request.resource.data.location) &&
           request.resource.data.locationUpdatedAtMs is int &&
           request.resource.data.locationUpdatedAt == request.time &&
-          request.resource.data.availabilityUpdatedAtMs is int &&
-          request.resource.data.availabilityUpdatedAt == request.time &&
           (request.resource.data.locationAccuracyMeters == null || request.resource.data.locationAccuracyMeters is number) &&
           (request.resource.data.locationHeadingDegrees == null || request.resource.data.locationHeadingDegrees is number) &&
           (request.resource.data.locationSpeedMps == null || request.resource.data.locationSpeedMps is number)
