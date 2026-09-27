@@ -252,6 +252,13 @@ describe('progressive dispatch lifecycle', () => {
       distanceToPickupMeters: 400,
       data: { founderEligible: true, commissionFreeUntil: T0 + 100_000 },
     };
+    await db.collection(C.DRIVERS).doc(candidate.driverId).set({
+      ...candidate.data, verificationStatus: 'approved', availabilityStatus: 'online',
+      availabilitySessionId: candidate.availabilitySessionId,
+      locationAvailabilitySessionId: candidate.availabilitySessionId,
+      availabilityUpdatedAtMs: T0, locationUpdatedAtMs: T0,
+      location: { lat: -4.1, lng: -38.5 }, pixKey: 'driver@example.test', pixKeyType: 'email',
+    });
     const ride = {
       ...db._store.get(`${C.RIDE_REQUESTS}/${RIDE_ID}`),
       dispatchWaveIndex: 0,

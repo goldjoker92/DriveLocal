@@ -9,97 +9,26 @@ const { queryCandidateDrivers, selectEligibleDriversWithDiagnostics } = require(
 const { createTargetedOffers } = require('./offers');
 const C = require('./constants');
 
-/**
- * Closes work sessions abandoned long ago while the driver document still said
- * "online" (app killed, swiped away, or stopped by battery optimization).
- * Without this the driver keeps seeing "disponível" in his app while dispatch
- * skips him for hours, and the admin counters overstate live supply.
- *
- * A driver who is simply late publishing is NEVER closed here: he stays online,
- * his app republishes a point and he becomes dispatchable again on his own.
- *
- * Never called for a driver with an active ride: the selector rejects those
- * earlier, so an abandoned id can only belong to an idle driver. Best effort by
- * design — a failure here must never change the dispatch outcome.
- *
- * @param {{db:object, driverIds:Array<string>, context:object, base:object}} args
- * @returns {Promise<number>} number of sessions closed
- */
-async function closeAbandonedWorkSessions({ db, driverIds, context, base }) {
-  if (!Array.isArray(driverIds) || driverIds.length === 0) return 0;
+const { reconcileDriverAvailability } = require('../drivers/availabilityMonitor');
 
-  // Same field set as stopping a work session in drivers/availability.js, so a
-  // reconciled driver is indistinguishable from one who tapped "indisponível".
-  const update = {
-    availabilityStatus: 'offline',
-    availabilitySessionId: null,
-    availabilitySessionEndedAt: admin.firestore.FieldValue.serverTimestamp(),
-    availabilityUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    locationAvailabilitySessionId: null,
-    availabilityClosedReason: 'work_session_lease_expired',
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
-
-  try {
-    const batch = db.batch();
-    driverIds.forEach((driverId) => {
-      batch.set(db.collection(C.DRIVERS).doc(driverId), update, { merge: true });
-    });
-    await batch.commit();
-    logInfo(context, 'ride.dispatch.abandoned_work_sessions_closed', {
-      ...base,
-      closedCount: driverIds.length,
-      workSessionAbandonedMaxAgeMs: C.WORK_SESSION_ABANDONED_MAX_AGE_MS,
-    });
-    return driverIds.length;
-  } catch (err) {
-    logWarning(context, 'ride.dispatch.abandoned_work_sessions_close_failed', {
-      ...base,
-      attemptedCount: driverIds.length,
-      internalMessage: err?.message || 'unknown reconciliation failure',
-    });
-    return 0;
+// Query snapshots are hints only. Re-check the exact session inside a
+// transaction so a recovery/new session/accepted ride can never be closed.
+async function closeInvalidSessions({ db, driverIds, candidates, clock, mode, context, base }) {
+  let closedCount = 0;
+  for (const driverId of driverIds || []) {
+    const candidate = candidates.find((item) => item.id === driverId);
+    if (!candidate) continue;
+    try {
+      const result = await reconcileDriverAvailability({
+        db, driverId, expectedSessionId: candidate.data?.availabilitySessionId,
+        nowMs: clock.now(), mode,
+      });
+      if (result.outcome === 'closed') closedCount += 1;
+    } catch (error) {
+      logWarning(context, 'ride.dispatch.session_cleanup_failed', { ...base, mode, reason: error?.code || 'unknown' });
+    }
   }
-}
-
-async function closeUnsupportedAppBuildSessions({ db, driverIds, context, base }) {
-  if (!Array.isArray(driverIds) || driverIds.length === 0) return 0;
-
-  const update = {
-    availabilityStatus: 'offline',
-    availabilitySessionId: null,
-    availabilitySessionEndedAt: admin.firestore.FieldValue.serverTimestamp(),
-    availabilityUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    locationAvailabilitySessionId: null,
-    availabilityClientSessionId: null,
-    availabilityClosedReason: 'mandatory_update_required',
-    availabilityRequiredBuildNumber:
-      Number(base.minimumDriverBuildNumber) > 0
-        ? Number(base.minimumDriverBuildNumber)
-        : null,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
-
-  try {
-    const batch = db.batch();
-    driverIds.forEach((driverId) => {
-      batch.set(db.collection(C.DRIVERS).doc(driverId), update, { merge: true });
-    });
-    await batch.commit();
-    logWarning(context, 'ride.dispatch.unsupported_app_sessions_closed', {
-      ...base,
-      closedCount: driverIds.length,
-      result: 'mandatory_update_required',
-    });
-    return driverIds.length;
-  } catch (err) {
-    logWarning(context, 'ride.dispatch.unsupported_app_sessions_close_failed', {
-      ...base,
-      attemptedCount: driverIds.length,
-      internalMessage: err?.message || 'unknown reconciliation failure',
-    });
-    return 0;
-  }
+  return closedCount;
 }
 
 /**
@@ -180,14 +109,16 @@ async function dispatchRide({
 
   // Close abandoned sessions before returning, whatever the dispatch outcome.
   // A driver who is merely late publishing keeps his session and recovers alone.
-  await closeAbandonedWorkSessions({
+  await closeInvalidSessions({
+    candidates, clock, mode: 'abandoned',
     db,
     driverIds: abandonedWorkSessionDriverIds,
     context,
     base,
   });
 
-  await closeUnsupportedAppBuildSessions({
+  await closeInvalidSessions({
+    candidates, clock, mode: 'unsupported',
     db,
     driverIds: unsupportedAppBuildDriverIds,
     context,

@@ -131,22 +131,24 @@ function makeFakeFirestore() {
     return a < b ? -1 : 1;
   }
 
-  function makeQuery(collectionName, filters, limitCount, orders) {
+  function makeQuery(collectionName, filters, limitCount, orders, afterId = null) {
     return {
       where(field, op, value) {
-        return makeQuery(collectionName, [...filters, { field, op, value }], limitCount, orders);
+        return makeQuery(collectionName, [...filters, { field, op, value }], limitCount, orders, afterId);
       },
       orderBy(field, direction = 'asc') {
         return makeQuery(
           collectionName,
           filters,
           limitCount,
-          [...orders, { field, direction: String(direction).toLowerCase() }]
+          [...orders, { field, direction: String(direction).toLowerCase() }],
+          afterId
         );
       },
       limit(n) {
-        return makeQuery(collectionName, filters, n, orders);
+        return makeQuery(collectionName, filters, n, orders, afterId);
       },
+      startAfter(id) { return makeQuery(collectionName, filters, limitCount, orders, id); },
       async get() {
         const prefix = `${collectionName}/`;
         let docs = [];
@@ -168,6 +170,7 @@ function makeFakeFirestore() {
             return left.id.localeCompare(right.id);
           });
         }
+        if (afterId) docs = docs.filter((item) => item.id > afterId);
         if (limitCount != null) docs = docs.slice(0, limitCount);
         return {
           size: docs.length,

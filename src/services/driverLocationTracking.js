@@ -16,7 +16,7 @@ import {
   APP_VERSION,
   DEV_RIDE_SIMULATOR_ENABLED,
 } from '../config/runtimeEnvironment';
-import { safeTrackingPayload } from '../utils/rideTracking';
+import { safeTrackingPayload, isRecentNativeLocationSample } from '../utils/rideTracking';
 import { shouldPublishDriverLocation } from '../utils/driverLocationPolicy';
 import { BACKGROUND_INCIDENT_REASONS } from '../utils/driverBackgroundReliability';
 import { reportBackgroundIncident } from './driverBackgroundReliabilityStore';
@@ -255,7 +255,6 @@ async function publishSessionHeartbeat(session) {
     await setDoc(
       doc(db, 'drivers', session.driverId),
       {
-        locationAvailabilitySessionId: session.availabilitySessionId,
         availabilityClientBuildNumber: APP_BUILD_NUMBER,
         availabilityClientVersion: APP_VERSION,
         availabilityClientSessionId: session.availabilitySessionId,
@@ -281,12 +280,11 @@ async function publishSessionHeartbeat(session) {
 }
 
 async function publishLocationUnlocked(session, locationObject, { force = false } = {}) {
-  const payload = safeTrackingPayload(locationObject);
+  const payload = isRecentNativeLocationSample(locationObject) ? safeTrackingPayload(locationObject) : null;
   const currentUid = await authenticatedUid();
   if (!payload || !currentUid || currentUid !== session?.driverId) {
-    // An unusable point is NOT an absent driver. When the app is running and the
-    // session is ours, renew presence so a GPS gap can no longer remove a
-    // working driver from dispatch.
+    // Keep recovery alive without pretending that an unusable or old point is
+    // fresh. Dispatch still applies its independent GPS deadline.
     if (!payload && currentUid && currentUid === session?.driverId) {
       await publishSessionHeartbeat(session);
     }
@@ -470,10 +468,10 @@ async function ensureNativeTaskStarted(session) {
     deferredUpdatesDistance: activeRide ? 10 : 0,
     pausesUpdatesAutomatically: false,
     foregroundService: {
-      notificationTitle: 'DriveLocal — localização ativa',
+      notificationTitle: activeRide ? 'DriveLocal — corrida em andamento' : 'DriveLocal — sessão de trabalho',
       notificationBody: activeRide
         ? 'Sua posição está sendo compartilhada durante a corrida atual.'
-        : 'Sua posição está sendo usada para encontrar corridas próximas.',
+        : 'Abra o app para conferir sua disponibilidade para novas corridas.',
       notificationColor: '#2563EB',
       killServiceOnDestroy: false,
     },
@@ -686,7 +684,7 @@ export async function attachActiveRideTracking({
 // Foreground safety net. The native background task remains primary, but this
 // pulse repairs a stopped task and refreshes the lease only when the adaptive
 // policy says a heartbeat is due.
-export async function refreshDriverOnlineHeartbeat() {
+export async function refreshDriverOnlineHeartbeat({ force = false } = {}) {
   const session = await readSession();
   if (!session) return { status: 'no_session' };
   if (session.rideId || session.trackingPaused === true) return { status: 'active_ride_managed' };
@@ -724,9 +722,8 @@ export async function refreshDriverOnlineHeartbeat() {
     ).catch(() => undefined);
   }
 
-  const published = await publishImmediate(session, { force: false });
-  // Even with no usable fix the driver must come back to dispatch: renewing the
-  // session is what makes him visible again, the position only refines where.
+  const published = await publishImmediate(session, { force });
+  // A heartbeat preserves recovery, but NEVER proves a usable GPS position.
   if (!published) await publishSessionHeartbeat(session);
   return { status: published ? 'published' : 'heartbeat_only' };
 }
@@ -778,6 +775,7 @@ export async function publishDevSimulatedLocation({ driverId, vehicleType, rideI
   const published = await publishLocation(
     { ...session, vehicleType: vehicleType === 'moto' ? 'moto' : 'car' },
     {
+      timestamp: Date.now(),
       coords: {
         latitude: point?.lat,
         longitude: point?.lng,

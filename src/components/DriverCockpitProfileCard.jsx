@@ -30,7 +30,7 @@ function approvalStatusCopy(driver, founder, founderNumber) {
   return 'Motorista aprovado';
 }
 
-export default function DriverCockpitProfileCard({ driver, online, onPhotoPress }) {
+export default function DriverCockpitProfileCard({ driver, online, onPhotoPress, availabilityPresentation }) {
   const displayName = useMemo(() => driverCockpitDisplayName(driver), [
     driver?.displayName,
     driver?.fullName,
@@ -110,7 +110,9 @@ export default function DriverCockpitProfileCard({ driver, online, onPhotoPress 
           <Text style={styles.name}>{displayName}</Text>
           <Text style={styles.approval}>{approvalCopy}</Text>
           <View style={styles.badges}>
-            <DriverStatusBadge status={online ? 'online' : 'offline'} />
+            {availabilityPresentation ? (
+              <AppBadge label={availabilityPresentation.badge} tone={availabilityPresentation.tone} />
+            ) : <DriverStatusBadge status={online ? 'online' : 'offline'} />}
             <AppBadge label={photoCopy.label} tone={photoCopy.tone} />
           </View>
         </View>

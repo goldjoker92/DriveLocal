@@ -52,13 +52,12 @@ describe('Android live driver tracking contracts', () => {
     expect(auth).toContain("availabilityStatus: 'offline'");
     expect(auth).toContain('availabilitySessionId: null');
     expect(availability).toContain("'setDriverAvailabilitySecure'");
-    expect(home).toContain('🔴 Você está indisponível');
-    expect(home).toContain('Comece quando estiver pronto para receber ofertas.');
-    expect(home).toContain('Sua localização fica desligada enquanto você não trabalha.');
+    expect(home).toContain('dispatchState.presentation');
+    expect(source('src/utils/driverAvailabilityPresentation.js')).toContain('Você está indisponível');
+    expect(source('src/utils/driverAvailabilityPresentation.js')).toContain('Comece quando estiver pronto para receber ofertas.');
+    expect(home).toContain('dispatchState.visibility.ready');
     expect(home).toContain('Começar a trabalhar');
-    expect(home).toContain('🟢 Você está disponível');
-    expect(home).toContain('Buscando corridas próximas.');
-    expect(home).toContain('GPS de trabalho ativo.');
+    expect(source('src/utils/driverAvailabilityPresentation.js')).toContain('Disponível para receber solicitações');
     expect(home).toContain('Parar de trabalhar');
     expect(home).toContain('cockpit.remote_session_revoked');
     // The session age rule now lives in one shared policy instead of being
@@ -151,7 +150,7 @@ describe('Android live driver tracking contracts', () => {
     expect(rules).toContain("resource.data.availabilityStatus == 'online'");
     // 30 min, not the 7 min dispatch lease: a driver must always be able to
     // publish the point that repairs his own session (see the rule comment).
-    expect(rules).toContain("resource.data.availabilityUpdatedAt > request.time - duration.value(30, 'm')");
+    expect(rules).toContain("resource.data.availabilityUpdatedAt >= request.time - duration.value(45, 'm')");
     expect(rules).toContain('request.resource.data.locationAvailabilitySessionId == resource.data.availabilitySessionId');
     expect(rules).toContain('request.resource.data.locationUpdatedAt == request.time');
     expect(rules).toContain('request.resource.data.availabilityUpdatedAt == request.time');

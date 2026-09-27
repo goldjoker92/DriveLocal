@@ -37,7 +37,7 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
     const candidates = [
       candidate('fresh'),
       candidate('stale-recoverable', {
-        locationUpdatedAtMs: NOW - 16 * 60 * 1000,
+        locationUpdatedAtMs: NOW - 6 * 60 * 1000,
       }),
       candidate('stale-too-old', {
         locationUpdatedAtMs: NOW - 25 * 60 * 1000,
@@ -76,7 +76,7 @@ describe('candidate diagnostics and bounded work-session fallback', () => {
       rejectedStaleWorkSession: 1,
       rejectedStaleLocation: 1,
       searchRadiusMeters: 8_000,
-      locationMaxAgeMs: 15 * 60 * 1000,
+      locationMaxAgeMs: 5 * 60 * 1000,
       availabilitySessionMaxAgeMs: 20 * 60 * 1000,
       staleFallbackMaxAgeMs: ONLINE_STALE_FALLBACK_MAX_AGE_MS,
     });

@@ -10,6 +10,8 @@ import DriverActiveRideCard from '../../components/DriverActiveRideCard';
 import DriverKeepAwakeGuard from '../../components/DriverKeepAwakeGuard';
 import DriverDispatchVisibilityBanner from '../../components/DriverDispatchVisibilityBanner';
 import DriverAnnouncementBanner from '../../components/DriverAnnouncementBanner';
+import { DriverAvailabilityContext } from '../../contexts/DriverAvailabilityContext';
+import useDriverDispatchState from '../../hooks/useDriverDispatchState';
 import { auth, db } from '../../config/firebase';
 import { DEV_RIDE_SIMULATOR_ENABLED } from '../../config/runtimeEnvironment';
 import { colors } from '../../constants/colors';
@@ -61,6 +63,8 @@ export default function DriverLayout() {
   // Kept alongside the derived screen status: the banner needs the raw session
   // timestamps to tell the driver whether dispatch can still see him.
   const [driverDoc, setDriverDoc] = useState(null);
+  const [driverSource, setDriverSource] = useState({ confirmed: false, fromCache: true });
+  const dispatchState = useDriverDispatchState(driverDoc, driverSource);
   const [availabilityStatus, setAvailabilityStatus] = useState('offline');
   const [activeOffer, setActiveOffer] = useState(null);
   const onRobotScreen = segments.includes('robot-driver');
@@ -198,11 +202,10 @@ export default function DriverLayout() {
         const uid = auth.currentUser?.uid;
         if (uid) {
           try {
-            const remote = await getDriver(uid);
+            const remote = await getDriver(uid, { serverOnly: true });
             await reconcileRemoteDriver(remote, 'foreground_heartbeat_error');
           } catch (_readError) {
-            // Keep the local foreground service alive; the seven-minute server
-            // lease still prevents ghost dispatch while connectivity is uncertain.
+            // Preserve recovery; dispatch independently rejects stale GPS fixes.
           }
         }
       }
@@ -233,10 +236,18 @@ export default function DriverLayout() {
           setActiveRideId(null);
           setAvailabilityStatus('offline');
           setDriverDoc(null);
+          setDriverSource({ confirmed: false, fromCache: true });
           return;
         }
         const remote = snapshot.data();
-        setDriverDoc(remote || null);
+        // Keep the last acknowledged document during a queued write. A local
+        // serverTimestamp estimate must not turn an old GPS fix green.
+        if (!snapshot.metadata?.hasPendingWrites) setDriverDoc(remote || null);
+        setDriverSource((previous) => ({
+          confirmed: snapshot.metadata?.hasPendingWrites
+            ? previous.confirmed : snapshot.metadata?.fromCache !== true,
+          fromCache: snapshot.metadata?.fromCache === true,
+        }));
         // activeRideId is the authoritative pointer for restoring the exact accepted
         // offer, including non-terminal payment disputes after a process restart.
         setActiveRideId(remote?.activeRideId || null);
@@ -265,6 +276,7 @@ export default function DriverLayout() {
         });
       },
       (error) => {
+        setDriverSource({ confirmed: false, fromCache: true });
         console.warn('[DRIVER_AVAILABILITY] layout.driver_listener_failed', {
           scope: 'driver_availability',
           event: 'layout.driver_listener_failed',
@@ -378,20 +390,14 @@ export default function DriverLayout() {
   }, [activeRideId, router, segments, onRobotScreen, onActiveRideScreen]);
 
   return (
+    <DriverAvailabilityContext.Provider value={dispatchState}>
     <View style={styles.container}>
       <DriverKeepAwakeGuard
         availabilityStatus={availabilityStatus}
         activeRideId={activeRideId}
       />
-      {/* Silent while dispatch can see the driver. Speaks up before he concludes
-          on his own that the platform simply has no rides. */}
       <SafeAreaView style={styles.visibilityArea} edges={['top']} pointerEvents="box-none">
-        <DriverDispatchVisibilityBanner
-          driver={driverDoc}
-          availabilityStatus={driverDoc?.availabilityStatus}
-          hasActiveRide={Boolean(activeRideId)}
-          onRecover={refreshDriverOnlineHeartbeat}
-        />
+        <DriverDispatchVisibilityBanner hideWhenStable={segments.includes('driver-home')} />
         {/* Admin message to the fleet. Shown on every driver screen so it cannot
             be missed, never during an accepted ride, and dismissed by the driver
             himself with "Entendi". */}
@@ -426,6 +432,7 @@ export default function DriverLayout() {
         </Pressable>
       ) : null}
     </View>
+    </DriverAvailabilityContext.Provider>
   );
 }
 

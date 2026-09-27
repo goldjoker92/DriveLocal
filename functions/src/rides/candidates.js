@@ -4,55 +4,25 @@
 // account eligibility, work-session, location and proximity rules while returning
 // aggregate rejection diagnostics (never UIDs, coordinates or profile data).
 
-const { evaluateRideEligibility, toMillis } = require('../drivers/eligibility');
-const {
-  driverHasFreshSupportedBuild,
-  resolveDriverBuildPolicy,
-} = require('../drivers/appVersion');
+const { resolveDriverBuildPolicy } = require('../drivers/appVersion');
 const { haversineMeters } = require('../geo/geo');
-const { validateAndNormalizePixKey } = require('../pix/pixKey');
+const {
+  driverLocation, locationAgeMs, availabilityAgeMs,
+  hasMatchingAvailabilitySession, hasFreshAvailabilitySession,
+  evaluateDriverDispatchReadiness,
+} = require('../drivers/dispatchReadiness');
 const C = require('./constants');
 
-// Kept as a compatibility export for analytics/tests. The fallback is now bounded
-// by the same short work-session lease instead of the previous one-hour window.
-const ONLINE_STALE_FALLBACK_MAX_AGE_MS = C.AVAILABILITY_SESSION_MAX_AGE_MS;
+const ONLINE_STALE_FALLBACK_MAX_AGE_MS = C.LOCATION_DISPATCH_MAX_AGE_MS;
 
-function driverLocation(d) {
-  if (d.location && Number.isFinite(d.location.lat) && Number.isFinite(d.location.lng)) {
-    return { lat: d.location.lat, lng: d.location.lng };
-  }
-  if (Number.isFinite(d.currentLat) && Number.isFinite(d.currentLng)) {
-    return { lat: d.currentLat, lng: d.currentLng };
-  }
-  return null;
-}
-
-function locationAgeMs(d, nowMs) {
-  // Server timestamps are authoritative. Epoch-ms remains a compatibility
-  // fallback for legacy records and deterministic in-memory test fixtures.
-  const ts = toMillis(d.locationUpdatedAt)
-    || Number(d.locationUpdatedAtMs || 0);
-  return ts > 0 ? Math.max(0, nowMs - ts) : Infinity;
-}
-
-function availabilityAgeMs(d, nowMs) {
-  // Never let a misconfigured phone clock extend a work session indefinitely.
-  const ts = toMillis(d.availabilityUpdatedAt)
-    || Number(d.availabilityUpdatedAtMs || 0);
-  return ts > 0 ? Math.max(0, nowMs - ts) : Infinity;
-}
-
-function hasMatchingAvailabilitySession(d = {}) {
-  return typeof d.availabilitySessionId === 'string'
-    && d.availabilitySessionId.length >= 16
-    && d.locationAvailabilitySessionId === d.availabilitySessionId;
-}
-
-function hasFreshAvailabilitySession(d = {}, nowMs = Date.now()) {
-  return d.availabilityStatus === 'online'
-    && hasMatchingAvailabilitySession(d)
-    && availabilityAgeMs(d, nowMs) <= C.AVAILABILITY_SESSION_MAX_AGE_MS;
-}
+const DIAGNOSTIC_FOR_REASON = {
+  offline: 'rejectedOffline', active_ride: 'rejectedBusy',
+  session_mismatch: 'rejectedMissingWorkSession', session_stale: 'rejectedStaleWorkSession',
+  app_update_required: 'rejectedUnsupportedAppBuild', pix_invalid: 'rejectedInvalidPixKey',
+  not_approved: 'rejectedNotApproved', blocked: 'rejectedBlocked',
+  location_missing: 'rejectedMissingLocation', location_stale: 'rejectedStaleLocation',
+  wallet_low: 'rejectedWalletLow',
+};
 
 function emptyDiagnostics(radius) {
   return {
@@ -67,6 +37,7 @@ function emptyDiagnostics(radius) {
     rejectedStaleWorkSession: 0,
     rejectedUnsupportedAppBuild: 0,
     rejectedInvalidPixKey: 0,
+    rejectedWalletLow: 0,
     // Subset of rejectedStaleWorkSession with no sign of life for far longer:
     // the only sessions the caller is allowed to close.
     abandonedWorkSessionCount: 0,
@@ -148,72 +119,21 @@ function selectEligibleDriversWithDiagnostics(candidates, { pickup, searchRadius
     diagnostics.candidateCount += 1;
     const d = c.data || {};
 
-    if (d.availabilityStatus !== 'online') {
-      diagnostics.rejectedOffline += 1;
-      continue;
-    }
-    if (d.activeRideId) {
-      diagnostics.rejectedBusy += 1;
-      continue;
-    }
-    if (!hasMatchingAvailabilitySession(d)) {
-      diagnostics.rejectedMissingWorkSession += 1;
-      continue;
-    }
-    const workSessionAgeMs = availabilityAgeMs(d, nowMs);
-    if (workSessionAgeMs > C.AVAILABILITY_SESSION_MAX_AGE_MS) {
-      diagnostics.rejectedStaleWorkSession += 1;
-      if (workSessionAgeMs > C.WORK_SESSION_ABANDONED_MAX_AGE_MS) {
-        // Reached only after the offline and activeRideId checks above, so
-        // closing this session can never interrupt an ongoing ride.
+    const readiness = evaluateDriverDispatchReadiness(d, { nowMs, driverBuildPolicy });
+    if (!readiness.ready) {
+      diagnostics[DIAGNOSTIC_FOR_REASON[readiness.reason] || 'rejectedUnknownEligibility'] += 1;
+      if (readiness.reason === 'session_stale'
+        && readiness.sessionAgeMs > C.WORK_SESSION_ABANDONED_MAX_AGE_MS) {
         diagnostics.abandonedWorkSessionCount += 1;
         abandonedWorkSessionDriverIds.push(c.id);
       }
+      if (readiness.reason === 'app_update_required') unsupportedAppBuildDriverIds.push(c.id);
       continue;
     }
-
-    if (buildPolicy.enforced && !driverHasFreshSupportedBuild(
-      d,
-      nowMs,
-      C.AVAILABILITY_SESSION_MAX_AGE_MS,
-      buildPolicy.minimumBuildNumber
-    )) {
-      diagnostics.rejectedUnsupportedAppBuild += 1;
-      unsupportedAppBuildDriverIds.push(c.id);
-      continue;
-    }
-
-    if (buildPolicy.enforced && buildPolicy.minimumBuildNumber >= 17) {
-      const pixKey = validateAndNormalizePixKey(d.pixKey, d.pixKeyType);
-      if (!pixKey.valid) {
-        diagnostics.rejectedInvalidPixKey += 1;
-        continue;
-      }
-    }
-
-    const evalResult = evaluateRideEligibility(d, clock);
-    if (!evalResult.canReceiveRides) {
-      if (d.verificationStatus !== 'approved') diagnostics.rejectedNotApproved += 1;
-      else if (d.isBlocked === true) diagnostics.rejectedBlocked += 1;
-      else diagnostics.rejectedUnknownEligibility += 1;
-      continue;
-    }
-
     const loc = driverLocation(d);
-    if (!loc) {
-      diagnostics.rejectedMissingLocation += 1;
-      continue;
-    }
-
-    const ageMs = locationAgeMs(d, nowMs);
+    const ageMs = readiness.locationAgeMs;
+    const fresh = readiness.locationFreshness === 'fresh';
     recordLocationAge(diagnostics, ageMs);
-    const fresh = ageMs <= C.LOCATION_MAX_AGE_MS;
-    const staleFallback = !fresh && ageMs <= ONLINE_STALE_FALLBACK_MAX_AGE_MS;
-
-    if (!fresh && !staleFallback) {
-      diagnostics.rejectedStaleLocation += 1;
-      continue;
-    }
 
     const distanceToPickupMeters = haversineMeters(loc, pickup);
     if (!(distanceToPickupMeters <= radius)) {

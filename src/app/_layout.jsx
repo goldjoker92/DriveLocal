@@ -78,7 +78,7 @@ export default function RootLayout() {
         // Validate the server lease globally, not only while a driver screen is open.
         let remoteDriver;
         try {
-          remoteDriver = await getDriver(authenticatedUid);
+          remoteDriver = await getDriver(authenticatedUid, { serverOnly: true });
         } catch (error) {
           console.warn('[AUTH_TRACKING_CLEANUP] remote_session_validation_failed', {
             scope: 'auth_tracking_cleanup',

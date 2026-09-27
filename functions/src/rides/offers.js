@@ -11,6 +11,7 @@ const { getFunctions } = require('firebase-admin/functions');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
 const { logInfo, logWarning } = require('../logging/logger');
 const { resolveCommercialPolicy } = require('../drivers/commercialPolicy');
+const { evaluateDriverDispatchReadiness } = require('../drivers/dispatchReadiness');
 const C = require('./constants');
 
 const REGION = 'southamerica-east1';
@@ -189,6 +190,12 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
     const liveRideSnap = await tx.get(rideRef);
     const snapshots = [];
     for (const ref of offerRefs) snapshots.push(await tx.get(ref));
+    const drivers = [];
+    for (const candidate of candidates) {
+      drivers.push(await tx.get(db.collection(C.DRIVERS).doc(candidate.driverId)));
+    }
+    const config = await tx.get(db.collection(C.CITY_PUBLIC_CONFIG)
+      .doc(ride.serviceAreaId || C.DEFAULT_SERVICE_AREA_ID));
 
     if (!liveRideSnap.exists) {
       return { created: [], skippedReason: 'RIDE_MISSING', rideStatus: null };
@@ -214,6 +221,14 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
     for (let index = 0; index < candidates.length; index += 1) {
       if (snapshots[index].exists) continue;
       const cand = candidates[index];
+      const liveDriver = drivers[index].exists ? drivers[index].data() || {} : {};
+      // Selection and offer creation are separate reads. Revalidate in this
+      // transaction so stopping work or taking another ride cannot create a
+      // ghost offer from an otherwise valid earlier candidate snapshot.
+      if (liveDriver.availabilitySessionId !== cand.availabilitySessionId
+        || !evaluateDriverDispatchReadiness(liveDriver, {
+          nowMs: clock.now(), driverBuildPolicy: config.exists ? config.data() || {} : {},
+        }).ready) continue;
       const ref = offerRefs[index];
       const id = ref.id;
       tx.set(ref, {
@@ -223,7 +238,7 @@ async function createTargetedOffers({ db, ride, eligible, offerTtlSeconds, trace
         vehicleType: ride.vehicleType,
         availabilitySessionId: cand.availabilitySessionId,
         estimatedFareCentavos: ride.estimatedFareCentavos,
-        commissionDisplayBps: commissionDisplayBpsForOffer(ride, cand.data, nowMs),
+        commissionDisplayBps: commissionDisplayBpsForOffer(ride, liveDriver, nowMs),
         pickupPreview: preview,
         destinationPreview: destination,
         distanceToPickupMeters: cand.distanceToPickupMeters,

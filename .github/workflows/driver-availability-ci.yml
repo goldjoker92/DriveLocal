@@ -1,0 +1,47 @@
+name: Driver availability CI
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'functions/**'
+      - 'backend/firebase/rules/firestore.rules'
+      - '.github/workflows/driver-availability-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-javascript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+      - run: npm ci
+      # Validates shared pure modules in Metro/Hermes. Does not build an AAB.
+      - run: npx expo export --platform android --output-dir /tmp/driver-availability-export
+  availability-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --prefix functions
+      - name: Test availability rules against Firestore emulator
+        run: >-
+          npx --yes firebase-tools@14.17.0 emulators:exec
+          --only firestore --project demo-drivelocal-availability
+          "npm --prefix functions test -- --runTestsByPath src/__tests__/driverAvailability.rules.emulator.test.js"

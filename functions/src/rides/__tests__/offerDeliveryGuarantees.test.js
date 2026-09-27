@@ -101,13 +101,20 @@ function ride(overrides = {}) {
   };
 }
 
-function eligible(count) {
-  return Array.from({ length: count }, (_, i) => ({
-    driverId: `driver_${i}`,
-    data: { verificationStatus: 'approved' },
-    distanceToPickupMeters: 100 * (i + 1),
-    availabilitySessionId: `work_session_abcdef${i}0123456`,
-  }));
+function eligible(db, count) {
+  return Array.from({ length: count }, (_, i) => {
+    const driverId = `driver_${i}`;
+    const availabilitySessionId = `work_session_abcdef${i}0123456`;
+    const data = {
+      verificationStatus: 'approved', availabilityStatus: 'online',
+      availabilitySessionId, locationAvailabilitySessionId: availabilitySessionId,
+      availabilityUpdatedAtMs: T0, locationUpdatedAtMs: T0,
+      location: { lat: -4.1, lng: -38.5 }, pixKey: `${i}@example.test`, pixKeyType: 'email',
+      commissionFreeUntil: T0 + 86_400_000,
+    };
+    db._store.set(`${C.DRIVERS}/${driverId}`, data);
+    return { driverId, data, distanceToPickupMeters: 100 * (i + 1), availabilitySessionId };
+  });
 }
 
 function entries(db, prefix) {
@@ -115,6 +122,21 @@ function entries(db, prefix) {
 }
 
 describe('offer wave delivery guarantees', () => {
+  it.each([
+    { availabilityStatus: 'offline' },
+    { activeRideId: 'another-ride' },
+    { availabilitySessionId: 'work_replacement_123456789' },
+    { locationUpdatedAtMs: T0 - 8 * 60_000 },
+  ])('does not send an offer when the driver changed after selection: %j', async (changes) => {
+    const db = fakeDb();
+    const candidates = eligible(db, 1);
+    const key = `${C.DRIVERS}/driver_0`;
+    db._store.set(key, { ...db._store.get(key), ...changes });
+    const result = await createTargetedOffers({ db, ride: ride(), eligible: candidates,
+      offerTtlSeconds: 30, traceId: 'test-race', context: {}, clock });
+    expect(result.createdCount).toBe(0);
+    expect(entries(db, `${C.NOTIFICATION_EVENTS}/`)).toHaveLength(0);
+  });
   const originalEnv = process.env.NODE_ENV;
   afterEach(() => {
     process.env.NODE_ENV = originalEnv;
@@ -125,7 +147,7 @@ describe('offer wave delivery guarantees', () => {
     const result = await createTargetedOffers({
       db,
       ride: ride(),
-      eligible: eligible(12),
+      eligible: eligible(db, 12),
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
       context: {},
       clock,
@@ -177,7 +199,7 @@ describe('offer wave delivery guarantees', () => {
     const result = await createTargetedOffers({
       db,
       ride: ride(),
-      eligible: eligible(5),
+      eligible: eligible(db, 5),
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
       context: {},
       clock,
@@ -194,7 +216,7 @@ describe('offer wave delivery guarantees', () => {
     await createTargetedOffers({
       db,
       ride: ride(),
-      eligible: eligible(3),
+      eligible: eligible(db, 3),
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
       context: {},
       clock,
@@ -211,7 +233,7 @@ describe('offer wave delivery guarantees', () => {
     await createTargetedOffers({
       db,
       ride: ride(),
-      eligible: eligible(1),
+      eligible: eligible(db, 1),
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
       context: {},
       clock,
@@ -227,7 +249,7 @@ describe('offer wave delivery guarantees', () => {
     const args = {
       db,
       ride: ride(),
-      eligible: eligible(4),
+      eligible: eligible(db, 4),
       offerTtlSeconds: C.OFFER_TTL_SECONDS,
       context: {},
       clock,

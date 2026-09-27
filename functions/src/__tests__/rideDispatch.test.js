@@ -185,10 +185,8 @@ describe('dispatch targeting', () => {
     expect(offered).not.toContain(`${view.rideId}_car`);
     expect(offered).not.toContain(`${view.rideId}_blocked`);
     expect(offered).not.toContain(`${view.rideId}_unapproved`);
-    // A 16-minute-old point is inside the controlled stale fallback window and is
-    // deliberately served: losing a real working driver to an Android battery
-    // restriction costs far more than an offer he can simply decline.
-    expect(offered).toContain(`${view.rideId}_stale`);
+    // A heartbeat cannot make a 16-minute-old GPS fix current.
+    expect(offered).not.toContain(`${view.rideId}_stale`);
     expect(offered).not.toContain(`${view.rideId}_old-session`);
     expect(offered).not.toContain(`${view.rideId}_busy`);
     // A near driver keeps the first wave at 3 km. The ~7 km driver is reached by
@@ -308,10 +306,12 @@ describe('transactional acceptance & wallet hold', () => {
       subscriptionActive: true,
       subscriptionExpiresAt: T0 + 10 * 24 * 60 * 60 * 1000,
     };
-    seedDriver(db, 'S', { ...standard, walletAvailableCentavos: 100 }); // <= R$3,00
+    seedDriver(db, 'S', { ...standard, walletAvailableCentavos: 5000 });
     const clock = fixedClock(T0);
     const view = await createRide(db, clock, fakeRouting());
 
+    // Balance changes after dispatch must still be rejected by acceptance.
+    await db.collection(C.DRIVERS).doc('S').set({ walletAvailableCentavos: 100 }, { merge: true });
     await expect(
       acceptDriverOfferSecure({ db, request: { auth: { uid: 'S' }, data: { offerId: `${view.rideId}_S`, idempotencyKey: 'acc-poor-000001' } }, context: ctx, clock })
     ).rejects.toMatchObject({ code: 'WALLET_INSUFFICIENT' });

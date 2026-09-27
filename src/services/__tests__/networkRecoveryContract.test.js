@@ -57,6 +57,6 @@ describe('network recovery integration contracts', () => {
     expect(driverHome).toContain('if (data?.activeRideId)');
     expect(driverHome).toContain("pathname: '/active-ride'");
     expect(driverLayout).toContain('A temporary network error alone does not immediately end work');
-    expect(driverLayout).toContain('seven-minute server');
+    expect(driverLayout).toContain('dispatch independently rejects stale GPS fixes');
   });
 });

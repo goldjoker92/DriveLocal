@@ -10,6 +10,7 @@
 const { logInfo, logWarning } = require('../logging/logger');
 const { quickMessagePresentation } = require('../rides/quickMessageCatalog');
 const C = require('../rides/constants');
+const { shouldSendAvailabilityAlert } = require('../drivers/availabilityMonitor');
 
 // FCM error codes meaning the token is dead and must be disabled.
 const INVALID_TOKEN_CODES = new Set([
@@ -19,6 +20,10 @@ const INVALID_TOKEN_CODES = new Set([
 ]);
 
 const PRESENTATION = Object.freeze({
+  [C.NOTIFICATION_EVENT.DRIVER_AVAILABILITY_INTERRUPTED]: {
+    title: 'Verifique sua disponibilidade',
+    body: 'Não conseguimos confirmar sua localização para novas corridas. Abra o DriveLocal para verificar e reativar.',
+  },
   [C.NOTIFICATION_EVENT.OFFER_CREATED]: {
     title: 'Nova corrida disponível',
     body: 'Abra a DriveLocal para ver e aceitar a oferta.',
@@ -138,7 +143,8 @@ function androidNotificationForEvent(event, options = {}) {
 
   const common = {
     channelId,
-    tag: safeAndroidTag(event),
+    tag: event.eventType === C.NOTIFICATION_EVENT.DRIVER_AVAILABILITY_INTERRUPTED
+      ? 'drivelocal_driver_availability' : safeAndroidTag(event),
   };
 
   if (!isDriverArrival) {
@@ -224,13 +230,21 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
   }
   const nowMs = clock.now();
 
+  if (event.eventType === C.NOTIFICATION_EVENT.DRIVER_AVAILABILITY_INTERRUPTED) {
+    const driver = await db.collection(C.DRIVERS).doc(event.recipientUid).get();
+    if (!shouldSendAvailabilityAlert(driver.exists ? driver.data() : null, event, nowMs)) {
+      await eventRef.set({ status: C.NOTIFICATION_STATUS.SKIPPED, reasonCode: 'AVAILABILITY_ALERT_OBSOLETE', processedAtMs: nowMs }, { merge: true });
+      return { skipped: true, reasonCode: 'AVAILABILITY_ALERT_OBSOLETE' };
+    }
+  }
+
   const snap = await db
     .collection(C.NOTIFICATION_TOKENS)
     .where('uid', '==', event.recipientUid)
     .where('active', '==', true)
     .get();
   const targets = [];
-  const broadcastRole = event.eventType === C.NOTIFICATION_EVENT.DRIVER_BROADCAST
+  const broadcastRole = [C.NOTIFICATION_EVENT.DRIVER_BROADCAST, C.NOTIFICATION_EVENT.DRIVER_AVAILABILITY_INTERRUPTED].includes(event.eventType)
     ? 'driver'
     : event.eventType === C.NOTIFICATION_EVENT.PASSENGER_BROADCAST
       ? 'passenger'

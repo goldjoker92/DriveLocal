@@ -93,6 +93,7 @@ module.exports = Object.freeze({
     // a static presentation, and rides on the STATUS channel, never the offer one.
     DRIVER_BROADCAST: 'driver_broadcast',
     PASSENGER_BROADCAST: 'passenger_broadcast',
+    DRIVER_AVAILABILITY_INTERRUPTED: 'driver_availability_interrupted',
   }),
 
   NOTIFICATION_STATUS: Object.freeze({
@@ -100,6 +101,7 @@ module.exports = Object.freeze({
     SENT: 'sent',
     PARTIALLY_FAILED: 'partially_failed',
     FAILED: 'failed',
+    SKIPPED: 'skipped',
   }),
 
   OFFER_STATUS: Object.freeze({
@@ -139,15 +141,12 @@ module.exports = Object.freeze({
     Object.freeze({ index: 3, offsetMs: 45_000, radiusMeters: 7_000 }),
     Object.freeze({ index: 4, offsetMs: 60_000, radiusMeters: 8_000 }),
   ]),
-  // Launch reality: the work session is refreshed ONLY by a published GPS point
-  // (see driverLocationTracking.driverLocationUpdate). Any Android battery
-  // restriction that suspends the location task therefore silently removes a
-  // working driver from dispatch while his app still shows "disponível".
-  // Until the client publishes a GPS-independent heartbeat, these windows are
-  // deliberately generous: in a town the size of Horizonte a 15-minute-old point
-  // is still useful, the driver can always decline, and losing a real driver
-  // costs far more than offering him a ride he refuses.
-  LOCATION_MAX_AGE_MS: 15 * 60 * 1000,
+  // Idle native tracking publishes at most every 150 s in normal conditions.
+  // Warn first, tolerate a short GPS delay, then exclude NEW offers. Renewing
+  // the independent heartbeat never extends the GPS deadline.
+  DISPATCH_VISIBILITY_WARNING_MS: 3 * 60 * 1000,
+  LOCATION_MAX_AGE_MS: 5 * 60 * 1000,
+  LOCATION_DISPATCH_MAX_AGE_MS: 7 * 60 * 1000,
   AVAILABILITY_SESSION_MAX_AGE_MS: 20 * 60 * 1000,
   // A driver whose lease merely expired is NOT logged out: his app republishes a
   // point and he becomes dispatchable again on his own. Only a session with no

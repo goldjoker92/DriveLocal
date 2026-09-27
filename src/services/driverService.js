@@ -4,6 +4,7 @@
 import {
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   updateDoc,
   collection,
@@ -29,8 +30,9 @@ const REQUIRED_PROFILE_FIELDS = [
 
 
 // Reads drivers/{driverId}. Returns the document data, or null when missing.
-export async function getDriver(driverId) {
-  const snap = await getDoc(doc(db, 'drivers', driverId));
+export async function getDriver(driverId, { serverOnly = false } = {}) {
+  const read = serverOnly ? getDocFromServer : getDoc;
+  const snap = await read(doc(db, 'drivers', driverId));
   return snap.exists() ? snap.data() : null;
 }
 

@@ -63,3 +63,11 @@ export function safeTrackingPayload(locationObject) {
     speedMps: speed == null ? null : Number(speed.toFixed(2)),
   };
 }
+
+// A delayed Android callback is not a new fix. Never stamp a queued old point
+// with the current server time and accidentally revive a ghost position.
+export function isRecentNativeLocationSample(locationObject, nowMs = Date.now()) {
+  const capturedAtMs = Number(locationObject?.timestamp);
+  return Number.isFinite(capturedAtMs) && capturedAtMs > 0
+    && nowMs - capturedAtMs >= -30_000 && nowMs - capturedAtMs <= 3 * 60_000;
+}

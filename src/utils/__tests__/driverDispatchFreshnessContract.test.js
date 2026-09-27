@@ -48,7 +48,7 @@ describe('driver dispatch freshness contract', () => {
     const tracking = source('src/services/driverLocationTracking.js');
     const layout = source('src/app/(driver)/_layout.jsx');
 
-    expect(tracking).toContain('export async function refreshDriverOnlineHeartbeat()');
+    expect(tracking).toContain('export async function refreshDriverOnlineHeartbeat({ force = false } = {})');
     expect(tracking).toContain('if (!started)');
     expect(tracking).toContain("await writeSafeStatus('foreground_native_task_restarted')");
     expect(layout).toContain('const FOREGROUND_HEARTBEAT_INTERVAL_MS = 60_000');
