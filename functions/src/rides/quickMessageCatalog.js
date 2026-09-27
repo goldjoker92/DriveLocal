@@ -1,7 +1,7 @@
 // @ts-check
 // Server-authoritative quick-message vocabulary. Clients send codes only; visible
-// PT-BR copy is resolved here so free text, phone numbers, emails and addresses can
-// never enter notification payloads or ride history through this feature.
+// PT-BR copy is resolved here. Free-text messages have a separate endpoint and
+// never enter notification payloads. Legacy-compatible codes stay unchanged.
 
 const QUICK_MESSAGE_HISTORY_LIMIT = 6;
 const QUICK_MESSAGE_RATE_LIMIT_MS = 5 * 1000;
@@ -27,6 +27,18 @@ const QUICK_MESSAGES = Object.freeze({
     senderRole: 'driver',
     statuses: Object.freeze(['driver_arrived']),
     text: 'Não consigo parar exatamente no ponto. Procure o veículo próximo.',
+  }),
+  driver_cannot_find_passenger: Object.freeze({
+    senderRole: 'driver',
+    statuses: Object.freeze(['driver_arrived']),
+    requiresMessagingV1: true,
+    text: 'Não estou vendo você.',
+  }),
+  driver_where_waiting: Object.freeze({
+    senderRole: 'driver',
+    statuses: Object.freeze(['assigned', 'driver_arrived']),
+    requiresMessagingV1: true,
+    text: 'Onde você está esperando?',
   }),
   passenger_waiting: Object.freeze({
     senderRole: 'passenger',

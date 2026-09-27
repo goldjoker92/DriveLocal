@@ -24,6 +24,18 @@ export const RIDE_QUICK_MESSAGES = Object.freeze({
     statuses: Object.freeze(['driver_arrived']),
     text: 'Não consigo parar exatamente no ponto. Procure o veículo próximo.',
   }),
+  driver_cannot_find_passenger: Object.freeze({
+    senderRole: 'driver',
+    statuses: Object.freeze(['driver_arrived']),
+    requiresMessagingV1: true,
+    text: 'Não estou vendo você.',
+  }),
+  driver_where_waiting: Object.freeze({
+    senderRole: 'driver',
+    statuses: Object.freeze(['assigned', 'driver_arrived']),
+    requiresMessagingV1: true,
+    text: 'Onde você está esperando?',
+  }),
   passenger_waiting: Object.freeze({
     senderRole: 'passenger',
     statuses: Object.freeze(['assigned', 'driver_arrived']),
@@ -52,7 +64,7 @@ export function quickMessageOptions(senderRole, rideStatus) {
       definition.senderRole === senderRole
       && definition.statuses.includes(String(rideStatus || ''))
     )
-    .map(([code, definition]) => ({ code, text: definition.text }));
+    .map(([code, definition]) => ({ code, text: definition.text, ...(definition.requiresMessagingV1 ? { requiresMessagingV1: true } : {}) }));
 }
 
 export function quickMessageText(messageCode) {

@@ -36,12 +36,18 @@ export function buildNotificationRouteTarget(data) {
   if (!data?.route || !ALLOWED_NOTIFICATION_ROUTES.has(data.route)) return null;
   if (ROUTES_REQUIRING_RIDE_ID.has(data.route) && !data.rideId) return null;
 
+  // Keep server routes compatible with installed legacy builds. Only current
+  // clients turn a ride-message notification into a direct conversation entry.
+  const isMessage = ['ride_message', 'ride_quick_message'].includes(data.eventType);
+  const messageRoute = data.route === '/active-ride' ? '/driver-ride-messages'
+    : data.route === '/driver-accepted' ? '/passenger-ride-messages' : null;
+  const targetRoute = isMessage && data.rideId && messageRoute ? messageRoute : data.route;
   const params = {};
   if (data.rideId) params.rideId = data.rideId;
   if (data.offerId) params.offerId = data.offerId;
   if (data.eventType) params.eventType = data.eventType;
 
   return Object.keys(params).length > 0
-    ? { pathname: data.route, params }
-    : data.route;
+    ? { pathname: targetRoute, params }
+    : targetRoute;
 }

@@ -24,6 +24,10 @@ const PRESENTATION = Object.freeze({
     title: 'Verifique sua disponibilidade',
     body: 'Não conseguimos confirmar sua localização para novas corridas. Abra o DriveLocal para verificar e reativar.',
   },
+  [C.NOTIFICATION_EVENT.RIDE_MESSAGE]: {
+    title: 'Nova mensagem na corrida',
+    body: 'Abra o DriveLocal para ver a mensagem.',
+  },
   [C.NOTIFICATION_EVENT.OFFER_CREATED]: {
     title: 'Nova corrida disponível',
     body: 'Abra a DriveLocal para ver e aceitar a oferta.',

@@ -69,7 +69,7 @@ export default function DriverLayout() {
   const [availabilityStatus, setAvailabilityStatus] = useState('offline');
   const [activeOffer, setActiveOffer] = useState(null);
   const onRobotScreen = segments.includes('robot-driver');
-  const onActiveRideScreen = segments.includes('active-ride');
+  const onActiveRideScreen = segments.includes('active-ride') || segments.includes('driver-ride-messages');
   const activeRideCardVisible = deriveDriverActiveRideCard(
     activeOffer,
     activeOffer?.driverRideStatus

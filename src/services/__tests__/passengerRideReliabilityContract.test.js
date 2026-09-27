@@ -20,7 +20,8 @@ describe('passenger active ride reliability contract', () => {
     expect(listeners).toContain("fanOut(entry, 'onData', location)");
     expect(screen).toContain('listenToPassengerRide as listenToRide');
     expect(screen).toContain('listenToPassengerRideLocation as listenToRideLocation');
-    expect(messages).toContain('listenToPassengerRide as listenToRide');
+    expect(messages).toContain('useRideConversation');
+    expect(source('src/hooks/use-ride-conversation.js')).toContain('listenToPassengerRide');
   });
 
   test('shows an in-app driver-arrival alert with haptic fallback', () => {

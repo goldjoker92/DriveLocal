@@ -394,6 +394,16 @@ service cloud.firestore {
 
       // Six server-owned message slots. The accepted driver may read this safe
       // subcollection without gaining access to the parent ride or destination.
+      // Chat content and capability handshake remain server-owned. These rules
+      // deliberately do not grant the driver access to the private parent ride.
+      match /messages/{messageId} {
+        allow read: if isAdmin() || isRidePassenger(rideId) || isAcceptedRideDriver(rideId);
+        allow create, update, delete: if false;
+      }
+      match /conversation/{documentId} {
+        allow read: if isAdmin() || isRidePassenger(rideId) || isAcceptedRideDriver(rideId);
+        allow create, update, delete: if false;
+      }
       match /quickMessages/{messageId} {
         allow read: if isAdmin() || isRidePassenger(rideId) || isAcceptedRideDriver(rideId);
         allow create, update, delete: if false;
