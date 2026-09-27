@@ -34,7 +34,7 @@ const SENSITIVE_KEY_PATTERNS = [
   'address', 'endereco', 'logradouro', 'street',
   'pickup', 'destination', 'origin', 'coordinates', 'location',
   'rawpayload', 'providerpayload', 'provider_payload', 'requestpayload',
-  'internalmessage',
+  'internalmessage', 'messagetext', 'chattext',
 ];
 
 // Exact identity/location keys. They cannot all use substring matching because
@@ -55,6 +55,7 @@ const SENSITIVE_IDENTITY_KEYS = new Set([
   'lng',
   'latitude',
   'longitude',
+  'text',
 ]);
 
 const OPERATIONAL_PHASES = new Set([

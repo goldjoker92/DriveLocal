@@ -14,6 +14,8 @@ describe('secure ride quick message catalog', () => {
       'driver_traffic_delay',
       'driver_at_pickup',
       'driver_cannot_stop_here',
+      'driver_cannot_find_passenger',
+      'driver_where_waiting',
       'passenger_waiting',
       'passenger_coming',
       'passenger_needs_minute',

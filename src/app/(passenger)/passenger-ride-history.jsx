@@ -98,7 +98,11 @@ export default function PassengerRideHistory() {
           </AppCard>
         ) : items.length > 0 ? (
           <View style={styles.list}>
-            {items.map((item) => <PassengerRideHistoryRow key={item.rideId} item={item} />)}
+            {items.map((item) => <View key={item.rideId}>
+              <PassengerRideHistoryRow item={item} />
+              <AppButton title="MENSAGENS DA CORRIDA" variant="ghost"
+                onPress={() => router.push({ pathname: '/passenger-ride-messages', params: { rideId: item.rideId } })} />
+            </View>)}
           </View>
         ) : (
           <AppCard style={styles.centerCard}>

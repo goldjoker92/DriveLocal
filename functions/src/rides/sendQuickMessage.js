@@ -1,7 +1,7 @@
 // @ts-check
 // Secure predefined ride messages. The authenticated actor is derived from the
-// server ride, free text is impossible, history is a six-slot ring buffer and the
-// notification event is committed atomically with the message.
+// server ride. Six legacy slots remain compatible; immutable history and the
+// notification event are committed atomically. Arrival/start are never changed.
 
 const crypto = require('crypto');
 const admin = require('firebase-admin');
@@ -21,6 +21,7 @@ const {
   QUICK_MESSAGE_RATE_LIMIT_MS,
   QUICK_MESSAGE_RETENTION_MS,
   isQuickMessageAllowed,
+  quickMessageDefinition,
 } = require('./quickMessageCatalog');
 
 function ts() {
@@ -133,6 +134,16 @@ async function sendRideQuickMessage({ db, request, context, clock }) {
       };
     }
 
+    const historyRef = db.collection(`${C.RIDE_REQUESTS}/${rideId}/messages`).doc(keyHash);
+    const historySnap = await tx.get(historyRef);
+    if (historySnap.exists) {
+      const previous = historySnap.data();
+      if (previous.kind !== 'preset' || previous.messageCode !== messageCode || previous.senderRole !== senderRole) {
+        throw new AppError(ERROR_CODES.IDEMPOTENCY_CONFLICT);
+      }
+      return { replay: true, senderRole, messageCode, rideStatus: ride.status, sequence: previous.sequence };
+    }
+
     if (!isQuickMessageAllowed(senderRole, ride.status, messageCode)) {
       throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
         internalMessage: 'quick message is not allowed for actor role and ride status',
@@ -142,6 +153,14 @@ async function sendRideQuickMessage({ db, request, context, clock }) {
           rideStatus: String(ride.status || 'unknown'),
         },
       });
+    }
+
+    if (quickMessageDefinition(messageCode)?.requiresMessagingV1) {
+      const readySnap = await tx.get(db.collection(`${C.RIDE_REQUESTS}/${rideId}/conversation`).doc('state'));
+      const ready = readySnap.data() || {};
+      if (ready.driver !== true || ready.passenger !== true) {
+        throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, { safeMetadata: { reason: 'MESSAGE_PEER_NOT_READY' } });
+      }
     }
 
     const nowMs = Number(clock.now());
@@ -194,6 +213,11 @@ async function sendRideQuickMessage({ db, request, context, clock }) {
       createdAtMs: nowMs,
       createdAt: ts(),
       expiresAtMs: nowMs + QUICK_MESSAGE_RETENTION_MS,
+      notificationEventId: notification.id,
+    });
+    tx.set(historyRef, {
+      rideId, kind: 'preset', sequence, messageCode, senderRole, recipientRole,
+      createdAtMs: nowMs, createdAt: ts(), traceId: context?.traceId || null,
       notificationEventId: notification.id,
     });
     enqueueEventTx(tx, db, notification);

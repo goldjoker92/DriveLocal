@@ -80,16 +80,39 @@ async function pseudonymizeMatches(db, collectionName, field, uid, updateFactory
   });
 }
 
+// Free text can contain personal details. Purge it before unlinking the account
+// from the ride; on failure the ride still matches the retry query below.
+async function deleteRideConversation(db, rideId) {
+  for (const name of ['messages', 'conversation']) {
+    while (true) {
+      const page = await db.collection(`${C.RIDE_REQUESTS}/${rideId}/${name}`).limit(CHUNK_SIZE).get();
+      if (!page.size) break;
+      const batch = db.batch();
+      page.docs.forEach((item) => batch.delete(item.ref));
+      await batch.commit();
+      if (page.size < CHUNK_SIZE) break;
+    }
+  }
+}
+
 async function anonymizeRides(db, role, uid, anonymousSubjectId) {
   const field = role === 'driver' ? 'acceptedDriverId' : 'passengerId';
-  return pseudonymizeMatches(db, C.RIDE_REQUESTS, field, uid, (ride) =>
-    buildRideAnonymizationUpdate({
-      role,
-      anonymousSubjectId,
-      ride,
-      deleteField: deleteField(),
-    })
-  );
+  let count = 0;
+  while (true) {
+    const page = await db.collection(C.RIDE_REQUESTS).where(field, '==', uid).limit(CHUNK_SIZE).get();
+    if (!page.size) break;
+    const batch = db.batch();
+    for (const entry of page.docs) {
+      await deleteRideConversation(db, entry.id);
+      batch.update(entry.ref, runtimeUpdate(buildRideAnonymizationUpdate({
+        role, anonymousSubjectId, ride: entry.data(), deleteField: deleteField(),
+      })));
+      count += 1;
+    }
+    await batch.commit();
+    if (page.size < CHUNK_SIZE) break;
+  }
+  return count;
 }
 
 async function pseudonymizeFinancialRecords(db, uid, anonymousSubjectId) {
@@ -353,6 +376,7 @@ module.exports = {
   processAccountDeletion,
   mutateMatches,
   anonymizeRides,
+  deleteRideConversation,
   pseudonymizeFinancialRecords,
   pseudonymizeRiskProfile,
   pseudonymizeSecurityRecords,

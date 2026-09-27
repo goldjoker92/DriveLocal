@@ -7,12 +7,14 @@ import {
 } from '../rideQuickMessages';
 
 describe('mobile ride quick messages', () => {
-  it('mirrors the eight server-catalogued codes', () => {
+  it('mirrors the server-catalogued codes', () => {
     expect(Object.keys(RIDE_QUICK_MESSAGES)).toEqual([
       'driver_arriving',
       'driver_traffic_delay',
       'driver_at_pickup',
       'driver_cannot_stop_here',
+      'driver_cannot_find_passenger',
+      'driver_where_waiting',
       'passenger_waiting',
       'passenger_coming',
       'passenger_needs_minute',
@@ -25,10 +27,13 @@ describe('mobile ride quick messages', () => {
     expect(quickMessageOptions('driver', 'assigned').map((item) => item.code)).toEqual([
       'driver_arriving',
       'driver_traffic_delay',
+      'driver_where_waiting',
     ]);
     expect(quickMessageOptions('driver', 'driver_arrived').map((item) => item.code)).toEqual([
       'driver_at_pickup',
       'driver_cannot_stop_here',
+      'driver_cannot_find_passenger',
+      'driver_where_waiting',
     ]);
     expect(quickMessageOptions('passenger', 'assigned').map((item) => item.code)).toEqual([
       'passenger_waiting',

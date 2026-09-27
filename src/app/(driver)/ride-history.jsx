@@ -26,8 +26,11 @@ function statusColor(tone) {
 }
 
 function RideHistoryRow({ item }) {
+  const router = useRouter();
   return (
     <AppCard style={styles.rideCard}>
+      <AppButton title="MENSAGENS DA CORRIDA" variant="ghost"
+        onPress={() => router.push({ pathname: '/driver-ride-messages', params: { rideId: item.rideId } })} />
       <View style={styles.rideHeader}>
         <View style={styles.rideHeaderCopy}>
           <Text style={styles.passengerName}>{item.passengerFirstName}</Text>

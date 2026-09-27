@@ -175,7 +175,7 @@ export default function RootLayout() {
               </OperationalAlertsViewport>
               {/* Visible only after the driver has announced arrival at the pickup. */}
               <DriverPassengerWaitGuard route={pathname} />
-              {/* Server-catalogued messages only; no free text or contact exposure. */}
+              {/* Shared ride-conversation entry; sends stay server-authorized. */}
               <RideQuickMessagesGuard route={pathname} />
               {/* Support is callable-only and automatically receives safe ride context. */}
               <SupportShortcut route={pathname} />

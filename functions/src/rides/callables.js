@@ -19,6 +19,7 @@ const { markDriverArrived } = require('./markDriverArrived');
 const { cancelRide } = require('./cancelRide');
 const { normalizedCancellationRequest } = require('./cancellationCompatibility');
 const { sendRideQuickMessage } = require('./sendQuickMessage');
+const { openRideConversation, sendRideMessage } = require('./ride-messages');
 const { getPassengerRideHistory } = require('./passengerHistory');
 const lifecycle = require('./lifecycle');
 const {
@@ -153,6 +154,8 @@ module.exports = {
   markPassengerPixSentSecure: bindLifecycle('markPassengerPixSentSecure', lifecycle.markPassengerPixSent),
   confirmDriverPixReceivedSecure: bindLifecycle('confirmDriverPixReceivedSecure', confirmDriverPixReceivedPublic),
   cancelRideSecure: bindLifecycle('cancelRideSecure', cancelRideWithCompatibility),
+  openRideConversationSecure: bindLifecycle('openRideConversationSecure', openRideConversation),
+  sendRideMessageSecure: bindLifecycle('sendRideMessageSecure', sendRideMessage),
   sendRideQuickMessageSecure: bindLifecycle('sendRideQuickMessageSecure', sendRideQuickMessage),
   reportRidePaymentIssueSecure: bindLifecycle('reportRidePaymentIssueSecure', lifecycle.reportRidePaymentIssue),
   resolveRideDisputeSecure: bindLifecycle('resolveRideDisputeSecure', resolveRideDispute),

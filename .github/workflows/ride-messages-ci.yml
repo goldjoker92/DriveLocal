@@ -1,0 +1,32 @@
+name: Ride messages CI
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'functions/**'
+      - 'backend/firebase/rules/firestore.rules'
+      - '.github/workflows/ride-messages-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  conversation-emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.4'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --prefix functions
+      - name: Verify rules, concurrent sends and privacy cleanup
+        run: >-
+          npx --yes firebase-tools@14.17.0 emulators:exec
+          --only firestore --project demo-drivelocal-chat
+          "npm --prefix functions test -- --runTestsByPath src/__tests__/ride-messages.emulator.test.js"
