@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
     fontFamily,
   },
   blockingText: {
-    color: colors.danger,
+    color: colors.dangerText,
   },
   warningText: {
     color: colors.warning,

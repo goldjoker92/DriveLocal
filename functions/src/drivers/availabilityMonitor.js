@@ -7,7 +7,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { evaluateDriverDispatchReadiness, timestampMs } = require('./dispatchReadiness');
 const { resolveDriverBuildPolicy } = require('./appVersion');
 const { buildNotificationEvent, enqueueEventTx } = require('../notifications/events');
-const { logInfo, logWarning } = require('../logging/logger');
+const { logInfo, logWarning, shortHash } = require('../logging/logger');
 const C = require('../rides/constants');
 
 const SCAN_LIMIT = 100;
@@ -16,9 +16,9 @@ const ALERT_TTL_MS = 60_000;
 const ALERT_COOLDOWN_MS = 15 * 60_000;
 const TECHNICAL_REASONS = new Set(['session_stale', 'session_mismatch', 'location_missing', 'location_stale']);
 
-async function reconcileDriverAvailability({ db, driverId, expectedSessionId, nowMs, mode = 'monitor' }) {
+async function reconcileDriverAvailability({ db, driverId, expectedSessionId, nowMs, mode = 'monitor', context }) {
   const ref = db.collection(C.DRIVERS).doc(driverId);
-  return db.runTransaction(async (tx) => {
+  const result = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) return { outcome: 'skipped' };
     const driver = snap.data() || {};
@@ -35,7 +35,7 @@ async function reconcileDriverAvailability({ db, driverId, expectedSessionId, no
     if (state.ready) {
       if (previous.state === 'unavailable' && previous.sessionId === sessionId) {
         tx.set(ref, { availabilityHealth: { ...previous, state: 'ready', reason: 'ready', recoveredAtMs: nowMs } }, { merge: true });
-        return { outcome: 'recovered' };
+        return { outcome: 'recovered', reason: 'ready' };
       }
       return { outcome: 'skipped' };
     }
@@ -83,8 +83,15 @@ async function reconcileDriverAvailability({ db, driverId, expectedSessionId, no
       event.data.incidentNumber = incidentNumber;
       enqueueEventTx(tx, db, event);
     }
-    return { outcome: close ? 'closed' : newIncident ? 'interrupted' : 'skipped', notified: notify };
+    return { outcome: close ? 'closed' : newIncident ? 'interrupted' : 'skipped', notified: notify, reason };
   });
+  // Log only committed transitions, never transaction attempts (which retry).
+  // Hashes let support correlate one driver/session without logging identities.
+  if (result.outcome !== 'skipped') logInfo(context, `driver.availability.${result.outcome}`, {
+    driverIdHash: shortHash(driverId), sessionIdHash: shortHash(expectedSessionId),
+    reason: result.reason, notified: result.notified === true, mode,
+  });
+  return result;
 }
 
 function shouldSendAvailabilityAlert(driver, event, nowMs) {
@@ -113,13 +120,15 @@ async function monitorDriverAvailability({ db, nowMs, context }) {
   for (const document of snap.docs) {
     try {
       const result = await reconcileDriverAvailability({
-        db, driverId: document.id, expectedSessionId: document.data()?.availabilitySessionId, nowMs,
+        db, driverId: document.id, expectedSessionId: document.data()?.availabilitySessionId, nowMs, context,
       });
       if (Object.prototype.hasOwnProperty.call(summary, result.outcome)) summary[result.outcome] += 1;
       if (result.notified) summary.notified += 1;
     } catch (error) {
       summary.failed += 1;
-      logWarning(context, 'driver.availability_monitor.failed', { reason: error?.code || 'unknown' });
+      logWarning(context, 'driver.availability_monitor.failed', {
+        driverIdHash: shortHash(document.id), reason: error?.code || 'unknown',
+      });
     }
   }
   await cursorRef.set({ afterId: snap.size === SCAN_LIMIT ? snap.docs[snap.size - 1].id : null });
@@ -132,7 +141,8 @@ const monitorDriverAvailabilityTask = onSchedule({
   retryCount: 0, maxInstances: 1, timeoutSeconds: 60,
 }, () => {
   const nowMs = Date.now();
-  return monitorDriverAvailability({ db: admin.firestore(), nowMs, context: { traceId: `availability-${nowMs}` } });
+  return monitorDriverAvailability({ db: admin.firestore(), nowMs,
+    context: { traceId: `availability-${nowMs}`, functionName: 'monitorDriverAvailabilityTask' } });
 });
 
 module.exports = {

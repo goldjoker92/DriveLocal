@@ -4,7 +4,7 @@
 // rejected without logging UIDs, coordinates, names or profile data.
 
 const admin = require('firebase-admin');
-const { logInfo, logWarning } = require('../logging/logger');
+const { logInfo, logWarning, shortHash } = require('../logging/logger');
 const { queryCandidateDrivers, selectEligibleDriversWithDiagnostics } = require('./candidates');
 const { createTargetedOffers } = require('./offers');
 const C = require('./constants');
@@ -21,11 +21,12 @@ async function closeInvalidSessions({ db, driverIds, candidates, clock, mode, co
     try {
       const result = await reconcileDriverAvailability({
         db, driverId, expectedSessionId: candidate.data?.availabilitySessionId,
-        nowMs: clock.now(), mode,
+        nowMs: clock.now(), mode, context,
       });
       if (result.outcome === 'closed') closedCount += 1;
     } catch (error) {
-      logWarning(context, 'ride.dispatch.session_cleanup_failed', { ...base, mode, reason: error?.code || 'unknown' });
+      logWarning(context, 'ride.dispatch.session_cleanup_failed', { ...base, mode,
+        driverIdHash: shortHash(driverId), reason: error?.code || 'unknown' });
     }
   }
   return closedCount;

@@ -7,6 +7,7 @@ const { getDocFromServer } = require('firebase/firestore');
 const { getDriverTrackingSession, refreshDriverOnlineHeartbeat } = require('../driverLocationTracking');
 const { getDriverDeviceDiagnostic } = require('../driverDeviceDiagnostics');
 const { recoverDriverAvailability } = require('../driverAvailabilityRecovery');
+const { auth } = require('../../config/firebase');
 const NOW = 1_800_000_000_000;
 const SESSION = 'work_driver_1234567890';
 const profile = (extra = {}) => ({
@@ -20,6 +21,8 @@ const snapshot = (data) => ({ exists: () => true, data: () => data });
 beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(Date, 'now').mockReturnValue(NOW);
+  jest.spyOn(console, 'info').mockImplementation(() => {});
+  auth.currentUser = { uid: 'driver' };
   getDriverTrackingSession.mockResolvedValue({ driverId: 'driver', availabilitySessionId: SESSION });
   getDocFromServer.mockResolvedValue(snapshot(profile()));
   refreshDriverOnlineHeartbeat.mockResolvedValue({ status: 'published' });
@@ -62,4 +65,40 @@ it('rejects a claimed publication when the actual server GPS remains stale', asy
 it('requires usable device permissions even after a successful server write', async () => {
   getDriverDeviceDiagnostic.mockResolvedValue({ blocking: true, primaryIssue: { code: 'services_disabled' } });
   await expect(recoverDriverAvailability()).rejects.toMatchObject({ code: 'DEVICE_NOT_READY' });
+});
+
+it('shares a pending attempt when the UI times out and the driver retries', async () => {
+  let releaseRead;
+  getDocFromServer.mockImplementationOnce(() => new Promise((resolve) => { releaseRead = resolve; }));
+  const first = recoverDriverAvailability();
+  await Promise.resolve();
+  const retry = recoverDriverAvailability();
+  expect(retry).toBe(first);
+  expect(getDocFromServer).toHaveBeenCalledTimes(1);
+  releaseRead(snapshot(profile()));
+  await expect(retry).resolves.toEqual({ status: 'ready' });
+  expect(refreshDriverOnlineHeartbeat).toHaveBeenCalledTimes(1);
+  // A settled attempt releases the lock, allowing a later genuine check.
+  await recoverDriverAvailability();
+  expect(refreshDriverOnlineHeartbeat).toHaveBeenCalledTimes(2);
+});
+
+it('releases the lock after a failure and logs one safe, correlated outcome', async () => {
+  getDocFromServer.mockRejectedValueOnce(Object.assign(new Error('private address/phone'), { code: 'unavailable' }));
+  await expect(recoverDriverAvailability()).rejects.toMatchObject({ code: 'unavailable' });
+  const calls = console.info.mock.calls.map(([, fields]) => fields);
+  expect(calls.map((entry) => entry.event)).toEqual(['recovery.started', 'recovery.failed']);
+  expect(calls[0].traceId).toBe(calls[1].traceId);
+  expect(JSON.stringify(calls)).not.toContain('private address/phone');
+  expect(JSON.stringify(calls)).not.toContain(SESSION);
+  await expect(recoverDriverAvailability()).resolves.toEqual({ status: 'ready' });
+});
+
+it('does not publish a GPS point after an account change during the server read', async () => {
+  getDocFromServer.mockImplementationOnce(async () => {
+    auth.currentUser = { uid: 'another-driver' };
+    return snapshot(profile());
+  });
+  await expect(recoverDriverAvailability()).rejects.toMatchObject({ code: 'SESSION_CHANGED' });
+  expect(refreshDriverOnlineHeartbeat).not.toHaveBeenCalled();
 });

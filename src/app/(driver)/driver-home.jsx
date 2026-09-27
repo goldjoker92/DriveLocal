@@ -73,8 +73,9 @@ function Line({ children, tone = 'muted' }) {
 }
 
 function WorkStatusTitle({ presentation }) {
-  const color = presentation.tone === 'success' ? colors.success
-    : presentation.tone === 'warning' ? colors.warning : colors.danger;
+  const color = presentation.tone === 'success' ? colors.successText
+    : presentation.tone === 'warning' ? colors.warning
+      : presentation.tone === 'danger' ? colors.danger : colors.textMuted;
   return <Text accessibilityLiveRegion="polite" style={[styles.workTitle, { color }]}>{presentation.title}</Text>;
 }
 

@@ -78,6 +78,7 @@ export default function useDriverDispatchState(driver, source = {}) {
 
   useEffect(() => {
     console.info('[DRIVER_AVAILABILITY] visibility.changed', {
+      scope: 'driver_availability', event: 'visibility.changed', atMs: Date.now(),
       state: visibility.state, reason: visibility.reason,
     });
     setRecoveryError('');
@@ -106,6 +107,10 @@ export default function useDriverDispatchState(driver, source = {}) {
         ]);
       }
     } catch (error) {
+      if (error?.code === 'RECOVERY_TIMEOUT') console.info('[DRIVER_AVAILABILITY] recovery.ui_timeout', {
+        scope: 'driver_availability', event: 'recovery.ui_timeout', atMs: Date.now(),
+        reason: 'RECOVERY_TIMEOUT', result: 'pending_attempt_preserved',
+      });
       const safeCodes = ['SESSION_RESTART_REQUIRED', 'LOCATION_NOT_CONFIRMED', 'SESSION_CHANGED',
         'AVAILABILITY_NOT_CONFIRMED', 'DEVICE_NOT_READY', 'RECOVERY_TIMEOUT'];
       if (mounted.current) setRecoveryError(safeCodes.includes(error?.code)

@@ -10,6 +10,7 @@ import DriverActiveRideCard from '../../components/DriverActiveRideCard';
 import DriverKeepAwakeGuard from '../../components/DriverKeepAwakeGuard';
 import DriverDispatchVisibilityBanner from '../../components/DriverDispatchVisibilityBanner';
 import DriverAnnouncementBanner from '../../components/DriverAnnouncementBanner';
+import OperationalAlertsViewport from '../../components/OperationalAlertsViewport';
 import { DriverAvailabilityContext } from '../../contexts/DriverAvailabilityContext';
 import useDriverDispatchState from '../../hooks/useDriverDispatchState';
 import { auth, db } from '../../config/firebase';
@@ -397,11 +398,13 @@ export default function DriverLayout() {
         activeRideId={activeRideId}
       />
       <SafeAreaView style={styles.visibilityArea} edges={['top']} pointerEvents="box-none">
+        <OperationalAlertsViewport testID="availability-alerts-viewport">
         <DriverDispatchVisibilityBanner hideWhenStable={segments.includes('driver-home')} />
         {/* Admin message to the fleet. Shown on every driver screen so it cannot
             be missed, never during an accepted ride, and dismissed by the driver
             himself with "Entendi". */}
         <DriverAnnouncementBanner hasActiveRide={Boolean(activeRideId)} />
+        </OperationalAlertsViewport>
       </SafeAreaView>
       {activeRideCardVisible ? (
         <SafeAreaView style={styles.activeRideArea} edges={['top']}>

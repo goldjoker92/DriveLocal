@@ -18,15 +18,17 @@ export default function DriverDispatchVisibilityBanner({ hideWhenStable = false 
     : copy.tone === 'success' ? colors.success : copy.tone === 'neutral' ? colors.textMuted : colors.warning;
   const background = copy.tone === 'danger' ? colors.dangerBg
     : copy.tone === 'warning' ? colors.warningBg : colors.background;
+  const textAccent = copy.tone === 'success' ? colors.successText
+    : copy.tone === 'danger' ? colors.dangerText : accent;
 
   return (
     <View accessibilityLiveRegion="polite" style={{
       backgroundColor: background, borderRadius: radius.md, borderWidth: 1,
       borderColor: accent, padding: stable ? spacing.sm : spacing.md, gap: spacing.xs,
     }}>
-      <Text style={[{ fontFamily, color: accent, fontWeight: '800' }, typography.body]}>{copy.title}</Text>
+      <Text style={[typography.bodyBold, { fontFamily, color: textAccent }]}>{copy.title}</Text>
       {!stable ? <Text style={[{ fontFamily, color: colors.text }, typography.small]}>{copy.body}</Text> : null}
-      {recoveryError ? <Text accessibilityRole="alert" style={[{ color: colors.danger }, typography.small]}>{recoveryError}</Text> : null}
+      {recoveryError ? <Text accessibilityRole="alert" style={[{ color: colors.dangerText }, typography.small]}>{recoveryError}</Text> : null}
       {copy.action ? (
         <Pressable accessibilityRole="button" accessibilityLabel={copy.actionLabel}
           accessibilityState={{ disabled: recovering, busy: recovering }}
@@ -34,7 +36,7 @@ export default function DriverDispatchVisibilityBanner({ hideWhenStable = false 
           style={{ minHeight: 48, padding: spacing.sm, borderRadius: radius.sm, alignItems: 'center',
             justifyContent: 'center', backgroundColor: accent, opacity: recovering ? 0.7 : 1 }}>
           {recovering ? <ActivityIndicator color={colors.white} />
-            : <Text style={[{ fontFamily, color: colors.white, fontWeight: '800', textAlign: 'center' }, typography.small]}>{copy.actionLabel}</Text>}
+            : <Text style={[typography.small, { fontFamily, color: colors.white, fontWeight: '800', textAlign: 'center' }]}>{copy.actionLabel}</Text>}
         </Pressable>
       ) : null}
     </View>

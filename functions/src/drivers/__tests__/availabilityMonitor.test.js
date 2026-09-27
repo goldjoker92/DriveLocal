@@ -27,6 +27,24 @@ async function setup(overrides) {
 }
 
 describe('availability monitor', () => {
+  it('logs only committed transitions with correlated hashes and no private data', async () => {
+    const logger = require('firebase-functions/logger');
+    const spy = jest.spyOn(logger, 'info').mockImplementation(() => {});
+    try {
+      const { run } = await setup();
+      await run({ context: { traceId: 'monitor-trace' } });
+      await run({ context: { traceId: 'monitor-trace' } });
+      expect(spy).toHaveBeenCalledTimes(1);
+      const [event, fields] = spy.mock.calls[0];
+      expect(event).toBe('driver.availability.interrupted');
+      expect(fields).toMatchObject({ traceId: 'monitor-trace', reason: 'location_stale', notified: true });
+      expect(fields.driverIdHash).toMatch(/^[a-f0-9]{12}$/);
+      expect(fields.sessionIdHash).toMatch(/^[a-f0-9]{12}$/);
+      expect(JSON.stringify(fields)).not.toContain(SESSION);
+      expect(JSON.stringify(fields)).not.toContain('driver@example.test');
+      expect(JSON.stringify(fields)).not.toContain('-38.5');
+    } finally { spy.mockRestore(); }
+  });
   it('advances its cursor past healthy drivers to inspect the whole fleet', async () => {
     const db = makeFakeFirestore();
     for (let i = 0; i < 101; i += 1) {

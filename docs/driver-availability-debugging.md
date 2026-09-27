@@ -229,7 +229,32 @@ cooldown), without waiting for passenger demand. It re-reads the exact session
 inside a transaction. FCM processing drops alerts for recovered/replaced/stopped
 sessions and active rides. A disconnected phone cannot be notified immediately.
 
-New logs: `visibility.changed` (state/reason),
-`driver.availability_monitor.completed` (aggregate counters), and
-`ride.dispatch.session_cleanup_failed`. Never interpret the raw `online` string
-as the number of drivers who can receive a ride.
+Never interpret the raw `online` string as the number of drivers who can receive
+a ride.
+
+### Trace one interruption
+
+| Event | Meaning / useful fields |
+| --- | --- |
+| `visibility.changed` | Mobile state/reason, `atMs`; emitted only when the visible state changes. |
+| `recovery.started` | Explicit verification began; keep its `traceId`. |
+| `recovery.succeeded` | Same trace: `ready` after fresh GPS + server read + device check, or `active_ride` when ride tracking takes priority. |
+| `recovery.failed` | Same trace, stable `reason` code and `durationMs`; no raw error message. |
+| `recovery.ui_timeout` | UI waited 20 seconds. The native/server attempt may still be pending; another tap joins that attempt. |
+| `driver.availability.interrupted` | Committed server interruption: `driverIdHash`, `sessionIdHash`, `reason`, `notified`, `traceId`. |
+| `driver.availability.recovered` | Server sees usable availability again. |
+| `driver.availability.closed` | Server closed the exact idle session after abandonment or mandatory-update enforcement. |
+| `driver.availability_monitor.completed` | Per-run scanned/interrupted/recovered/closed/notified/failed counts. |
+| `driver.availability_monitor.failed` / `ride.dispatch.session_cleanup_failed` | Failure code and hashed driver correlation. |
+
+Transition logs are written **after** the Firestore transaction commits, not
+inside its retried callback. Stable healthy profiles do not generate one event
+per minute. Server identifiers are one-way SHA-256 prefixes; client recovery logs
+contain no account/session ID, address, GPS coordinates, phone or Pix key.
+
+For a complaint, first identify the UI `state/reason`, then check the committed
+server transition and the monitor summary. If readiness is healthy, continue to
+the existing ride trace: proximity/wave selection, offer creation, FCM result,
+accept/refuse/expire. FCM acceptance is not proof that a human saw the notification.
+
+Detailed scenario and UX review: `docs/release/driver-availability-pr-87-review.md`.
