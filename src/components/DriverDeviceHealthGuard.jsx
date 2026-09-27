@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSegments } from 'expo-router';
 import {
   AppState,
   Linking,
@@ -104,7 +105,9 @@ function applyRobotSimulationTrackingSource(snapshot, session) {
 }
 
 export default function DriverDeviceHealthGuard({ route }) {
-  const relevantRoute = isDriverOperationalRoute(route);
+  const segments = useSegments();
+  // Pathnames omit route groups: keep diagnostics alive on wallet/profile too.
+  const relevantRoute = segments.includes('(driver)') || isDriverOperationalRoute(route);
   const [authenticated, setAuthenticated] = useState(Boolean(auth.currentUser));
   const [diagnostic, setDiagnostic] = useState(null);
   const [checking, setChecking] = useState(false);
