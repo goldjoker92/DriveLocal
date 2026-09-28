@@ -11,6 +11,10 @@ const { logInfo, logWarning } = require('../logging/logger');
 const { quickMessagePresentation } = require('../rides/quickMessageCatalog');
 const C = require('../rides/constants');
 const { shouldSendAvailabilityAlert } = require('../drivers/availabilityMonitor');
+const {
+  RIDE_LOCATION_ALERT_EVENTS,
+  shouldSendRideLocationAlert,
+} = require('../rides/liveLocationGuard');
 
 // FCM error codes meaning the token is dead and must be disabled.
 const INVALID_TOKEN_CODES = new Set([
@@ -23,6 +27,16 @@ const PRESENTATION = Object.freeze({
   [C.NOTIFICATION_EVENT.DRIVER_AVAILABILITY_INTERRUPTED]: {
     title: 'Verifique sua disponibilidade',
     body: 'Não conseguimos confirmar sua localização para novas corridas. Abra o DriveLocal para verificar e reativar.',
+  },
+  // Live-location guard. The driver copy is read while driving: it asks to act
+  // only once safely stopped. The passenger copy states facts only.
+  [C.NOTIFICATION_EVENT.RIDE_LOCATION_STALE]: {
+    title: 'Passageiro sem sua localização',
+    body: 'Sua posição não está chegando ao passageiro. Quando parar com segurança, abra o DriveLocal e confira "Localização ao vivo".',
+  },
+  [C.NOTIFICATION_EVENT.RIDE_LOCATION_DELAYED]: {
+    title: 'Seu motorista aceitou a corrida',
+    body: 'A posição dele no mapa está demorando para atualizar. A corrida continua confirmada.',
   },
   [C.NOTIFICATION_EVENT.RIDE_MESSAGE]: {
     title: 'Nova mensagem na corrida',
@@ -147,8 +161,14 @@ function androidNotificationForEvent(event, options = {}) {
 
   const common = {
     channelId,
+    // One slot per ride for location alerts: a second alert replaces the first
+    // instead of stacking in the shade while the driver is on the road.
     tag: event.eventType === C.NOTIFICATION_EVENT.DRIVER_AVAILABILITY_INTERRUPTED
-      ? 'drivelocal_driver_availability' : safeAndroidTag(event),
+      ? 'drivelocal_driver_availability'
+      : event.eventType === C.NOTIFICATION_EVENT.RIDE_LOCATION_STALE
+        ? `drivelocal_ride_location_${String(event.rideId || 'ride')}`
+          .replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 120)
+        : safeAndroidTag(event),
   };
 
   if (!isDriverArrival) {
@@ -239,6 +259,28 @@ async function processRideNotificationEvent({ db, messaging, eventRef, event, co
     if (!shouldSendAvailabilityAlert(driver.exists ? driver.data() : null, event, nowMs)) {
       await eventRef.set({ status: C.NOTIFICATION_STATUS.SKIPPED, reasonCode: 'AVAILABILITY_ALERT_OBSOLETE', processedAtMs: nowMs }, { merge: true });
       return { skipped: true, reasonCode: 'AVAILABILITY_ALERT_OBSOLETE' };
+    }
+  }
+
+  if (RIDE_LOCATION_ALERT_EVENTS.has(event.eventType)) {
+    const [rideSnap, trackingSnap, healthSnap] = await Promise.all([
+      db.collection(C.RIDE_REQUESTS).doc(event.rideId).get(),
+      db.collection(C.ACTIVE_RIDE_LOCATIONS).doc(event.rideId).get(),
+      db.collection(C.RIDE_TRACKING_HEALTH).doc(event.rideId).get(),
+    ]);
+    const sendable = shouldSendRideLocationAlert({
+      ride: rideSnap.exists ? rideSnap.data() : null,
+      tracking: trackingSnap.exists ? trackingSnap.data() : null,
+      health: healthSnap.exists ? healthSnap.data() : null,
+      event,
+      nowMs,
+    });
+    if (!sendable) {
+      await eventRef.set({ status: C.NOTIFICATION_STATUS.SKIPPED, reasonCode: 'RIDE_LOCATION_ALERT_OBSOLETE', processedAtMs: nowMs }, { merge: true });
+      logInfo(context, 'notification.skipped', {
+        operation: 'notify', notificationId: event.notificationId, reasonCode: 'RIDE_LOCATION_ALERT_OBSOLETE',
+      });
+      return { skipped: true, reasonCode: 'RIDE_LOCATION_ALERT_OBSOLETE' };
     }
   }
 

@@ -8,6 +8,9 @@ module.exports = Object.freeze({
   RIDE_QUOTES: 'rideQuotes',
   DRIVER_OFFERS: 'driverOffers',
   ACTIVE_RIDE_LOCATIONS: 'activeRideLocations',
+  // Server-only live-location incident record, one per ride (liveLocationGuard.js).
+  // No uid and no coordinates: rideId is the only join key.
+  RIDE_TRACKING_HEALTH: 'rideTrackingHealth',
   DRIVERS: 'drivers',
   PASSENGERS: 'passengers',
   PRIVATE_DRIVER_DATA: 'privateDriverData',
@@ -95,6 +98,11 @@ module.exports = Object.freeze({
     DRIVER_BROADCAST: 'driver_broadcast',
     PASSENGER_BROADCAST: 'passenger_broadcast',
     DRIVER_AVAILABILITY_INTERRUPTED: 'driver_availability_interrupted',
+    // Live-location guard (rides/liveLocationGuard.js). STALE: the driver's
+    // position stopped reaching the passenger during the approach. DELAYED: one
+    // honest reassurance to the passenger. Both re-checked at delivery time.
+    RIDE_LOCATION_STALE: 'ride_location_stale',
+    RIDE_LOCATION_DELAYED: 'ride_location_delayed',
   }),
 
   NOTIFICATION_STATUS: Object.freeze({

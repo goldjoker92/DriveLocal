@@ -93,6 +93,15 @@ const {
   acceptedPassengerIdentityTrigger,
 } = require('./rides/passengerIdentityProjection');
 exports.acceptedPassengerIdentityTrigger = acceptedPassengerIdentityTrigger;
+// Passenger-visible live location guard: relays the accepted driver's own point
+// onto the ride map when the ride channel falls behind, and turns every silence
+// into a measured incident with a bounded driver alert. Works for every build.
+const {
+  rideLocationMirrorTrigger,
+  monitorRideLiveLocationTask,
+} = require('./rides/liveLocationGuard');
+exports.rideLocationMirrorTrigger = rideLocationMirrorTrigger;
+exports.monitorRideLiveLocationTask = monitorRideLiveLocationTask;
 
 const notificationCallables = require('./notifications/callables');
 exports.syncNotificationTokenSecure = notificationCallables.syncNotificationTokenSecure;
