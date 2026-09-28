@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import {
   deleteDoc,
   doc,
@@ -20,12 +20,18 @@ import { safeTrackingPayload, isRecentNativeLocationSample } from '../utils/ride
 import { shouldPublishDriverLocation } from '../utils/driverLocationPolicy';
 import { BACKGROUND_INCIDENT_REASONS } from '../utils/driverBackgroundReliability';
 import { reportBackgroundIncident } from './driverBackgroundReliabilityStore';
+import { recordClientNonFatal } from './clientErrorReporter';
 
 export const DRIVER_LOCATION_TASK = 'drivelocal-driver-live-location-v1';
 const SESSION_KEY = '@drivelocal/driver-location-session-v1';
 const LAST_STATUS_KEY = '@drivelocal/driver-location-last-status-v1';
 const DEV_OVERRIDE_KEY = '@drivelocal/driver-location-dev-override-v1';
 const LAST_PUBLISH_KEY = '@drivelocal/driver-location-last-publish-v2';
+// Which cadence the running native service was started with ('online' or
+// 'active_ride'). A ride session can be served by an online-cadence service
+// (restart deferred while the app was in background); the supervisor upgrades
+// it as soon as the app is in the foreground again.
+const NATIVE_MODE_KEY = '@drivelocal/driver-location-native-mode-v1';
 
 // Native sampling is intentionally more frequent than Firestore publication.
 // A time-driven online sample guarantees an idle-driver heartbeat in background;
@@ -34,6 +40,15 @@ const ONLINE_NATIVE_INTERVAL_MS = 60_000;
 const ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000;
 const ONLINE_QUEUE_GAP_MS = 15_000;
 const ACTIVE_RIDE_QUEUE_GAP_MS = 3_000;
+
+// Ride live location (field incident 2026-09-27: passengers cancelled because the
+// car stayed frozen on their map and they concluded nobody was coming).
+//  - A ride point is older than this for the supervisor: repair it. The accepted
+//    policy publishes every 8-15 s, the passenger map flags 30 s as outdated.
+const RIDE_PUBLISH_STALE_MS = 20_000;
+//  - getCurrentPositionAsync can wait a long time for a first fix indoors; ride
+//    repairs never pile up behind it. The online start path keeps its old wait.
+const RIDE_IMMEDIATE_FIX_TIMEOUT_MS = 12_000;
 
 let publishQueue = Promise.resolve();
 let lastThrottleLogAtMs = 0;
@@ -102,6 +117,48 @@ async function writeSession(session) {
 
 async function clearSession() {
   await AsyncStorage.removeItem(SESSION_KEY);
+}
+
+async function readNativeMode() {
+  try {
+    return (await AsyncStorage.getItem(NATIVE_MODE_KEY)) || null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function withTimeout(promise, timeoutMs, code) {
+  if (!timeoutMs) return promise;
+  let timer = null;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(code);
+      error.code = code;
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Production visibility for ride tracking degradations. Development traces stay
+// in the console; production gets ONE sanitized non-fatal report per ride and
+// state through the existing reportClientErrorSecure channel. No coordinates,
+// no raw ids (the sanitizer shortens rideRef).
+const reportedRideIssues = new Set();
+function reportRideTrackingIssue(session, status, reason) {
+  if (!session?.rideId) return;
+  const key = `${session.rideId}:${status}`;
+  if (reportedRideIssues.has(key)) return;
+  reportedRideIssues.add(key);
+  const error = new Error(`RIDE_TRACKING_${String(status).toUpperCase()}: ${reason || 'unknown'}`);
+  error.name = 'RideTrackingDegraded';
+  recordClientNonFatal(error, {
+    eventName: 'driver.ride_tracking.degraded',
+    role: 'driver',
+    rideId: session.rideId,
+    route: '/active-ride',
+    severity: 'warning',
+  }).catch(() => undefined);
 }
 
 async function readLastPublish() {
@@ -451,6 +508,7 @@ export async function requestDriverTrackingPermissions() {
 async function stopNativeTask() {
   const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
   if (started) await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+  await AsyncStorage.removeItem(NATIVE_MODE_KEY).catch(() => undefined);
 }
 
 async function ensureNativeTaskStarted(session) {
@@ -461,11 +519,14 @@ async function ensureNativeTaskStarted(session) {
   await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, {
     accuracy: activeRide ? Location.Accuracy.High : Location.Accuracy.Balanced,
     timeInterval: intervalMs,
-    // Online waiting must be time-driven even when the vehicle is perfectly still.
+    // Time-driven in BOTH modes, even when the vehicle is perfectly still: an
+    // online driver needs his heartbeat, and a ride passenger must keep seeing a
+    // fresh point at a traffic light or while the driver waits at the pickup
+    // (a 10 m distance filter silenced stopped phones: field incident 2026-09-27).
     // Firestore publication remains distance/time throttled by driverLocationPolicy.
-    distanceInterval: activeRide ? 10 : 0,
+    distanceInterval: 0,
     deferredUpdatesInterval: intervalMs,
-    deferredUpdatesDistance: activeRide ? 10 : 0,
+    deferredUpdatesDistance: 0,
     pausesUpdatesAutomatically: false,
     foregroundService: {
       notificationTitle: activeRide ? 'DriveLocal — corrida em andamento' : 'DriveLocal — sessão de trabalho',
@@ -476,22 +537,55 @@ async function ensureNativeTaskStarted(session) {
       killServiceOnDestroy: false,
     },
   });
+  await AsyncStorage.setItem(NATIVE_MODE_KEY, activeRide ? 'active_ride' : 'online').catch(() => undefined);
   traceTracking('native_task.started', session, {
     intervalMs,
-    distanceInterval: activeRide ? 10 : 0,
+    distanceInterval: 0,
     result: 'active',
   });
 }
 
-async function publishImmediate(session, options) {
+async function publishImmediate(session, options, { timeoutMs = 0 } = {}) {
   const lastKnown = await Location.getLastKnownPositionAsync({
     maxAge: 30_000,
     requiredAccuracy: 100,
   });
-  const current = lastKnown || await Location.getCurrentPositionAsync({
-    accuracy: session?.rideId ? Location.Accuracy.High : Location.Accuracy.Balanced,
-  });
+  const current = lastKnown || await withTimeout(
+    Location.getCurrentPositionAsync({
+      accuracy: session?.rideId ? Location.Accuracy.High : Location.Accuracy.Balanced,
+    }),
+    timeoutMs,
+    'DRIVER_LOCATION_FIX_TIMEOUT'
+  );
   return publishLocation(session, current, options);
+}
+
+// Ride mode never falls back to the online work session. That fallback was the
+// root of the 2026-09-27 field incident: the online session keeps writing
+// drivers/{id}.location but never activeRideLocations/{rideId}, and nothing
+// retried, so the passenger watched a frozen car for the whole approach.
+// The ride session stays written: any running native task (even one still on the
+// online cadence) now publishes ride points, and superviseActiveRideTracking()
+// keeps repairing until a point is published.
+async function keepRideSessionAfterStartFailure(session, reason) {
+  await writeSession(session).catch(() => undefined);
+  const nativeStarted = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK)
+    .catch(() => false);
+  const status = nativeStarted ? 'waiting_gps' : 'service_not_started';
+  await writeSafeStatus('active_ride_start_degraded', { reason, nativeStarted });
+  traceTracking('active_ride.start_degraded', session, {
+    reason,
+    nativeStarted,
+    result: 'ride_session_kept',
+  }, 'warn');
+  reportRideTrackingIssue(session, status, reason);
+  return {
+    status,
+    rideId: session.rideId,
+    source: 'native',
+    availabilitySessionId: session.availabilitySessionId,
+    reason,
+  };
 }
 
 async function restorePreviousSessionAfterStartFailure(previousSession, failedSession) {
@@ -570,6 +664,7 @@ async function startSession({
     requestPermissions,
   });
 
+  if (rideId) rideStartInFlight = true;
   try {
     await writeSession(session);
 
@@ -583,8 +678,26 @@ async function startSession({
       return { status: 'active', rideId, source: 'dev_simulation', availabilitySessionId };
     }
 
-    await ensureNativeTaskStarted(session);
-    const published = await publishImmediate(session, { force: true });
+    const nativeRunning = rideId
+      ? await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK).catch(() => false)
+      : false;
+    if (rideId && nativeRunning && AppState.currentState !== 'active') {
+      // Android 12+ may refuse to START a foreground service from background.
+      // Never stop a running service we might not be allowed to restart: it
+      // already publishes ride points for the ride session written above, and
+      // the supervisor upgrades its cadence once the app is foreground again.
+      traceTracking('native_task.restart_deferred', session, {
+        reason: 'app_not_foreground',
+        result: 'running_task_kept',
+      });
+    } else {
+      await ensureNativeTaskStarted(session);
+    }
+    const published = await publishImmediate(
+      session,
+      { force: true },
+      { timeoutMs: rideId ? RIDE_IMMEDIATE_FIX_TIMEOUT_MS : 0 }
+    );
     if (!published) {
       const error = new Error('DRIVER_INITIAL_LOCATION_NOT_PUBLISHED');
       error.code = 'DRIVER_INITIAL_LOCATION_NOT_PUBLISHED';
@@ -601,6 +714,8 @@ async function startSession({
     });
     return { status: 'active', rideId, source: 'native', availabilitySessionId };
   } catch (error) {
+    if (rideId) return keepRideSessionAfterStartFailure(session, error?.code || error?.message || 'unknown');
+
     const currentSession = await readSession();
     if (sameSession(currentSession, session)) await clearSession();
     await AsyncStorage.removeItem(LAST_PUBLISH_KEY);
@@ -620,6 +735,10 @@ async function startSession({
       result: 'error',
     }, 'error');
     throw error;
+  } finally {
+    // Always released, success or failure: a stuck flag would silence the
+    // supervisor for every later ride.
+    if (rideId) rideStartInFlight = false;
   }
 }
 
@@ -647,6 +766,32 @@ export async function attachActiveRideTracking({
   requestPermissions = false,
 }) {
   const existing = await readSession();
+
+  // Same ride, stage change (assigned -> driver_arrived -> in_progress): keep the
+  // running service. Restarting it at each stage was a window where Android could
+  // refuse the restart and leave the passenger without any point. The manual
+  // "Ativar" button (requestPermissions) still forces a full restart.
+  if (
+    !requestPermissions
+    && existing?.driverId === driverId
+    && existing?.rideId === rideId
+    && existing?.trackingPaused !== true
+    && validIdentifier(existing?.availabilitySessionId)
+    && (!availabilitySessionId || availabilitySessionId === existing.availabilitySessionId)
+  ) {
+    const override = await readDevOverride();
+    const nativeMode = await readNativeMode();
+    const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK)
+      .catch(() => false);
+    if (!override && started && nativeMode === 'active_ride') {
+      await writeSession({ ...existing, rideStatus: rideStatus || existing.rideStatus, updatedAtMs: Date.now() });
+      traceTracking('active_ride.stage_changed', { ...existing, rideStatus }, {
+        result: 'native_task_reused',
+      });
+      return superviseActiveRideTracking({ reason: 'stage_changed' });
+    }
+  }
+
   let workSessionId = availabilitySessionId || (
     existing?.driverId === driverId ? existing.availabilitySessionId : null
   );
@@ -679,6 +824,112 @@ export async function attachActiveRideTracking({
     rideStatus,
     requestPermissions,
   });
+}
+
+// Ride safety net, driven by the active-ride screen (10 s) and the driver layout
+// pulse (60 s). The native task stays primary; this only repairs:
+//  1. native service stopped, or still on the online cadence -> restart it in
+//     ride mode, foreground only (Android may refuse a background start);
+//  2. no ride point published for RIDE_PUBLISH_STALE_MS -> publish one now.
+// It never falls back to the online session and never touches a DEV simulation.
+// Concurrent callers share one run.
+let superviseInFlight = null;
+// A ride start is running (it stops/starts the native service and may wait for a
+// first fix): the supervisor must not start a second one in parallel.
+let rideStartInFlight = false;
+export function superviseActiveRideTracking({ reason = 'pulse' } = {}) {
+  if (superviseInFlight) return superviseInFlight;
+  superviseInFlight = superviseActiveRideTrackingUnlocked(reason)
+    .catch((error) => {
+      traceTracking('active_ride.supervisor_failed', null, {
+        reason: error?.code || error?.message || 'unknown',
+        trigger: reason,
+        result: 'error',
+      }, 'warn');
+      return { status: 'waiting_gps', reason: error?.code || 'unknown' };
+    })
+    .finally(() => { superviseInFlight = null; });
+  return superviseInFlight;
+}
+
+async function superviseActiveRideTrackingUnlocked(trigger) {
+  if (rideStartInFlight) return { status: 'checking' };
+  const session = await readSession();
+  if (!session?.rideId || session.trackingPaused === true) return { status: 'no_ride_session' };
+
+  const override = await readDevOverride();
+  if (override && override.driverId === session.driverId && override.rideId === session.rideId) {
+    return { status: 'active', source: 'dev_simulation' };
+  }
+
+  const currentUid = await authenticatedUid();
+  if (!currentUid || currentUid !== session.driverId) return { status: 'session_mismatch' };
+
+  const permission = await getDriverTrackingPermissionState();
+  if (permission.status !== 'granted') {
+    traceTracking('active_ride.supervisor_blocked', session, {
+      reason: permission.status,
+      trigger,
+      result: 'permission_missing',
+    }, 'warn');
+    reportRideTrackingIssue(session, permission.status, 'permission');
+    return permission;
+  }
+
+  const started = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+  const nativeMode = await readNativeMode();
+  if (!started || nativeMode !== 'active_ride') {
+    if (AppState.currentState === 'active') {
+      await ensureNativeTaskStarted(session);
+      await writeSafeStatus('active_ride_native_task_repaired', { wasStarted: started });
+      traceTracking('active_ride.native_task_repaired', session, {
+        reason: started ? 'online_cadence' : 'native_task_missing',
+        trigger,
+        result: 'restarted',
+      });
+      if (!started) {
+        await reportBackgroundIncident(BACKGROUND_INCIDENT_REASONS.NATIVE_TASK_REPAIRED)
+          .catch(() => undefined);
+      }
+    } else if (!started) {
+      traceTracking('active_ride.native_task_repair_deferred', session, {
+        reason: 'app_not_foreground',
+        trigger,
+        result: 'waiting_foreground',
+      }, 'warn');
+      reportRideTrackingIssue(session, 'service_not_started', 'background');
+      return { status: 'service_not_started' };
+    }
+  }
+
+  const last = await readLastPublish();
+  const lastRideMs = last?.rideId === session.rideId ? Number(last.atMs) : 0;
+  if (lastRideMs > 0 && Date.now() - lastRideMs < RIDE_PUBLISH_STALE_MS) {
+    return { status: 'active', source: 'native' };
+  }
+
+  const published = await publishImmediate(
+    session,
+    { force: true },
+    { timeoutMs: RIDE_IMMEDIATE_FIX_TIMEOUT_MS }
+  ).catch((error) => {
+    traceTracking('active_ride.repair_publish_failed', session, {
+      reason: error?.code || error?.message || 'unknown',
+      trigger,
+      result: 'not_published',
+    }, 'warn');
+    return false;
+  });
+  if (published) {
+    traceTracking('active_ride.point_repaired', session, {
+      trigger,
+      staleForMs: lastRideMs > 0 ? Date.now() - lastRideMs : null,
+      result: 'published',
+    });
+    return { status: 'active', source: 'supervisor' };
+  }
+  reportRideTrackingIssue(session, 'waiting_gps', 'no_fix');
+  return { status: 'waiting_gps' };
 }
 
 // Foreground safety net. The native background task remains primary, but this

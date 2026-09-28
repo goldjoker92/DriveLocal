@@ -3,7 +3,7 @@
 // remain delegated to the existing services; this screen owns hierarchy and feedback.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Header from '../../components/Header';
@@ -35,7 +35,9 @@ import {
   attachActiveRideTracking,
   detachActiveRideTracking,
   restoreRealDriverTrackingAfterSimulation,
+  superviseActiveRideTracking,
 } from '../../services/driverLocationTracking';
+import { driverRideTrackingPresentation } from '../../utils/rideLiveLocationPresentation';
 import {
   getDevRideSimulationState,
   getDevSimulatedCurrentPoint,
@@ -57,6 +59,9 @@ import {
 } from '../../services/ridesService';
 
 const TRACKED_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
+// While this screen is open, the ride point is checked every 10 s and repaired
+// if it stopped (driverLocationTracking.superviseActiveRideTracking).
+const RIDE_TRACKING_SUPERVISE_INTERVAL_MS = 10_000;
 const PAYMENT_STATUSES = new Set([
   'awaiting_payment',
   'payment_marked_sent',
@@ -83,15 +88,18 @@ function statusFromEvent(eventType) {
   return map[eventType] || 'assigned';
 }
 
-function trackingErrorLabel(status) {
-  const labels = {
-    services_disabled: 'Ative o GPS do telefone para compartilhar sua posição.',
-    foreground_required: 'Autorize a localização precisa para continuar.',
-    background_required: 'Autorize “Permitir o tempo todo” para manter a posição durante a corrida.',
-    foreground_denied: 'A localização precisa foi recusada.',
-    background_denied: 'A localização em segundo plano foi recusada.',
-  };
-  return labels[status] || 'Não foi possível iniciar a localização ao vivo.';
+function confirmNavigationWithoutLiveLocation() {
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Localização ao vivo ainda não está ativa',
+      'O passageiro não verá você se aproximar no mapa. Ative a localização antes de abrir a navegação.',
+      [
+        { text: 'Ativar agora', onPress: () => resolve('enable') },
+        { text: 'Abrir mesmo assim', style: 'cancel', onPress: () => resolve('open') },
+      ],
+      { cancelable: true, onDismiss: () => resolve('open') }
+    );
+  });
 }
 
 function simulationStatusLabel(simulation) {
@@ -325,6 +333,55 @@ export default function ActiveRide() {
     };
   }, [rideId, offer?.vehicleType, offer?.availabilitySessionId, status]);
 
+  // Ride live-location supervision. The attach above runs once per stage; this
+  // keeps repairing without any driver action: a failed first GPS fix, a native
+  // service stopped by Android, a point that stopped flowing. It also runs as
+  // soon as the driver comes back from Waze / Google Maps.
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !rideId || !offer?.vehicleType || !TRACKED_STATUSES.has(status)) return undefined;
+    let active = true;
+
+    async function supervise(trigger) {
+      if (DEV_RIDE_SIMULATOR_ENABLED && getRobotDriverState().enabled) return;
+      const result = await superviseActiveRideTracking({ reason: trigger });
+      if (!active || !result?.status) return;
+      if (result.status === 'no_ride_session') {
+        // The local ride session disappeared (cleanup, storage reset): rebuild it
+        // from the confirmed ride, without asking anything to the driver.
+        const reattached = await attachActiveRideTracking({
+          driverId: uid,
+          vehicleType: offer.vehicleType,
+          availabilitySessionId: offer.availabilitySessionId || null,
+          rideId,
+          rideStatus: status,
+          requestPermissions: false,
+        }).catch(() => ({ status: 'error' }));
+        if (active) setTrackingStatus(reattached.status);
+        return;
+      }
+      setTrackingStatus(result.status);
+    }
+
+    const timer = setInterval(() => { supervise('screen_interval'); }, RIDE_TRACKING_SUPERVISE_INTERVAL_MS);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') supervise('app_foreground');
+    });
+    return () => {
+      active = false;
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [rideId, offer?.vehicleType, offer?.availabilitySessionId, status]);
+
+  // "Tentar agora": same repair as the automatic loop, on demand.
+  async function retryRideTracking() {
+    setTrackingStatus('checking');
+    const result = await superviseActiveRideTracking({ reason: 'driver_retry' })
+      .catch(() => ({ status: 'error' }));
+    setTrackingStatus(result?.status || 'error');
+  }
+
   async function enableRideTracking() {
     const uid = auth.currentUser?.uid;
     if (!uid || !rideId || !offer?.vehicleType) return;
@@ -415,7 +472,7 @@ export default function ActiveRide() {
       const result = await stopDevRideSimulation({ restoreRealTracking: true });
       setDevSimulation(result);
       if (result?.status && result.status !== 'stopped' && result.status !== 'active') {
-        setError(trackingErrorLabel(result.status));
+        setError(driverRideTrackingPresentation(result.status).message);
       }
     } catch (_error) {
       setError('Não foi possível restaurar o GPS real.');
@@ -429,6 +486,24 @@ export default function ActiveRide() {
     if (!offer?.vehicleType) {
       setError('Aguarde o tipo do veículo antes de abrir a navegação.');
       return;
+    }
+
+    // Leaving for Waze / Google Maps while the passenger cannot see the car is
+    // exactly how the 2026-09-27 cancellations started. Warn, never block.
+    if (TRACKED_STATUSES.has(status) && trackingStatus !== 'active' && !DEV_RIDE_SIMULATOR_ENABLED) {
+      const choice = await confirmNavigationWithoutLiveLocation();
+      logRideClientEvent('navigation.driver_live_location_warning', {
+        rideId,
+        rideStatus: status,
+        trackingStatus,
+        choice,
+      });
+      if (choice === 'enable') {
+        const presentation = driverRideTrackingPresentation(trackingStatus);
+        if (presentation.actionKind === 'enable') await enableRideTracking();
+        else await retryRideTracking();
+        return;
+      }
     }
 
     setError('');
@@ -497,6 +572,7 @@ export default function ActiveRide() {
   const pickup = offer?.exactPickup;
   const destination = offer?.exactDestination;
   const trackingActive = trackingStatus === 'active';
+  const trackingPresentation = driverRideTrackingPresentation(trackingStatus);
   const simulationRunning = devSimulation?.status === 'running';
   const simulationPaused = devSimulation?.status === 'paused';
   const paymentOpen = status === 'awaiting_payment' || status === 'payment_marked_sent';
@@ -572,17 +648,21 @@ export default function ActiveRide() {
         {TRACKED_STATUSES.has(status) ? (
           <AppCard style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Localização ao vivo</Text>
-            <Text style={[styles.sectionCopy, trackingActive ? styles.successText : styles.warningText]}>
-              {trackingActive
-                ? 'Ativa — o passageiro pode acompanhar seu deslocamento.'
-                : trackingStatus === 'checking'
-                  ? 'Verificando o GPS…'
-                  : trackingErrorLabel(trackingStatus)}
+            <Text
+              style={[
+                styles.sectionCopy,
+                trackingPresentation.tone === 'active'
+                  ? styles.successText
+                  : trackingPresentation.tone === 'action' ? styles.dangerText : styles.warningText,
+              ]}
+            >
+              {trackingPresentation.message}
             </Text>
-            {!trackingActive && trackingStatus !== 'checking' ? (
+            {trackingPresentation.actionKind ? (
               <AppButton
-                title="Ativar localização da corrida"
-                onPress={enableRideTracking}
+                title={trackingPresentation.actionTitle}
+                variant={trackingPresentation.actionKind === 'retry' ? 'ghost' : undefined}
+                onPress={trackingPresentation.actionKind === 'retry' ? retryRideTracking : enableRideTracking}
                 disabled={Boolean(busy)}
               />
             ) : null}
@@ -784,6 +864,7 @@ const styles = StyleSheet.create({
   },
   successText: { color: colors.success },
   warningText: { color: colors.warning },
+  dangerText: { color: colors.danger },
   errorText: {
     fontFamily,
     color: colors.danger,

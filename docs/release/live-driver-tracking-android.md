@@ -1,5 +1,8 @@
 # DriveLocal — Android live driver tracking
 
+> Failure scenarios, fallbacks, logs and the build 24 fixes: see
+> [`docs/ride-live-location.md`](../ride-live-location.md).
+
 ## Scope
 
 - Driver current presence is published while the driver is online for dispatch.

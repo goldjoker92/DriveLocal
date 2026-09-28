@@ -55,6 +55,39 @@ function fanOut(entry, field, payload) {
   });
 }
 
+// A Firestore listener error is terminal: the SDK never re-attaches it. Before
+// this, one error (auth not restored yet after a cold start, a transient rules
+// evaluation failure) left the passenger's map empty until they left the screen.
+// Re-attach with a bounded backoff while someone is still listening.
+const LISTENER_RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000];
+
+function scheduleListenerRetry(entry, entries, rideId, attach, scope) {
+  entry.unsubscribeNative?.();
+  entry.unsubscribeNative = null;
+  // Subscribers reset their state on error: the next snapshot must reach them
+  // even when it carries the same position as before.
+  entry.lastSignature = null;
+  if (entry.retryTimer || entry.subscribers.size === 0) return;
+  const attempt = entry.retryCount || 0;
+  const delayMs = LISTENER_RETRY_DELAYS_MS[Math.min(attempt, LISTENER_RETRY_DELAYS_MS.length - 1)];
+  entry.retryCount = attempt + 1;
+  logRideClientEvent(`${scope}.listener_retry_scheduled`, {
+    rideId, delayMs, attempt: entry.retryCount, shared: true,
+  });
+  entry.retryTimer = setTimeout(() => {
+    entry.retryTimer = null;
+    if (entry.subscribers.size === 0 || entries.get(rideId) !== entry) return;
+    attach();
+  }, delayMs);
+}
+
+function stopEntry(entry) {
+  if (entry.retryTimer) clearTimeout(entry.retryTimer);
+  entry.retryTimer = null;
+  entry.unsubscribeNative?.();
+  entry.unsubscribeNative = null;
+}
+
 function createRideEntry(rideId) {
   const entry = {
     subscribers: new Map(),
@@ -68,10 +101,12 @@ function createRideEntry(rideId) {
     shared: true,
   });
 
+  const attach = () => {
   entry.unsubscribeNative = onSnapshot(
     doc(db, 'rideRequests', rideId),
     { includeMetadataChanges: true },
     (snap) => {
+      entry.retryCount = 0;
       reportFirestoreSnapshot('ride_snapshot', snap.metadata || {});
       const ride = snap.exists() ? { rideId: snap.id, ...snap.data() } : null;
       const signature = semanticSignature(ride);
@@ -98,8 +133,11 @@ function createRideEntry(rideId) {
       reportFirestoreListenerError('ride_snapshot', error);
       logRideClientEvent('ride.snapshot.listener_failed', { rideId, error, shared: true }, 'error');
       fanOut(entry, 'onError', error);
+      scheduleListenerRetry(entry, rideEntries, rideId, attach, 'ride.snapshot');
     },
   );
+  };
+  attach();
 
   rideEntries.set(rideId, entry);
   return entry;
@@ -120,7 +158,7 @@ export function listenToPassengerRide(rideId, onData, onError) {
   return () => {
     entry.subscribers.delete(subscriptionId);
     if (entry.subscribers.size > 0) return;
-    entry.unsubscribeNative?.();
+    stopEntry(entry);
     rideEntries.delete(rideId);
     logRideClientEvent('ride.snapshot.listener_stopped', { rideId, shared: true });
   };
@@ -138,10 +176,12 @@ function createLocationEntry(rideId) {
 
   logRideClientEvent('ride.location.listener_started', { rideId, shared: true });
 
+  const attach = () => {
   entry.unsubscribeNative = onSnapshot(
     doc(db, 'activeRideLocations', rideId),
     { includeMetadataChanges: true },
     (snap) => {
+      entry.retryCount = 0;
       reportFirestoreSnapshot('ride_location', snap.metadata || {});
       const location = snap.exists() ? { rideId: snap.id, ...snap.data() } : null;
       const signature = semanticSignature(location);
@@ -175,8 +215,11 @@ function createLocationEntry(rideId) {
       reportFirestoreListenerError('ride_location', error);
       logRideClientEvent('ride.location.listener_failed', { rideId, error, shared: true }, 'error');
       fanOut(entry, 'onError', error);
+      scheduleListenerRetry(entry, locationEntries, rideId, attach, 'ride.location');
     },
   );
+  };
+  attach();
 
   locationEntries.set(rideId, entry);
   return entry;
@@ -197,7 +240,7 @@ export function listenToPassengerRideLocation(rideId, onData, onError) {
   return () => {
     entry.subscribers.delete(subscriptionId);
     if (entry.subscribers.size > 0) return;
-    entry.unsubscribeNative?.();
+    stopEntry(entry);
     locationEntries.delete(rideId);
     logRideClientEvent('ride.location.listener_stopped', { rideId, shared: true });
   };

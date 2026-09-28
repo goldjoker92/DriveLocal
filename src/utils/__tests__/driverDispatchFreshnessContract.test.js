@@ -34,8 +34,11 @@ describe('driver dispatch freshness contract', () => {
 
     expect(tracking).toContain('ONLINE_NATIVE_INTERVAL_MS = 60_000');
     expect(tracking).toContain('ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000');
-    expect(tracking).toContain('distanceInterval: activeRide ? 10 : 0');
-    expect(tracking).toContain('deferredUpdatesDistance: activeRide ? 10 : 0');
+    // Time-driven in both modes: a 10 m ride filter silenced stopped phones and
+    // froze the passenger map (field incident 2026-09-27).
+    expect(tracking).toContain('distanceInterval: 0,');
+    expect(tracking).toContain('deferredUpdatesDistance: 0,');
+    expect(tracking).not.toContain('distanceInterval: activeRide ? 10');
     expect(tracking).toContain('stale_session_publish_dropped');
     expect(tracking).toContain('locationAvailabilitySessionId: session.availabilitySessionId');
     expect(tracking).toContain('availabilityUpdatedAtMs: nowMs');

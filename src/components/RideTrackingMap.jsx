@@ -9,9 +9,14 @@ import { fontFamily, typography } from '../constants/typography';
 import { logRideClientEvent } from '../utils/clientRideLog';
 import {
   DEFAULT_TRACKING_STALE_MS,
-  isTrackingLocationFresh,
   normalizeTrackingPoint,
 } from '../utils/rideTracking';
+import {
+  passengerTrackingPresentation,
+  trackingPointAgeMs,
+} from '../utils/rideLiveLocationPresentation';
+import { getNetworkRecoveryState, subscribeNetworkRecovery } from '../services/networkRecoveryService';
+import { NETWORK_STATUS } from '../services/networkRecoveryPolicy';
 
 const EARTH_RADIUS_KM = 6371;
 const MAX_TRACKING_LOG_CACHE = 50;
@@ -69,14 +74,6 @@ function etaRange(distance, vehicleType) {
   };
 }
 
-function lastUpdateLabel(updatedAtMs, nowMs) {
-  const ageSeconds = Math.max(0, Math.floor((nowMs - Number(updatedAtMs || 0)) / 1000));
-  if (!Number.isFinite(ageSeconds) || !updatedAtMs) return 'sem atualização';
-  if (ageSeconds < 5) return 'agora';
-  if (ageSeconds < 60) return `há ${ageSeconds}s`;
-  return `há ${Math.floor(ageSeconds / 60)} min`;
-}
-
 function trimTrackingLogCache() {
   while (trackingLogStateByRide.size > MAX_TRACKING_LOG_CACHE) {
     const oldestKey = trackingLogStateByRide.keys().next().value;
@@ -113,14 +110,35 @@ export default function RideTrackingMap({
   vehicleType = 'car',
   showEta = true,
   etaContext = 'pickup',
+  rideStatus = null,
+  onMessageDriver = null,
 }) {
   const mapRef = useRef(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const [mapReady, setMapReady] = useState(false);
+  const [network, setNetwork] = useState(getNetworkRecoveryState());
+  // Passenger's own GPS dot, shown during the ride only. It stays on this phone
+  // (never published) and needs no new permission: without the foreground
+  // permission the passenger already gave, react-native-maps simply shows none.
+  const [ownPoint, setOwnPoint] = useState(null);
+  const onTheRide = etaContext === 'destination';
   const targetPoint = normalizeTrackingPoint(target);
   const driverPoint = normalizeTrackingPoint(driverLocation?.location);
-  const fresh = isTrackingLocationFresh(driverLocation, nowMs, DEFAULT_TRACKING_STALE_MS);
-  const directDistanceKm = distanceKm(driverPoint, targetPoint);
+  const ageMs = trackingPointAgeMs(driverLocation, nowMs);
+  const fresh = Boolean(driverPoint) && Number.isFinite(ageMs) && ageMs <= DEFAULT_TRACKING_STALE_MS;
+  const passengerOffline = network?.status === NETWORK_STATUS.OFFLINE;
+  const presentation = passengerTrackingPresentation({
+    rideStatus,
+    hasDriverPoint: Boolean(driverPoint),
+    ageMs,
+    staleAfterMs: DEFAULT_TRACKING_STALE_MS,
+    passengerOffline,
+    ownPositionVisible: onTheRide && Boolean(ownPoint),
+  });
+  // On the ride, the passenger IS in the car: when the driver's phone goes
+  // silent, the remaining distance is computed from the passenger's own dot.
+  const etaOrigin = onTheRide && presentation.dimDriver && ownPoint ? ownPoint : driverPoint;
+  const directDistanceKm = distanceKm(etaOrigin, targetPoint);
   const eta = etaRange(directDistanceKm, vehicleType);
   const distanceText = Number.isFinite(directDistanceKm)
     ? directDistanceKm < 1
@@ -139,6 +157,18 @@ export default function RideTrackingMap({
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => subscribeNetworkRecovery(setNetwork), []);
+
+  function handleUserLocationChange(event) {
+    const point = normalizeTrackingPoint(event?.nativeEvent?.coordinate);
+    if (!point) return;
+    setOwnPoint((current) => (
+      current && Math.abs(current.lat - point.lat) < 0.00005 && Math.abs(current.lng - point.lng) < 0.00005
+        ? current
+        : point
+    ));
+  }
+
   const trackingState = meaningfulTrackingState({
     configured: googleMapsAndroidConfigured,
     mapReady,
@@ -154,6 +184,8 @@ export default function RideTrackingMap({
       hasTarget: !!targetPoint,
       hasDriverLocation: !!driverPoint,
       fresh,
+      presentation: presentation.tone,
+      passengerOffline,
       distanceKm: directDistanceKm,
       updatedAtMs: driverLocation?.updatedAtMs || null,
       logPolicy: 'semantic_state_only',
@@ -214,6 +246,9 @@ export default function RideTrackingMap({
           showsTraffic
           toolbarEnabled={false}
           moveOnMarkerPress={false}
+          showsUserLocation={onTheRide}
+          showsMyLocationButton={false}
+          onUserLocationChange={onTheRide ? handleUserLocationChange : undefined}
           onMapReady={() => setMapReady(true)}
         >
           {targetPoint ? (
@@ -229,6 +264,7 @@ export default function RideTrackingMap({
               coordinate={{ latitude: driverPoint.lat, longitude: driverPoint.lng }}
               title={vehicleType === 'moto' ? 'Moto do motorista' : 'Carro do motorista'}
               anchor={{ x: 0.5, y: 0.5 }}
+              opacity={presentation.dimDriver ? 0.45 : 1}
               tracksViewChanges
             >
               <View
@@ -240,7 +276,7 @@ export default function RideTrackingMap({
                   justifyContent: 'center',
                   backgroundColor: colors.white,
                   borderWidth: 2,
-                  borderColor: fresh ? colors.primary : colors.warning,
+                  borderColor: fresh || presentation.tone === 'arrived' ? colors.primary : colors.warning,
                   shadowColor: colors.black,
                   shadowOpacity: 0.18,
                   shadowRadius: 4,
@@ -254,7 +290,7 @@ export default function RideTrackingMap({
         </MapView>
       </View>
 
-      {showEta && driverPoint && targetPoint && eta && distanceText ? (
+      {showEta && etaOrigin && targetPoint && eta && distanceText ? (
         <Text style={[{ fontFamily, color: colors.text }, typography.bodyBold]}>
           {etaContext === 'destination'
             ? `${distanceText} restantes • chegada estimada em ${eta.min}–${eta.max} min`
@@ -265,18 +301,24 @@ export default function RideTrackingMap({
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
         <Text
           style={[
-            { flex: 1, fontFamily, color: fresh ? colors.success : colors.warning },
+            {
+              flex: 1,
+              fontFamily,
+              color: ['fresh', 'arrived'].includes(presentation.tone)
+                ? colors.success
+                : presentation.tone === 'waiting' ? colors.textMuted : colors.warning,
+            },
             typography.caption,
           ]}
         >
-          {driverPoint
-            ? fresh
-              ? `Posição atualizada ${lastUpdateLabel(driverLocation?.updatedAtMs, nowMs)}.`
-              : `Última posição ${lastUpdateLabel(driverLocation?.updatedAtMs, nowMs)} — sinal temporariamente desatualizado.`
-            : 'Aguardando a primeira posição do motorista…'}
+          {presentation.text}
         </Text>
         <AppButton title="Centralizar" variant="ghost" onPress={recenter} />
       </View>
+
+      {presentation.offerMessage && typeof onMessageDriver === 'function' ? (
+        <AppButton title="Enviar mensagem ao motorista" variant="ghost" onPress={onMessageDriver} />
+      ) : null}
 
       {!googleMapsAndroidConfigured ? (
         <Text style={[{ fontFamily, color: colors.warning }, typography.caption]}>
