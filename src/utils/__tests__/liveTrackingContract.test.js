@@ -17,8 +17,11 @@ describe('Android live driver tracking contracts', () => {
     expect(service).toContain('ONLINE_NATIVE_INTERVAL_MS = 60_000');
     expect(service).toContain('ACTIVE_RIDE_NATIVE_INTERVAL_MS = 5_000');
     expect(service).toContain('timeInterval: intervalMs');
-    expect(service).toContain('distanceInterval: activeRide ? 10 : 0');
-    expect(service).toContain('deferredUpdatesDistance: activeRide ? 10 : 0');
+    // Time-driven in both modes: a 10 m ride filter silenced stopped phones and
+    // froze the passenger map (field incident 2026-09-27).
+    expect(service).toContain('distanceInterval: 0,');
+    expect(service).toContain('deferredUpdatesDistance: 0,');
+    expect(service).not.toContain('distanceInterval: activeRide ? 10');
     expect(service).toContain('lastQueuedAtByMode');
     expect(service).toContain('auth.authStateReady');
     expect(service).toContain('stale_session_publish_dropped');

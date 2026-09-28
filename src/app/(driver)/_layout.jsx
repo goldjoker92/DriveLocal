@@ -21,6 +21,7 @@ import { getDriver } from '../../services/driverService';
 import {
   getDriverTrackingSession,
   refreshDriverOnlineHeartbeat,
+  superviseActiveRideTracking,
   stopDriverOnlineTracking,
   updateActiveRideTrackingStatus,
 } from '../../services/driverLocationTracking';
@@ -181,6 +182,12 @@ export default function DriverLayout() {
       }
       try {
         const result = await refreshDriverOnlineHeartbeat();
+        // During a ride the online heartbeat stands aside; the ride point gets
+        // its own repair, even when the driver is on another driver screen.
+        if (result?.status === 'active_ride_managed') {
+          await superviseActiveRideTracking({ reason: 'layout_pulse' });
+          return;
+        }
         if (typeof __DEV__ !== 'undefined' && __DEV__ && result?.status === 'published') {
           console.log('[DRIVER_AVAILABILITY] foreground_heartbeat.published', {
             scope: 'driver_availability',

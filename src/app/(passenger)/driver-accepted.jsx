@@ -26,9 +26,13 @@ import { firstName } from '../../utils/driverPhoto';
 import { logDriverPhotoEvent } from '../../utils/driverPhotoLog';
 import { formatBRL } from '../../utils/format';
 import { logRideClientEvent } from '../../utils/clientRideLog';
+import { conversationRoute, messagePhaseOpen } from '../../utils/ride-messages';
 
 const MAP_STATUSES = new Set(['assigned', 'driver_arrived', 'in_progress']);
 const ARRIVAL_NOTICE_VISIBLE_MS = 12_000;
+// The shared listener now re-subscribes by itself after an error: once a ride
+// snapshot arrives again, this message must disappear on its own.
+const RIDE_LISTENER_ERROR = 'Não foi possível carregar a corrida.';
 
 const PHASES = {
   assigned: {
@@ -190,6 +194,7 @@ export default function DriverAccepted() {
         const previousStatus = previousStatusRef.current;
         previousStatusRef.current = nextRide.status || null;
         setRide(nextRide);
+        setError((current) => (current === RIDE_LISTENER_ERROR ? '' : current));
 
         if (previousStatus !== nextRide.status) {
           logRideClientEvent('ride.passenger.phase_changed', {
@@ -221,7 +226,7 @@ export default function DriverAccepted() {
         }
       },
       (listenerError) => {
-        setError('Não foi possível carregar a corrida.');
+        setError(RIDE_LISTENER_ERROR);
         logRideClientEvent('ride.passenger.listener_failed', { rideId, error: listenerError }, 'error');
       }
     );
@@ -368,6 +373,10 @@ export default function DriverAccepted() {
                   vehicleType={driver.vehicleType || ride.vehicleType}
                   showEta={ride.status === 'assigned' || ride.status === 'in_progress'}
                   etaContext={ride.status === 'in_progress' ? 'destination' : 'pickup'}
+                  rideStatus={ride.status}
+                  onMessageDriver={messagePhaseOpen(ride.status)
+                    ? () => router.push({ pathname: conversationRoute('passenger'), params: { rideId } })
+                    : null}
                 />
               </AppCard>
             ) : null}
